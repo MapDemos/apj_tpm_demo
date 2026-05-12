@@ -1,13 +1,13 @@
 [
   {
     "title": "ta_coverage_demo",
-    "description": "Short description of Demo A",
+    "description": "GLJS / Details API / SearchBOX API",
     "path": "./ta_coverage_2026/"
   },
   {
-    "title": "Demo B",
-    "description": "Short description of Demo B",
-    "path": "./demo-b/"
+    "title": "search_compare_demo",
+    "description": "G Places API, Mapbox Saerch BOX API (Forward)",
+    "path": "./search_compare/"
   },
   {
     "title": "Demo C",
