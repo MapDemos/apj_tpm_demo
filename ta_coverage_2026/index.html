@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Mapbox POI Demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet" />
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+  #config-screen { display: flex; align-items: center; justify-content: center; height: 100vh; background: #f3f4f6; }
+  .config-card { background: #fff; padding: 32px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); width: 420px; max-width: 90%; }
+  .config-card h1 { margin: 0 0 8px; font-size: 20px; }
+  .config-card p { margin: 0 0 20px; color: #6b7280; font-size: 13px; }
+  .config-card label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; }
+  .config-card input { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
+  .config-card button { width: 100%; padding: 12px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .config-card button:hover { background: #1d4ed8; }
+  .err { color: #dc2626; font-size: 12px; margin-top: -10px; margin-bottom: 12px; }
+
+  #main-screen { display: none; height: 100vh; position: relative; }
+  #map { width: 100%; height: 100%; }
+
+  #search-box { position: absolute; top: 10px; left: 10px; z-index: 10; width: 320px; max-width: calc(100vw - 80px); }
+  #search-input { width: 100%; padding: 10px 36px 10px 12px; border: none; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.2); font-size: 14px; outline: none; }
+  #search-clear { position: absolute; right: 10px; top: 10px; background: none; border: none; cursor: pointer; color: #6b7280; font-size: 18px; line-height: 1; padding: 0; display: none; }
+  #search-clear.show { display: block; }
+  #search-results { margin-top: 4px; background: #fff; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); max-height: 60vh; overflow-y: auto; display: none; }
+  #search-results.active { display: block; }
+  .search-item { padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #f3f4f6; }
+  .search-item:hover { background: #f9fafb; }
+  .search-item:last-child { border-bottom: none; }
+  .search-item-name { font-size: 14px; font-weight: 600; color: #111827; }
+  .search-item-desc { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .search-empty { padding: 14px; text-align: center; color: #6b7280; font-size: 13px; }
+
+  #filter-btn { position: absolute; top: 130px; right: 10px; z-index: 10; width: 29px; height: 29px; border-radius: 4px; background: #fff; border: none; cursor: pointer; box-shadow: 0 0 0 2px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center; }
+  #filter-btn:hover { background: #f3f4f6; }
+  #filter-btn svg { width: 18px; height: 18px; }
+  #filter-btn .filter-badge { position: absolute; top: -4px; right: -4px; background: #ef4444; color: #fff; border-radius: 9px; min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; display: none; align-items: center; justify-content: center; line-height: 1; }
+  #filter-btn.has-filter .filter-badge { display: flex; }
+
+  /* Messages (bottom-left) */
+  #messages { position: absolute; bottom: 16px; left: 16px; z-index: 10; display: flex; flex-direction: column-reverse; gap: 8px; pointer-events: none; max-width: calc(100vw - 32px); }
+  .msg { background: rgba(17, 24, 39, 0.88); color: #fff; padding: 10px 14px; border-radius: 6px; font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); animation: slideUp 0.18s ease; display: flex; align-items: center; gap: 8px; pointer-events: auto; }
+  .msg-info    { background: rgba(37, 99, 235, 0.92); }
+  .msg-warning { background: rgba(245, 158, 11, 0.94); }
+  .msg-success { background: rgba(16, 185, 129, 0.94); }
+  .msg svg { width: 16px; height: 16px; flex-shrink: 0; }
+  @keyframes slideUp { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .mapboxgl-popup-content { font-size: 12px; padding: 10px 12px; max-width: 280px; }
+  .popup-row { margin: 2px 0; }
+  .popup-key { color: #6b7280; font-weight: 600; }
+  .popup-cat { display: inline-block; background: #eef2ff; color: #4338ca; padding: 1px 6px; border-radius: 4px; margin: 1px 2px 1px 0; font-size: 11px; }
+
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: #fff; border-radius: 12px; width: 560px; max-width: 92%; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+  .modal-lg { width: 720px; max-height: 90vh; }
+  .modal-header { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .modal-header h2 { margin: 0; font-size: 18px; flex: 1; }
+  .modal-header-actions { display: flex; gap: 4px; align-items: center; }
+  .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280; line-height: 1; padding: 0 4px; }
+  .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+  .modal-footer { padding: 12px 20px; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 8px; }
+  .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid transparent; font-weight: 500; }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-secondary { background: #fff; color: #374151; border-color: #d1d5db; }
+  .btn-secondary:hover { background: #f9fafb; }
+
+  #bookmark-btn { background: none; border: none; cursor: pointer; padding: 4px 6px; border-radius: 6px; display: flex; align-items: center; }
+  #bookmark-btn:hover { background: #f3f4f6; }
+  #bookmark-btn svg { width: 22px; height: 22px; fill: none; stroke: #6b7280; stroke-width: 2; }
+  #bookmark-btn.active svg { fill: #fbbf24; stroke: #f59e0b; }
+
+  .modal-tabs { display: flex; border-bottom: 1px solid #e5e7eb; padding: 0 20px; }
+  .modal-tabs .tab { padding: 12px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #6b7280; border-bottom: 2px solid transparent; font-weight: 500; }
+  .modal-tabs .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  .modal-body .field { margin-bottom: 12px; }
+  .modal-body .field-label { font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
+  .modal-body .field-value { font-size: 14px; color: #111827; word-break: break-word; }
+  .modal-body a { color: #2563eb; text-decoration: none; }
+  .modal-body a:hover { text-decoration: underline; }
+  .photos { display: flex; flex-direction: column; gap: 8px; }
+  .photos img { width: 100%; height: auto; border-radius: 8px; display: block; }
+  .loading { text-align: center; padding: 40px; color: #6b7280; }
+  .badge { display: inline-block; background: #eef2ff; color: #4338ca; padding: 2px 8px; border-radius: 4px; margin: 2px 4px 2px 0; font-size: 12px; }
+  .json-view { background: #1f2937; color: #e5e7eb; padding: 12px; border-radius: 6px; font-size: 11px; line-height: 1.5; overflow: auto; max-height: 60vh; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; margin: 0; }
+
+  .bookmark-section { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .bookmark-section label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; font-weight: 600; color: #92400e; flex: 1; }
+  .bookmark-section input[type="checkbox"] { cursor: pointer; }
+  .bookmark-section .count-badge { background: #f59e0b; color: #fff; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+
+  .filter-toolbar { display: flex; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; align-items: center; }
+  .filter-search { flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; }
+  .category-tree.dimmed { opacity: 0.45; pointer-events: none; }
+  .category-tree .group { margin-bottom: 8px; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
+  .category-tree .group-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #f9fafb; cursor: pointer; user-select: none; }
+  .category-tree .group-header:hover { background: #f3f4f6; }
+  .category-tree .group-header .chevron { transition: transform 0.15s; color: #6b7280; font-size: 10px; }
+  .category-tree .group.open .group-header .chevron { transform: rotate(90deg); }
+  .category-tree .group-name { flex: 1; font-weight: 600; font-size: 13px; }
+  .category-tree .count { font-size: 11px; color: #6b7280; }
+  .category-tree .group-color { width: 10px; height: 10px; border-radius: 50%; }
+  .category-tree .children { display: none; padding: 8px 12px; gap: 4px; grid-template-columns: 1fr 1fr; }
+  .category-tree .group.open .children { display: grid; }
+  .category-tree .child { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .category-tree .child:hover { background: #f3f4f6; }
+  .category-tree input[type="checkbox"] { cursor: pointer; }
+  .empty-msg { text-align: center; color: #6b7280; padding: 20px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div id="config-screen">
+  <div class="config-card">
+    <h1>Mapbox POI Demo</h1>
+    <p>Enter your Mapbox public token (pk.*).</p>
+    <label for="token-input">Access Token</label>
+    <input id="token-input" type="text" placeholder="pk.eyJ1Ijoi..." />
+    <div id="token-err" class="err" style="display:none;">Token must start with "pk."</div>
+    <button id="start-btn">Show Map</button>
+  </div>
+</div>
+
+<div id="main-screen">
+  <div id="map"></div>
+  <div id="search-box">
+    <input id="search-input" type="text" placeholder="Search places..." autocomplete="off" />
+    <button id="search-clear" title="Clear">&times;</button>
+    <div id="search-results"></div>
+  </div>
+  <button id="filter-btn" title="Category Filter">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+    </svg>
+    <span class="filter-badge" id="filter-badge">!</span>
+  </button>
+  <div id="messages"></div>
+</div>
+
+<div id="details-overlay" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="details-title">POI Details</h2>
+      <div class="modal-header-actions">
+        <button id="bookmark-btn" title="Bookmark">
+          <svg viewBox="0 0 24 24"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
+        </button>
+        <button class="modal-close" data-close="details">&times;</button>
+      </div>
+    </div>
+    <div class="modal-tabs">
+      <button class="tab active" data-detail-tab="info">Info</button>
+      <button class="tab" data-detail-tab="json">Raw JSON</button>
+    </div>
+    <div class="modal-body">
+      <div id="detail-tab-info" class="tab-pane active"><div class="loading">Loading...</div></div>
+      <div id="detail-tab-json" class="tab-pane"><pre class="json-view">Loading...</pre></div>
+    </div>
+  </div>
+</div>
+
+<div id="filter-overlay" class="modal-overlay">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h2>Filter</h2>
+      <button class="modal-close" data-close="filter">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="bookmark-section">
+        <label>
+          <input type="checkbox" id="bookmark-toggle"/>
+          <span>★ Show only bookmarked POIs</span>
+        </label>
+        <span class="count-badge" id="bookmark-count">0</span>
+      </div>
+      <div class="filter-toolbar">
+        <input id="filter-search" class="filter-search" placeholder="Search categories..." />
+        <button class="btn btn-secondary" id="check-all">Select All</button>
+        <button class="btn btn-secondary" id="uncheck-all">Deselect All</button>
+      </div>
+      <div id="category-tree" class="category-tree"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close="filter">Cancel</button>
+      <button class="btn btn-primary" id="apply-filter">Apply</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+ *  Constants
+ * ============================================================ */
+const TILESET_ID    = "10da032y.ta_headmap_0511";
+const SOURCE_LAYER  = "photos";
+const STYLE_URL     = "mapbox://styles/mapbox/standard";
+const TOKEN_KEY     = "mapbox_demo_pk_token";
+const VISITED_KEY   = "mapbox_demo_visited_pois";
+const BOOKMARK_KEY  = "mapbox_demo_bookmarks";
+const DETAILS_API   = "https://api.mapbox.com/search/details/v1/retrieve/";
+const SEARCH_SUGGEST_API  = "https://api.mapbox.com/search/searchbox/v1/suggest";
+const SEARCH_RETRIEVE_API = "https://api.mapbox.com/search/searchbox/v1/retrieve/";
+const HEATMAP_MIN_ZOOM = 6;
+
+const TILESETS = [
+  { key:"services_business", name:"Services & Business", color:"#2563eb",
+    categories:["services","office","salon","financial_services","auto_repair","government","real_estate_agent","hairdresser","bank","consulting","lawyer","repair_shop","factory","shipping_store","photographer","travel_agency","atm","advertising_agency","commercial","post_office","insurance_broker","it","warehouse","car_wash","tailor","laundry","nongovernmental_organization","spa","landscaping","photo_store","massage_shop","car_rental","event_planner","nail_salon","copyshop","design_studio","employment_agency","studio","tax_advisor","equipment_rental","tattoo_parlour","storage","dry_cleaners","police_station","recording_studio","fire_station","funeral_home","furniture_maker","notary","government_offices","townhall","charity","conference_center","waste_transfer_station","recycling_center","labor_union","locksmith","psychic","radio_studio","cobbler","home_repair","shoe_repair","coworking_space","courthouse","currency_exchange","waste_disposal","television_studio","photo_lab","military_office","bookmaker","prison","military_base","embassy","treecare","check_cashing","carpet_cleaner","information_technology_company","veterans_service","political_party_office","tech_startup","states_and_municipalities","corporate_amenity","meeting_room","lgbtq_organization","moving_target"] },
+  { key:"food_drink", name:"Food & Drink", color:"#ef4444",
+    categories:["food_and_drink","food","restaurant","cafe","fast_food","nightlife","bar","coffee","bakery","coffee_shop","dessert_shop","ice_cream","pizza_restaurant","teahouse","mexican_restaurant","snack_bar","indian_restaurant","food_court","deli","asian_restaurant","burger_restaurant","nightclub","diner_restaurant","indonesian_restaurant","juice_bar","breakfast_restaurant","japanese_restaurant","chinese_restaurant","brunch_restaurant","seafood_restaurant","noodle_restaurant","barbeque_restaurant","pub","winery","taco_shop","italian_restaurant","sandwich_shop","american_restaurant","thai_restaurant","brewery","sushi_restaurant","buffet_restaurant","lounge","cocktail_bar","bubble_tea","donut_shop","tapas_restaurant","spanish_restaurant","steakhouse","turkish_restaurant","wine_bar","korean_restaurant","beer_bar","vietnamese_restaurant","french_restaurant","greek_restaurant","fish_and_chips_restaurant","sports_bar","middle_eastern_restaurant","hookah_lounge","gastropub","vineyard","mediterranean_restaurant","african_restaurant","salad_bar","hot_dog_stand","coffee_roaster","brazilian_restaurant","bagel_shop","filipino_restaurant","german_restaurant","carribean_restaurant","frozen_yogurt_shop","distillery","biergarten","ramen_restaurant","gay_bar","korean_barbeque_restaurant","hawaiian_restaurant","portuguese_restaurant","latin_american_restaurant","english_restaurant","persian_restaurant","cuban_restaurant","gluten_free_restaurant","creole_restaurant","tiki_bar","food_truck","peruvian_restaurant","wings_joint","irish_pub","beach_bar","dive_bar","stripclub","waffle_shop","speakeasy","champagne_bar","turkish_coffeehouse","sake_bar","beer_festival","hotel_bar","whiskey_bar"] },
+  { key:"shopping", name:"Shopping", color:"#a855f7",
+    categories:["shopping","grocery","clothing_store","wholesale_store","supermarket","beauty_store","pharmacy","furniture_store","electronics_shop","car_dealership","clothing","shopping_mall","hardware_store","phone_store","jewelry_store","convenience_store","market","pet_store","gift_shop","shoe_store","butcher_shop","florist","womens_clothing_store","paper_goods_store","liquor_store","book_store","tobacco_shop","arts_and_craft_store","bicycle_shop","sports_shop","health_food_store","fashion_accessory_shop","boutique","department_store","motorcycle_dealer","fabric_store","news_kiosk","video_game_store","baby_goods_shop","toy_store","fishing_store","music_shop","antique_shop","mattress_store","party_store","garden_store","discount_store","lighting_store","thrift_shop","pawnshop","watch_store","vape_shop","bridal_shop","video_store","kitchen_store","leather_goods","outlet_store","sewing_shop","cannabis_dispensary","hobby_shop","frame_store","camera_shop","gun_store","cheese_shop","fireworks_store","luggage_store","hunting_store","fishmonger","motorsports_store","surfboard_store","duty_free_shop","chocolate_shop","outdoors_store","ski_shop","pop_up_shop","variety_store"] },
+  { key:"education_health", name:"Education & Health", color:"#10b981",
+    categories:["health_services","education","school","medical_practice","doctors_office","medical_clinic","dentist","hospital","hospital_unit","alternative_healthcare","elementary_school","psychotherapist","physiotherapist","kindergarten","psychological_services","care_services","chiropractor","college","medical_supply_store","childcare","veterinarian","university","medical_laboratory","optician","assisted_living_facility","driving_school","high_school","counselling","library","tutor","language_school","music_school","university_building","laboratory","rehabilitation_center","trade_school","herbalist","community_college","emergency_room","dialysis_center","optometrist","university_laboratory","university_book_store"] },
+    { key:"transportation_leisure", name:"Transportation & Leisure", color:"#f59e0b",
+    categories:["transportation","outdoors","lodging","bus_stop","park","tourist_attraction","sports","hotel","entertainment","fitness_center","historic_site","gas_station","monument","parking_lot","river","lake","playground","bed_and_breakfast","sports_club","field","cemetery","garden","charging_station","internet_cafe","mountain","social_club","public_transportation_station","event_space","art","taxi","community_center","museum","hostel","forest","dance_studio","island","bridge","art_gallery","soccer_field","yoga_studio","swimming_pool","bus_station","theatre","theme_park","dormitory","campground","nature_reserve","public_artwork","outdoor_sculpture","music_venue","stadium","tours","cinema","tourist_information","tennis_courts","motel","canal","railway_station","rest_area","golf_course","pilates_studio","vacation_rental","boat_rental","basketball_court","martial_arts_studio","recreation_center","arts_center","airport","fair_grounds","beach","animal_shelter","concert_hall","gymnastics","stable","casino","karaoke_bar","viewpoint","sports_center","marina","billiards","pier","baseball_field","resort","picnic_shelter","dog_park","sauna","waterfall","racetrack","zoo","dam","boxing_gym","climbing","climbing_gym","bowling_alley","fishing","aquarium","light_rail_station","cricket_club","summer_camp","ice_rink","ski_area","exhibit","boat_or_ferry","fountain","hunting_area","plaza","disc_golf_course","miniature_golf","observatory","cable_car","cave","train","rugby_stadium","trailhead","airport_terminal","street","intersection","windmill","bike_rental","arcade","water_park","service_area","surf_spot","track","soccer_stadium","skatepark","cruise","theme_park_attraction","baseball_stadium","mountain_hut","football_stadium","lighthouse","airport_gate","go_kart_racing","hockey_stadium","basketball_stadium","laser_tag","tunnel","driving_range","well","boat_launch","racecourse","scuba_diving_shop","ski_trail","planetarium","tennis_stadium","rafting_spot","tree","zoo_exhibit","chairlift","indoor_cycling","baggage_claim","airport_ticket_counter","bus_line","graffiti","railway_platform","road"] },
+  { key:"others", name:"Others", color:"#6b7280",
+    categories:["apartment_or_condo","place_of_worship","temple","church","farm","home","mosque","buddhist_temple","tanning_salon","carpet_store","synagogue","town","skydiving_drop_zone","village","neighbourhood","city","country","county","state"] }
+];
+
+const ALL_CATEGORIES = TILESETS.flatMap(t => t.categories);
+
+/* ============================================================
+ *  State
+ * ============================================================ */
+let map = null;
+// ★ デフォルト: フィルタオフ = 全選択 = レイヤーに何もフィルタかけない
+let selectedSet = new Set(ALL_CATEGORIES);
+let showOnlyBookmarks = false;
+
+let visitedPois = new Set(JSON.parse(localStorage.getItem(VISITED_KEY) || "[]"));
+let bookmarks   = new Map(Object.entries(JSON.parse(localStorage.getItem(BOOKMARK_KEY) || "{}")));
+
+let currentDetailMapboxId = null;
+let currentDetailProps = null;
+
+let searchSessionToken = generateUUID();
+let searchMarker = null;
+let searchDebounce = null;
+
+/* ============================================================
+ *  Helpers
+ * ============================================================ */
+function generateUUID() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    const v = c === "x" ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+function parseCategories(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try { const p = JSON.parse(raw); if (Array.isArray(p)) return p; } catch (_) {}
+    return raw.split(",").map(s => s.trim().replace(/^["\[]+|["\]]+$/g, "")).filter(Boolean);
+  }
+  return [];
+}
+function extractPhotos(props, meta) {
+  const candidates = [props && props.photos, props && props.photo, props && props.images, meta && meta.photos, meta && meta.photo, meta && meta.images];
+  for (const c of candidates) {
+    if (!Array.isArray(c) || c.length === 0) continue;
+    return c.map(p => typeof p === "string" ? p : (p.url || p.src || p.href || p.uri)).filter(Boolean).map(u => u.replace(/^http:\/\//i, "https://"));
+  }
+  return [];
+}
+function truncate(s, n) { if (!s) return "-"; s = String(s); return s.length > n ? s.slice(0, n) + "..." : s; }
+function escapeHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+function escapeAttr(s) { return escapeHtml(s); }
+
+/* ============================================================
+ *  Messages (bottom-left)
+ * ============================================================ */
+const persistentMessages = {}; // id -> element
+
+function showPersistentMessage(id, text, type = "info") {
+  const container = document.getElementById("messages");
+  if (persistentMessages[id]) {
+    persistentMessages[id].querySelector(".msg-text").textContent = text;
+    return;
+  }
+  const el = document.createElement("div");
+  el.className = `msg msg-${type}`;
+  el.innerHTML = `<span class="msg-text">${escapeHtml(text)}</span>`;
+  container.appendChild(el);
+  persistentMessages[id] = el;
+}
+
+function hidePersistentMessage(id) {
+  if (persistentMessages[id]) {
+    persistentMessages[id].remove();
+    delete persistentMessages[id];
+  }
+}
+
+function showTransientMessage(text, type = "success", duration = 3000) {
+  const container = document.getElementById("messages");
+  const el = document.createElement("div");
+  el.className = `msg msg-${type}`;
+  el.innerHTML = `<span class="msg-text">${escapeHtml(text)}</span>`;
+  container.appendChild(el);
+  setTimeout(() => {
+    el.style.transition = "opacity 0.3s";
+    el.style.opacity = "0";
+    setTimeout(() => el.remove(), 300);
+  }, duration);
+}
+
+function updateZoomMessage() {
+  if (!map) return;
+  if (map.getZoom() < HEATMAP_MIN_ZOOM) {
+    showPersistentMessage("zoom-hint", "Please zoom in to see heatmap", "info");
+  } else {
+    hidePersistentMessage("zoom-hint");
+  }
+}
+
+function updateFilterMessage() {
+  // showOnlyBookmarks のときはカテゴリの選択状況は意味なし → 無視
+  const allDeselected = !showOnlyBookmarks && [...selectedSet].length === 0;
+  if (allDeselected) {
+    showPersistentMessage("filter-empty", "Filter is all deselected", "warning");
+  } else {
+    hidePersistentMessage("filter-empty");
+  }
+
+  // showOnlyBookmarks で bookmark が空のとき
+  if (showOnlyBookmarks && bookmarks.size === 0) {
+    showPersistentMessage("bookmark-empty", "No bookmarks yet. Click ★ in a POI's details to add one.", "warning");
+  } else {
+    hidePersistentMessage("bookmark-empty");
+  }
+}
+
+/* ============================================================
+ *  Visited POIs
+ * ============================================================ */
+function markVisited(mapboxId) {
+  if (!mapboxId) return;
+  if (!visitedPois.has(mapboxId)) {
+    visitedPois.add(mapboxId);
+    try { localStorage.setItem(VISITED_KEY, JSON.stringify([...visitedPois])); }
+    catch (e) { console.warn("visited save failed:", e); }
+  }
+  map.setFeatureState({ source: "poi-src", sourceLayer: SOURCE_LAYER, id: mapboxId }, { visited: true });
+}
+function restoreAllVisited() {
+  visitedPois.forEach(id => {
+    map.setFeatureState({ source: "poi-src", sourceLayer: SOURCE_LAYER, id }, { visited: true });
+  });
+}
+
+/* ============================================================
+ *  Bookmarks
+ * ============================================================ */
+function saveBookmarks() {
+  try {
+    const obj = {};
+    bookmarks.forEach((v, k) => obj[k] = v);
+    localStorage.setItem(BOOKMARK_KEY, JSON.stringify(obj));
+  } catch (e) { console.warn("bookmark save failed:", e); }
+  refreshBookmarkUI();
+}
+
+function toggleBookmark(mapboxId, props) {
+  if (!mapboxId) return;
+  if (bookmarks.has(mapboxId)) {
+    bookmarks.delete(mapboxId);
+  } else {
+    bookmarks.set(mapboxId, {
+      name: (props && props.name) || "",
+      addedAt: Date.now()
+    });
+    showTransientMessage("Added to the bookmark", "success", 3000);
+  }
+  saveBookmarks();
+  updateBookmarkButton(mapboxId);
+
+  // bookmark フィルタが ON ならレイヤーも更新
+  if (showOnlyBookmarks) applyFilter();
+  updateFilterMessage();
+}
+
+function updateBookmarkButton(mapboxId) {
+  const btn = document.getElementById("bookmark-btn");
+  if (!btn) return;
+  const on = bookmarks.has(mapboxId);
+  btn.classList.toggle("active", on);
+  btn.title = on ? "Remove bookmark" : "Add bookmark";
+}
+
+function refreshBookmarkUI() {
+  const cnt = document.getElementById("bookmark-count");
+  if (cnt) cnt.textContent = String(bookmarks.size);
+}
+
+/* ============================================================
+ *  Config Screen
+ * ============================================================ */
+const tokenInput = document.getElementById("token-input");
+const tokenErr   = document.getElementById("token-err");
+const startBtn   = document.getElementById("start-btn");
+const savedToken = localStorage.getItem(TOKEN_KEY);
+if (savedToken) tokenInput.value = savedToken;
+startBtn.addEventListener("click", () => {
+  const t = tokenInput.value.trim();
+  if (!t.startsWith("pk.")) { tokenErr.style.display = "block"; return; }
+  tokenErr.style.display = "none";
+  localStorage.setItem(TOKEN_KEY, t);
+  initMainScreen(t);
+});
+
+/* ============================================================
+ *  Main Screen
+ * ============================================================ */
+function initMainScreen(token) {
+  document.getElementById("config-screen").style.display = "none";
+  document.getElementById("main-screen").style.display = "block";
+
+  mapboxgl.accessToken = token;
+  map = new mapboxgl.Map({
+    container: "map",
+    style: STYLE_URL,
+    hash: true,
+    center: [-156.772803, 71.297321],
+    zoom: 3,
+    maxZoom: 14,
+  });
+  map.addControl(new mapboxgl.NavigationControl(), "top-right");
+
+  map.on("load", () => {
+    map.addSource("poi-src", {
+      type: "vector",
+      url: `mapbox://${TILESET_ID}`,
+      promoteId: "mapbox_id"
+    });
+
+    map.addLayer({
+      id: "poi-heatmap", type: "heatmap", source: "poi-src", "source-layer": SOURCE_LAYER,
+      minzoom: HEATMAP_MIN_ZOOM, maxzoom: 11,
+      paint: {
+        "heatmap-weight": ["interpolate",["linear"],["zoom"], 3, 0.15, 9, 0.6],
+        "heatmap-intensity": ["interpolate",["linear"],["zoom"], 3, 0.6, 9, 1.5],
+        "heatmap-color": ["interpolate",["linear"],["heatmap-density"],
+          0,"rgba(33,102,172,0)",0.1,"rgba(103,169,207,0.5)",0.3,"rgb(209,229,240)",
+          0.5,"rgb(253,219,199)",0.7,"rgb(239,138,98)",1,"rgb(178,24,43)"],
+        "heatmap-radius": ["interpolate",["linear"],["zoom"], 3,15, 9,40, 11,60],
+        "heatmap-opacity": ["interpolate",["linear"],["zoom"], 9,1, 11,0]
+      }
+    });
+
+    map.addLayer({
+      id: "poi-symbol", type: "circle", source: "poi-src", "source-layer": SOURCE_LAYER,
+      minzoom: 10,
+      paint: {
+        "circle-radius": ["interpolate",["linear"],["zoom"],10,3,16,8],
+        "circle-color": ["case", ["boolean", ["feature-state", "visited"], false], "#9ca3af", "#2563eb"],
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 1.5,
+        "circle-opacity":        ["interpolate",["linear"],["zoom"],10,0,11,1],
+        "circle-stroke-opacity": ["interpolate",["linear"],["zoom"],10,0,11,1]
+      }
+    });
+
+    restoreAllVisited();
+    refreshBookmarkUI();
+    setupInteractions();
+    setupFilter();
+    setupSearchBox();
+    setupDetailModal();
+
+    // 初期メッセージ
+    updateZoomMessage();
+    updateFilterMessage();
+    map.on("zoom", updateZoomMessage);
+  });
+
+  map.on("error", (e) => console.error("Mapbox error:", e && e.error));
+}
+
+/* ============================================================
+ *  Interactions
+ * ============================================================ */
+function setupInteractions() {
+  const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false });
+
+  map.on("mousemove", "poi-symbol", (e) => {
+    if (!e.features || !e.features.length) return;
+    map.getCanvas().style.cursor = "pointer";
+    const p = e.features[0].properties || {};
+    const categories = parseCategories(p.categories);
+    const idShort = truncate(p.mapbox_id, 12);
+    const visited = visitedPois.has(p.mapbox_id);
+    const bm = bookmarks.has(p.mapbox_id);
+    const html = `
+      <div class="popup-row"><span class="popup-key">mapbox_id:</span>
+        <span title="${escapeAttr(p.mapbox_id || "")}">${escapeHtml(idShort)}</span>
+        ${visited ? '<span style="color:#9ca3af;font-size:10px;margin-left:4px;">(visited)</span>' : ''}
+        ${bm ? '<span style="color:#f59e0b;font-size:10px;margin-left:4px;">★</span>' : ''}
+      </div>
+      <div class="popup-row"><span class="popup-key">lat / lon:</span> ${p.lat ?? "-"}, ${p.lon ?? "-"}</div>
+      <div class="popup-row"><span class="popup-key">categories:</span><br/>
+        ${categories.map(c => `<span class="popup-cat">${escapeHtml(c)}</span>`).join("")}</div>`;
+    popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+  });
+
+  map.on("mouseleave", "poi-symbol", () => {
+    map.getCanvas().style.cursor = "";
+    popup.remove();
+  });
+
+  map.on("click", "poi-symbol", (e) => {
+    if (!e.features || !e.features.length) return;
+    const p = e.features[0].properties || {};
+    if (!p.mapbox_id) return;
+    markVisited(p.mapbox_id);
+    openDetailsModal(p.mapbox_id, p);
+  });
+}
+
+/* ============================================================
+ *  Search Box (Mapbox Search Box API)
+ * ============================================================ */
+function setupSearchBox() {
+  const input    = document.getElementById("search-input");
+  const results  = document.getElementById("search-results");
+  const clearBtn = document.getElementById("search-clear");
+
+  input.addEventListener("input", () => {
+    const q = input.value.trim();
+    clearBtn.classList.toggle("show", q.length > 0);
+    clearTimeout(searchDebounce);
+    if (!q) { results.classList.remove("active"); results.innerHTML = ""; return; }
+    searchDebounce = setTimeout(() => doSuggest(q), 250);
+  });
+
+  input.addEventListener("focus", () => {
+    if (results.innerHTML.trim()) results.classList.add("active");
+  });
+
+  document.addEventListener("mousedown", (e) => {
+    if (!document.getElementById("search-box").contains(e.target)) results.classList.remove("active");
+  });
+
+  clearBtn.addEventListener("click", () => {
+    input.value = "";
+    clearBtn.classList.remove("show");
+    results.innerHTML = "";
+    results.classList.remove("active");
+    if (searchMarker) { searchMarker.remove(); searchMarker = null; }
+    input.focus();
+  });
+}
+
+async function doSuggest(query) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const center = map.getCenter();
+  const params = new URLSearchParams({
+    q: query,
+    session_token: searchSessionToken,
+    proximity: `${center.lng.toFixed(6)},${center.lat.toFixed(6)}`,
+    access_token: token,
+    limit: "8"
+  });
+  try {
+    const res = await fetch(`${SEARCH_SUGGEST_API}?${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderSuggestions(data.suggestions || []);
+  } catch (err) {
+    console.error("Suggest error:", err);
+    renderSuggestions([]);
+  }
+}
+
+function renderSuggestions(suggestions) {
+  const results = document.getElementById("search-results");
+  if (!suggestions.length) {
+    results.innerHTML = `<div class="search-empty">No results</div>`;
+    results.classList.add("active");
+    return;
+  }
+  results.innerHTML = suggestions.map(s => `
+    <div class="search-item" data-id="${escapeAttr(s.mapbox_id)}">
+      <div class="search-item-name">${escapeHtml(s.name || "")}</div>
+      <div class="search-item-desc">${escapeHtml(s.place_formatted || s.full_address || s.feature_type || "")}</div>
+    </div>`).join("");
+  results.classList.add("active");
+
+  results.querySelectorAll(".search-item").forEach(el => {
+    el.addEventListener("mousedown", async (ev) => {
+      ev.preventDefault();
+      const id = el.dataset.id;
+      if (!id) return;
+      await doRetrieve(id, el.querySelector(".search-item-name").textContent);
+    });
+  });
+}
+
+async function doRetrieve(mapboxId, displayName) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const params = new URLSearchParams({ session_token: searchSessionToken, access_token: token });
+  try {
+    const res = await fetch(`${SEARCH_RETRIEVE_API}${encodeURIComponent(mapboxId)}?${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const feature = data.features && data.features[0];
+    if (!feature || !feature.geometry || !feature.geometry.coordinates) return;
+    const coords = feature.geometry.coordinates;
+    dropSearchMarker(coords, feature.properties || {});
+    document.getElementById("search-input").value = (feature.properties && feature.properties.name) || displayName || "";
+    document.getElementById("search-results").classList.remove("active");
+    document.getElementById("search-clear").classList.add("show");
+    searchSessionToken = generateUUID();
+  } catch (err) {
+    console.error("Retrieve error:", err);
+  }
+}
+
+function dropSearchMarker(coords, props) {
+  if (searchMarker) searchMarker.remove();
+  searchMarker = new mapboxgl.Marker({ color: "#ef4444" }).setLngLat(coords).addTo(map);
+  if (props && props.name) {
+    searchMarker.setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(
+      `<div style="font-weight:600;font-size:13px;">${escapeHtml(props.name)}</div>
+       <div style="font-size:11px;color:#6b7280;">${escapeHtml(props.place_formatted || props.full_address || "")}</div>`
+    ));
+  }
+  const ft = (props && props.feature_type) || "";
+  let targetZoom = 14;
+  if (ft === "country") targetZoom = 4;
+  else if (ft === "region") targetZoom = 6;
+  else if (ft === "postcode") targetZoom = 11;
+  else if (ft === "district" || ft === "place" || ft === "city") targetZoom = 11;
+  else if (ft === "locality" || ft === "neighborhood") targetZoom = 13;
+  else if (ft === "address" || ft === "street") targetZoom = 16;
+  else if (ft === "poi") targetZoom = 16;
+  map.flyTo({ center: coords, zoom: targetZoom, essential: true, duration: 1500 });
+}
+
+/* ============================================================
+ *  Filter
+ * ============================================================ */
+function setupFilter() {
+  document.getElementById("filter-btn").addEventListener("click", () => {
+    // モーダル表示時にチェックボックスを現在の状態と同期
+    document.getElementById("bookmark-toggle").checked = showOnlyBookmarks;
+    renderTree();
+    document.getElementById("filter-overlay").classList.add("active");
+  });
+
+  document.getElementById("filter-search").addEventListener("input", renderTree);
+
+  document.getElementById("check-all").addEventListener("click", () => {
+    ALL_CATEGORIES.forEach(id => selectedSet.add(id));
+    renderTree();
+  });
+  document.getElementById("uncheck-all").addEventListener("click", () => {
+    ALL_CATEGORIES.forEach(id => selectedSet.delete(id));
+    renderTree();
+  });
+
+  document.getElementById("bookmark-toggle").addEventListener("change", (e) => {
+    // この時点ではUIに反映するのみ。Applyで実適用。
+    e.target.parentElement.style.opacity = e.target.checked ? "1" : "1";
+    const tree = document.getElementById("category-tree");
+    tree.classList.toggle("dimmed", e.target.checked);
+  });
+
+  document.getElementById("apply-filter").addEventListener("click", () => {
+    showOnlyBookmarks = document.getElementById("bookmark-toggle").checked;
+    applyFilter();
+    closeModal("filter");
+  });
+}
+
+function renderTree() {
+  const search = (document.getElementById("filter-search").value || "").toLowerCase().trim();
+  const container = document.getElementById("category-tree");
+  const isBmMode = document.getElementById("bookmark-toggle").checked;
+  container.classList.toggle("dimmed", isBmMode);
+
+  const html = TILESETS.map(t => {
+    const visibleChildren = search ? t.categories.filter(c => c.toLowerCase().includes(search)) : t.categories;
+    const groupMatches = !search || t.name.toLowerCase().includes(search);
+    if (search && !groupMatches && visibleChildren.length === 0) return "";
+    const totalCount = t.categories.length;
+    const checkedCount = t.categories.filter(c => selectedSet.has(c)).length;
+    const allChecked = checkedCount === totalCount && totalCount > 0;
+    const indeterminate = checkedCount > 0 && checkedCount < totalCount;
+    const open = !!search;
+    return `
+      <div class="group ${open ? "open" : ""}" data-group="${escapeAttr(t.key)}">
+        <div class="group-header">
+          <input type="checkbox" class="group-cb" ${allChecked ? "checked" : ""} data-indeterminate="${indeterminate}" />
+          <span class="group-color" style="background:${t.color};"></span>
+          <span class="group-name">${escapeHtml(t.name)}</span>
+          <span class="count">${checkedCount} / ${totalCount}</span>
+          <span class="chevron">▶</span>
+        </div>
+        <div class="children">
+          ${visibleChildren.map(c => `
+            <label class="child">
+              <input type="checkbox" class="leaf-cb" value="${escapeAttr(c)}" ${selectedSet.has(c) ? "checked" : ""}/>
+              <span>${escapeHtml(c)}</span>
+            </label>`).join("")}
+        </div>
+      </div>`;
+  }).join("");
+
+  container.innerHTML = html || `<div class="empty-msg">No matches.</div>`;
+  container.querySelectorAll(".group-cb").forEach(cb => { cb.indeterminate = cb.dataset.indeterminate === "true"; });
+  container.querySelectorAll(".group-header").forEach(h => {
+    h.addEventListener("click", (e) => {
+      if (e.target.classList.contains("group-cb")) return;
+      h.parentElement.classList.toggle("open");
+    });
+  });
+  container.querySelectorAll(".group-cb").forEach(cb => {
+    cb.addEventListener("click", (e) => e.stopPropagation());
+    cb.addEventListener("change", (e) => {
+      const groupEl = e.target.closest(".group");
+      const groupKey = groupEl.dataset.group;
+      const group = TILESETS.find(t => t.key === groupKey);
+      if (!group) return;
+      if (e.target.checked) group.categories.forEach(c => selectedSet.add(c));
+      else                  group.categories.forEach(c => selectedSet.delete(c));
+      renderTree();
+    });
+  });
+  container.querySelectorAll(".leaf-cb").forEach(cb => {
+    cb.addEventListener("change", (e) => {
+      if (e.target.checked) selectedSet.add(e.target.value);
+      else selectedSet.delete(e.target.value);
+      renderTree();
+    });
+  });
+}
+
+function applyFilter() {
+  let filter = null;
+  let hasFilter = false;
+
+  if (showOnlyBookmarks) {
+    const ids = [...bookmarks.keys()];
+    if (ids.length === 0) {
+      filter = ["==", ["literal", 1], 0];
+    } else {
+      filter = ["in", ["get", "mapbox_id"], ["literal", ids]];
+    }
+    hasFilter = true;
+  } else {
+    const totalAll = ALL_CATEGORIES.length;
+    const selected = [...selectedSet].filter(id => ALL_CATEGORIES.includes(id));
+    if (selected.length === 0) {
+      filter = ["==", ["literal", 1], 0];
+      hasFilter = true;
+    } else if (selected.length === totalAll) {
+      filter = null;       // ★ デフォルト = 全選択 = フィルタなし
+      hasFilter = false;
+    } else {
+      filter = ["any", ...selected.map(cat => ["in", cat, ["to-string", ["get", "categories"]]])];
+      hasFilter = true;
+    }
+  }
+
+  if (map.getLayer("poi-symbol"))  map.setFilter("poi-symbol",  filter);
+  if (map.getLayer("poi-heatmap")) map.setFilter("poi-heatmap", filter);
+
+  // フィルタアイコンにバッジ表示
+  document.getElementById("filter-btn").classList.toggle("has-filter", hasFilter);
+
+  updateFilterMessage();
+}
+
+/* ============================================================
+ *  Details Modal
+ * ============================================================ */
+const detailsTitle   = document.getElementById("details-title");
+const detailInfoPane = document.getElementById("detail-tab-info");
+const detailJsonPane = document.getElementById("detail-tab-json");
+
+function setupDetailModal() {
+  document.querySelectorAll("[data-close]").forEach(btn => {
+    btn.addEventListener("click", () => closeModal(btn.dataset.close));
+  });
+  document.querySelectorAll(".modal-overlay").forEach(ov => {
+    ov.addEventListener("click", (e) => { if (e.target === ov) ov.classList.remove("active"); });
+  });
+  document.querySelectorAll("[data-detail-tab]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.detailTab;
+      document.querySelectorAll("[data-detail-tab]").forEach(b => b.classList.toggle("active", b === btn));
+      detailInfoPane.classList.toggle("active", target === "info");
+      detailJsonPane.classList.toggle("active", target === "json");
+    });
+  });
+
+  // bookmark ボタン
+  document.getElementById("bookmark-btn").addEventListener("click", () => {
+    if (!currentDetailMapboxId) return;
+    toggleBookmark(currentDetailMapboxId, currentDetailProps || {});
+  });
+}
+
+function closeModal(name) {
+  document.getElementById(`${name}-overlay`).classList.remove("active");
+}
+
+async function openDetailsModal(mapboxId, srcProps) {
+  currentDetailMapboxId = mapboxId;
+  currentDetailProps    = srcProps || null;
+
+  detailsTitle.textContent = "POI Details";
+  detailInfoPane.innerHTML = `<div class="loading">Loading...</div>`;
+  detailJsonPane.querySelector(".json-view").textContent = "Loading...";
+  document.querySelectorAll("[data-detail-tab]").forEach(b => b.classList.toggle("active", b.dataset.detailTab === "info"));
+  detailInfoPane.classList.add("active");
+  detailJsonPane.classList.remove("active");
+  updateBookmarkButton(mapboxId);
+  document.getElementById("details-overlay").classList.add("active");
+
+  const token = localStorage.getItem(TOKEN_KEY);
+  const params = new URLSearchParams({ attribute_sets: "basic,photos,visit,venue", access_token: token });
+  const url = `${DETAILS_API}${encodeURIComponent(mapboxId)}?${params.toString()}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    // bookmark 用のプロパティを更新(retrieve 結果優先)
+    currentDetailProps = (data && data.properties) || currentDetailProps;
+    renderDetails(data);
+    detailJsonPane.querySelector(".json-view").textContent = JSON.stringify(data, null, 2);
+  } catch (err) {
+    detailInfoPane.innerHTML = `<div class="loading">Failed to load: ${escapeHtml(err.message)}</div>`;
+    detailJsonPane.querySelector(".json-view").textContent = `Error: ${err.message}`;
+  }
+}
+
+function renderDetails(data) {
+  const props = (data && data.properties) || {};
+  const meta  = props.metadata || {};
+  const name = props.name || "(no name)";
+  const address = props.full_address || props.address || props.place_formatted || "";
+  const phone = meta.phone || "";
+  const website = meta.website || "";
+  const rating = meta.rating;
+  const popularity = meta.popularity;
+  const description = meta.detailed_description || "";
+  const cuisines = Array.isArray(meta.cuisines) ? meta.cuisines : [];
+  const hours = (meta.open_hours && Array.isArray(meta.open_hours.weekday_text)) ? meta.open_hours.weekday_text : [];
+  const categories = parseCategories(props.poi_category || props.poi_category_ids);
+  const photos = extractPhotos(props, meta);
+
+  const flags = [];
+  if (meta.delivery) flags.push("Delivery");
+  if (meta.takeout) flags.push("Takeout");
+  if (meta.serves_breakfast) flags.push("Breakfast");
+  if (meta.serves_brunch) flags.push("Brunch");
+  if (meta.serves_lunch) flags.push("Lunch");
+  if (meta.serves_dinner) flags.push("Dinner");
+  if (meta.serves_beer) flags.push("Beer");
+  if (meta.serves_wine) flags.push("Wine");
+  if (meta.serves_vegan_diet) flags.push("Vegan");
+  if (meta.serves_vegetarian_diet) flags.push("Vegetarian");
+  if (meta.wheelchair_accessible) flags.push("Wheelchair Accessible");
+
+  detailsTitle.textContent = name;
+  let html = "";
+  if (photos.length) {
+    html += `<div class="photos" style="margin-bottom:16px;">
+      ${photos.map(src => `<img src="${escapeAttr(src)}" alt="" loading="lazy" />`).join("")}
+    </div>`;
+  }
+  if (categories.length) html += field("Categories", categories.map(c => `<span class="badge">${escapeHtml(c)}</span>`).join(""));
+  if (cuisines.length) html += field("Cuisines", cuisines.map(c => `<span class="badge">${escapeHtml(c)}</span>`).join(""));
+  if (description) html += field("About", `<div style="font-size:13px;line-height:1.6;">${escapeHtml(description)}</div>`);
+  if (address) html += field("Address", escapeHtml(address));
+  if (phone) html += field("Phone", `<a href="tel:${escapeAttr(phone)}">${escapeHtml(phone)}</a>`);
+  if (website) html += field("Website", `<a href="${escapeAttr(website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(website)}</a>`);
+  if (typeof rating === "number" || typeof popularity === "number") {
+    const parts = [];
+    if (typeof rating === "number") parts.push(`★ ${rating.toFixed(2)}`);
+    if (typeof popularity === "number") parts.push(`<span style="color:#6b7280;font-size:12px;">popularity ${(popularity*100).toFixed(0)}%</span>`);
+    html += field("Rating", parts.join("  "));
+  }
+  if (flags.length) html += field("Features", flags.map(f => `<span class="badge">${escapeHtml(f)}</span>`).join(""));
+  if (hours.length) html += field("Hours", `<div style="font-size:13px;line-height:1.6;">${hours.map(escapeHtml).join("<br/>")}</div>`);
+  if (!html) html = `<div class="loading">No information available.</div>`;
+  detailInfoPane.innerHTML = html;
+}
+
+function field(label, value) {
+  return `<div class="field"><div class="field-label">${escapeHtml(label)}</div><div class="field-value">${value}</div></div>`;
+}
+</script>
+</body>
+</html>
