@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Compare Tool</title>
+
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      height: 100vh; display: flex; flex-direction: column;
+      background: #121212; color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overflow: hidden;
+    }
+
+    /* Setup Modal */
+    #setup-overlay {
+      display: flex; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.88); z-index: 9999;
+      align-items: center; justify-content: center;
+    }
+    #setup-modal {
+      background: #1e1e1e; border: 1px solid #444; border-radius: 10px;
+      width: 480px; padding: 32px; display: flex; flex-direction: column; gap: 20px;
+    }
+    #setup-modal h2 { font-size: 16px; color: #ddd; }
+    #setup-modal p.note { font-size: 11px; color: #555; line-height: 1.6; }
+    .setup-field { display: flex; flex-direction: column; gap: 6px; }
+    .setup-field label { font-size: 11px; color: #888; font-family: monospace; }
+    .setup-field input { padding: 9px 12px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 12px; font-family: monospace; outline: none; }
+    .setup-field input:focus { border-color: #2563eb; }
+    .setup-field .show-toggle { position: relative; }
+    .setup-field .show-toggle input { width: 100%; padding-right: 60px; }
+    .setup-field .show-toggle button { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #666; cursor: pointer; font-size: 11px; padding: 2px 4px; }
+    .setup-field .show-toggle button:hover { color: #aaa; }
+    #setup-start { padding: 11px; background: #2563eb; border: none; border-radius: 4px; color: #fff; font-size: 13px; cursor: pointer; font-weight: bold; }
+    #setup-start:hover { background: #1d4ed8; }
+    #setup-start:disabled { background: #333; color: #555; cursor: not-allowed; }
+    #setup-clear { background: none; border: none; color: #555; font-size: 11px; cursor: pointer; text-align: center; text-decoration: underline; }
+    #setup-clear:hover { color: #aaa; }
+
+    /* Header */
+    #header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 16px; background: #1a1a1a;
+      border-bottom: 1px solid #333; flex-shrink: 0;
+    }
+    #header .title { font-size: 13px; font-weight: bold; color: #aaa; white-space: nowrap; }
+    #header .spacer { flex: 1; }
+    #query-input { flex: 1; max-width: 400px; padding: 7px 12px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 13px; outline: none; }
+    #query-input:focus { border-color: #2563eb; }
+    .btn { padding: 7px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-secondary { background: #2d2d2d; border: 1px solid #444; color: #ccc; }
+    .btn-secondary:hover { background: #3a3a3a; }
+
+    /* CSV Panel */
+    #csv-panel {
+      flex-shrink: 0; background: #161616; border-bottom: 1px solid #333; overflow: hidden;
+    }
+    #csv-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 16px; cursor: pointer; user-select: none;
+    }
+    #csv-header:hover { background: #1e1e1e; }
+    #csv-toggle-icon { font-size: 10px; color: #666; transition: transform 0.2s; }
+    #csv-toggle-icon.open { transform: rotate(90deg); }
+    #csv-header-label { font-size: 12px; color: #888; font-family: monospace; }
+    #csv-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    #csv-body { display: none; max-height: 180px; overflow-y: auto; }
+    #csv-body.open { display: block; }
+    #csv-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    #csv-table th { padding: 4px 12px; background: #1a1a1a; color: #666; text-align: left; font-weight: normal; border-bottom: 1px solid #2a2a2a; position: sticky; top: 0; z-index: 1;}
+    #csv-table td { padding: 5px 12px; border-bottom: 1px solid #1a1a1a; color: #aaa; cursor: pointer; }
+    #csv-table tr:hover td { background: #1e1e1e; }
+    #csv-table tr.active td { background: #1a2744; color: #fff; }
+    #csv-table tr.active td:first-child { color: #60a5fa; font-weight: bold; }
+    .csv-progress { font-size: 11px; color: #666; white-space: nowrap; }
+
+    #layout { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+    #config-panel { flex-shrink: 0; background: #1a1a1a; border-bottom: 1px solid #333; overflow: hidden; }
+    #config-body { display: flex; gap: 12px; padding: 10px 16px; }
+    #config-body > div { flex: 1; min-width: 0; }
+    #config-actions { padding: 6px 16px 8px; display: flex; gap: 8px; border-top: 1px solid #222; }
+
+    .resizer { height: 5px; background: #2a2a2a; cursor: row-resize; flex-shrink: 0; position: relative; transition: background 0.15s; }
+    .resizer:hover, .resizer.dragging { background: #2563eb; }
+    .resizer::after { content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 40px; height: 2px; background: #555; border-radius: 2px; }
+
+    #map-row { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; min-height: 0; flex-shrink: 0; }
+    #results-row { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; min-height: 0; flex: 1; }
+    .pane-half { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+    .pane-half:first-child { border-right: 1px solid #333; }
+    .pane-header { padding: 7px 12px; font-size: 11px; color: #888; background: #1a1a1a; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+    .pane-header .ph-spacer { flex: 1; }
+    .result-count { font-size: 11px; font-weight: bold; }
+    .google-count { color: #1a73e8; }
+    .mapbox-count { color: #e74c3c; }
+    .map-container { flex: 1; min-height: 0; }
+    .results-list { flex: 1; overflow-y: auto; }
+    .result-item { display: flex; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #1e1e1e; align-items: flex-start; }
+    .result-item:hover { background: #1a1a1a; }
+    .result-index { min-width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; color: white; font-weight: bold; margin-top: 2px; flex-shrink: 0; }
+    .google-index { background: #1a73e8; }
+    .mapbox-index { background: #e74c3c; }
+	.result-name { font-size: 11px; font-weight: bold; margin-bottom: 1px; }
+	.result-address { font-size: 10px; color: #888; margin-bottom: 1px; }
+	.result-type { font-size: 9px; color: #555; }
+    .status-msg { padding: 16px 12px; font-size: 13px; color: #555; }
+    .status-error { color: #e74c3c; }
+
+    .mode-badge { font-size: 10px; padding: 2px 7px; border-radius: 10px; border: 1px solid #444; cursor: pointer; background: #2d2d2d; color: #aaa; user-select: none; }
+    .mode-badge:hover { background: #3a3a3a; }
+    .mode-badge.new    { border-color: #2563eb; color: #60a5fa; }
+    .mode-badge.legacy { border-color: #f59e0b; color: #fbbf24; }
+
+    .dialog-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
+    .dialog-overlay.open { display: flex; }
+    .dialog { background: #1e1e1e; border: 1px solid #444; border-radius: 8px; width: 90vw; max-width: 1100px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+    .dialog-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #333; flex-shrink: 0; }
+    .dialog-title { font-size: 13px; font-weight: bold; color: #ccc; font-family: monospace; }
+    .dialog-close { background: none; border: none; color: #888; cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; }
+    .dialog-close:hover { color: #fff; }
+    .dialog-body { flex: 1; overflow-y: auto; padding: 16px; }
+    .editors-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
+    .editor-label { font-size: 11px; color: #666; margin-bottom: 6px; font-family: monospace; }
+    .editor-wrap { border: 1px solid #333; border-radius: 4px; overflow: hidden; }
+  </style>
+</head>
+<body>
+
+<!-- Setup Modal -->
+<div id="setup-overlay">
+  <div id="setup-modal">
+    <h2>🗺 API Compare Tool</h2>
+    <div class="setup-field">
+      <label>Google API Key</label>
+      <div class="show-toggle">
+        <input type="password" id="setup-google-key" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+        <button type="button" onclick="toggleVis('setup-google-key', this)">表示</button>
+      </div>
+    </div>
+    <div class="setup-field">
+      <label>Mapbox Access Token</label>
+      <div class="show-toggle">
+        <input type="password" id="setup-mapbox-token" placeholder="pk.eyJ..." autocomplete="off" spellcheck="false" />
+        <button type="button" onclick="toggleVis('setup-mapbox-token', this)">表示</button>
+      </div>
+    </div>
+    <p class="note">※ トークンはこのブラウザの localStorage にのみ保存されます。<br>※ サーバーには一切送信されません。</p>
+    <button id="setup-start" disabled>Start</button>
+    <button id="setup-clear">保存済みトークンを削除</button>
+  </div>
+</div>
+
+<!-- Header -->
+<div id="header">
+  <span class="title">🗺 API Compare</span>
+  <input id="query-input" type="text" placeholder="Search query..." />
+  <button class="btn btn-primary" id="search-btn">Search</button>
+  <select id="radius-select" style="padding:7px 10px;background:#2a2a2a;border:1px solid #444;border-radius:4px;color:#fff;font-size:12px;cursor:pointer;outline:none;">
+    <option value="500">500m</option>
+    <option value="2000" selected>2000m</option>
+    <option value="5000">5000m</option>
+    <option value="custom">カスタム</option>
+  </select>
+  <input id="radius-custom" type="number" placeholder="m" style="display:none;width:80px;padding:7px 10px;background:#2a2a2a;border:1px solid #444;border-radius:4px;color:#fff;font-size:12px;outline:none;" />
+  <button class="btn btn-secondary" id="copy-url-btn">🔗 Copy URL</button>
+  <div class="spacer"></div>
+  <button class="btn btn-secondary" id="open-query-btn">📋 QUERY</button>
+  <button class="btn btn-secondary" id="open-results-btn">📋 RESULTS</button>
+  <button class="btn btn-secondary" id="export-btn">📥 Export</button>
+  <button class="btn btn-secondary" id="open-token-btn" style="font-size:11px;padding:5px 10px;">🔑 Token</button>
+</div>
+
+<!-- CSV Panel -->
+<div id="csv-panel">
+  <div id="csv-header">
+    <span id="csv-toggle-icon">▶</span>
+    <span id="csv-header-label">📂 CSV Test</span>
+		<div id="csv-controls" onclick="event.stopPropagation()">
+		  <input type="file" id="csv-file-input" accept=".csv" style="display:none;" />
+		  <button class="btn btn-secondary" id="csv-file-btn" style="font-size:11px;padding:4px 10px;">ファイル選択</button>
+		  <button class="btn btn-secondary" id="csv-prev-btn" style="font-size:11px;padding:4px 10px;" disabled>◀ 前へ</button>
+		  <button class="btn btn-secondary" id="csv-next-btn" style="font-size:11px;padding:4px 10px;" disabled>次へ ▶</button>
+		  <span class="csv-progress" id="csv-progress"></span>
+		  <!-- ジャンプUI追加 -->
+		  <span style="color:#555;font-size:10px;">Jump:</span>
+		  <input type="number" id="csv-jump-input" min="1" placeholder="行番号"
+		    style="width:70px;padding:4px 6px;background:#2a2a2a;border:1px solid #444;border-radius:3px;color:#fff;font-size:11px;outline:none;" />
+		  <button id="csv-jump-btn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;">Go</button>
+		  <span style="color:#555;font-size:10px;" id="csv-jump-hint"></span>
+		</div>
+  </div>
+  <div id="csv-body">
+    <table id="csv-table">
+		<thead>
+		  <tr>
+		    <th>#</th>
+		    <th>query_text</th>
+		    <th>latitude</th>
+		    <th>longitude</th>
+		  </tr>
+		</thead>
+      <tbody id="csv-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- CSV ↔ layout リサイザー -->
+<div class="resizer" id="resizer-csv-layout"></div>
+
+<div id="layout">
+  <div id="config-panel">
+    <div id="config-body">
+      <div>
+        <p class="editor-label" id="google-config-label">Google Search Params (New) <span style="color:#555">※ URLに反映されます</span></p>
+        <div class="editor-wrap" id="google-editor-wrap"></div>
+      </div>
+      <div>
+        <p class="editor-label">Mapbox Search Params <span style="color:#555">※ URLに反映されます</span></p>
+        <div class="editor-wrap" id="mapbox-editor-wrap"></div>
+      </div>
+    </div>
+    <div id="config-actions">
+      <button class="btn btn-secondary" id="reset-btn" style="font-size:11px;padding:4px 10px;">Reset to Default</button>
+      <button class="btn btn-secondary" id="copy-json-btn" style="font-size:11px;padding:4px 10px;">Copy JSON</button>
+    </div>
+  </div>
+
+  <div class="resizer" id="resizer-config-map"></div>
+
+<div id="map-row">
+  <div class="pane-half">
+    <div class="pane-header">
+      <span>Google Places API</span>
+      <span id="google-count" class="result-count google-count"></span>
+      <span class="ph-spacer"></span>
+      <span class="mode-badge new" id="google-mode-badge">New</span>
+    </div>
+    <div id="google-map" class="map-container"></div>
+  </div>
+  <div class="pane-half">
+    <div class="pane-header">
+      Mapbox Search Box API
+      <span id="mapbox-count" class="result-count mapbox-count"></span>
+      <span class="ph-spacer"></span>
+      <select id="poi-density-select" style="padding:2px 6px;background:#2a2a2a;border:1px solid #444;border-radius:3px;color:#ccc;font-size:10px;cursor:pointer;outline:none;">
+        <option value="1" selected>POI: Low</option>
+        <option value="2">POI: Middle</option>
+        <option value="3">POI: High</option>
+        <option value="4">POI: Very High</option>
+      </select>
+      <button class="btn btn-secondary" id="bbox-toggle-btn" style="font-size:10px;padding:2px 8px;">BBOX OFF</button>
+    </div>
+    <div id="mapbox-map" class="map-container"></div>
+  </div>
+</div>
+  <div class="resizer" id="resizer-map-results"></div>
+
+  <div id="results-row">
+    <div class="pane-half">
+      <div id="google-results" class="results-list">
+        <p class="status-msg">クエリを入力して検索してください</p>
+      </div>
+    </div>
+    <div class="pane-half">
+      <div id="mapbox-results" class="results-list">
+        <p class="status-msg">クエリを入力して検索してください</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- QUERY Dialog -->
+<div class="dialog-overlay" id="query-dialog">
+  <div class="dialog">
+    <div class="dialog-header">
+      <span class="dialog-title">📋 QUERY</span>
+      <button class="dialog-close" data-close="query-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div class="editors-grid" style="margin-bottom:0;">
+        <div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <p class="editor-label" style="margin:0;" id="query-google-label">Google Places API (New)</p>
+            <button class="btn btn-secondary" id="copy-google-query-btn" style="padding:3px 10px;font-size:11px;">Copy</button>
+          </div>
+          <div class="editor-wrap" id="query-google-editor-wrap"></div>
+        </div>
+        <div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <p class="editor-label" style="margin:0;">Mapbox Search Box API</p>
+            <button class="btn btn-secondary" id="copy-mapbox-query-btn" style="padding:3px 10px;font-size:11px;">Copy</button>
+          </div>
+          <div class="editor-wrap" id="query-mapbox-editor-wrap"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RESULTS Dialog -->
+<div class="dialog-overlay" id="results-dialog">
+  <div class="dialog">
+    <div class="dialog-header">
+      <span class="dialog-title">📋 SEARCH RESULTS</span>
+      <button class="dialog-close" data-close="results-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div class="editors-grid">
+        <div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <p class="editor-label" style="margin:0;">Google Results</p>
+            <button class="btn btn-secondary" id="copy-google-results-btn" style="padding:3px 10px;font-size:11px;">Copy</button>
+          </div>
+          <div class="editor-wrap" id="google-result-editor-wrap"></div>
+        </div>
+        <div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <p class="editor-label" style="margin:0;">Mapbox Results</p>
+            <button class="btn btn-secondary" id="copy-mapbox-results-btn" style="padding:3px 10px;font-size:11px;">Copy</button>
+          </div>
+          <div class="editor-wrap" id="mapbox-result-editor-wrap"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// TOKENS
+// ============================================================
+let GOOGLE_API_KEY = '';
+let MAPBOX_TOKEN   = '';
+const LS_GKEY      = 'apc_google_api_key';
+const LS_MBTOKEN   = 'apc_mapbox_token';
+const MAPBOX_STYLE = 'mapbox://styles/10da032y/cmnqqyl6e001901re8rf02za5';
+
+// ============================================================
+// SETUP MODAL
+// ============================================================
+function toggleVis(inputId, btn) {
+  const input = document.getElementById(inputId);
+  input.type = input.type === 'password' ? 'text' : 'password';
+  btn.textContent = input.type === 'password' ? '表示' : '隠す';
+}
+
+function initSetup() {
+  const gInput = document.getElementById('setup-google-key');
+  const mInput = document.getElementById('setup-mapbox-token');
+  const startBtn = document.getElementById('setup-start');
+  const clearBtn = document.getElementById('setup-clear');
+
+  gInput.value = localStorage.getItem(LS_GKEY)    ?? '';
+  mInput.value = localStorage.getItem(LS_MBTOKEN) ?? '';
+
+  const validate = () => { startBtn.disabled = !(gInput.value.trim() && mInput.value.trim()); };
+  gInput.addEventListener('input', validate);
+  mInput.addEventListener('input', validate);
+  validate();
+
+  startBtn.addEventListener('click', () => {
+    GOOGLE_API_KEY = gInput.value.trim();
+    MAPBOX_TOKEN   = mInput.value.trim();
+    localStorage.setItem(LS_GKEY,    GOOGLE_API_KEY);
+    localStorage.setItem(LS_MBTOKEN, MAPBOX_TOKEN);
+    document.getElementById('setup-overlay').style.display = 'none';
+    startApp();
+  });
+
+  clearBtn.addEventListener('click', () => {
+    localStorage.removeItem(LS_GKEY);
+    localStorage.removeItem(LS_MBTOKEN);
+    gInput.value = ''; mInput.value = '';
+    validate();
+    clearBtn.textContent = '✅ 削除しました';
+    setTimeout(() => clearBtn.textContent = '保存済みトークンを削除', 2000);
+  });
+
+  [gInput, mInput].forEach(el => {
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !startBtn.disabled) startBtn.click(); });
+  });
+}
+
+function openTokenModal() {
+  document.getElementById('setup-google-key').value  = GOOGLE_API_KEY;
+  document.getElementById('setup-mapbox-token').value = MAPBOX_TOKEN;
+  document.getElementById('setup-start').disabled = false;
+  document.getElementById('setup-overlay').style.display = 'flex';
+}
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+const DEFAULT_LAT    = 35.6631696325232;
+const DEFAULT_LNG    = 139.75565770549306;
+const DEFAULT_RADIUS = 2000;
+
+const DEFAULT_GOOGLE_PARAMS_NEW = {
+  languageCode: 'ja', regionCode: 'jp', maxResultCount: 10,
+  locationRestriction: {
+    rectangle: {
+      low:  { latitude:  DEFAULT_LAT - DEFAULT_RADIUS/111000, longitude: DEFAULT_LNG - DEFAULT_RADIUS/111000 },
+      high: { latitude:  DEFAULT_LAT + DEFAULT_RADIUS/111000, longitude: DEFAULT_LNG + DEFAULT_RADIUS/111000 },
+    },
+  },
+  includedType: '', rankPreference: 'RELEVANCE',
+};
+
+const DEFAULT_GOOGLE_PARAMS_LEGACY = {
+  language: 'ja', region: 'jp',
+  location: { lat: DEFAULT_LAT, lng: DEFAULT_LNG },
+  radius: DEFAULT_RADIUS, types: [],
+};
+
+const DEFAULT_MAPBOX_PARAMS = {
+  language: 'ja', country: 'jp',
+  proximity: { lng: DEFAULT_LNG, lat: DEFAULT_LAT },
+  limit: 10, types: [],
+  // bboxはデフォルトなし。BBOXボタンで有効化
+};
+
+// ============================================================
+// STATE
+// ============================================================
+let googleApiMode = 'legacy';
+let state = {
+  query: '',
+  googleParams: structuredClone(DEFAULT_GOOGLE_PARAMS_LEGACY),
+  mapboxParams:  structuredClone(DEFAULT_MAPBOX_PARAMS),
+};
+
+// ============================================================
+// CSV STATE
+// ============================================================
+let csvRows       = [];   // { query_text, latitude, longitude }
+let csvIndex      = -1;   // 現在の行インデックス
+
+// ============================================================
+// LOCATION HELPERS
+// ============================================================
+function getCurrentLocation() {
+  if (googleApiMode === 'new') {
+    const rect = state.googleParams.locationRestriction?.rectangle;
+    if (rect) return { lat: (rect.low.latitude + rect.high.latitude) / 2, lng: (rect.low.longitude + rect.high.longitude) / 2 };
+    return { lat: DEFAULT_LAT, lng: DEFAULT_LNG };
+  } else {
+    return state.googleParams.location ?? { lat: DEFAULT_LAT, lng: DEFAULT_LNG };
+  }
+}
+
+function getCurrentRadius() {
+  if (googleApiMode === 'new') {
+    const rect = state.googleParams.locationRestriction?.rectangle;
+    if (rect) return ((rect.high.latitude - rect.low.latitude) / 2) * 111000;
+    return DEFAULT_RADIUS;
+  } else {
+    return state.googleParams.radius ?? DEFAULT_RADIUS;
+  }
+}
+
+function setLocationToState(lat, lng) {
+  if (googleApiMode === 'new') {
+    const radius = getCurrentRadius(), offset = radius / 111000;
+    state.googleParams.locationRestriction = {
+      rectangle: {
+        low:  { latitude: lat - offset, longitude: lng - offset },
+        high: { latitude: lat + offset, longitude: lng + offset },
+      },
+    };
+  } else {
+    state.googleParams.location = { lat, lng };
+  }
+}
+
+// ============================================================
+// RADIUS CONTROL
+// ============================================================
+function applyRadius(radius) {
+  const { lat, lng } = getCurrentLocation();
+  const offset = radius / 111000;
+  if (googleApiMode === 'legacy') state.googleParams.radius = radius;
+  if (googleApiMode === 'new') {
+    state.googleParams.locationRestriction = {
+      rectangle: { low: { latitude: lat - offset, longitude: lng - offset }, high: { latitude: lat + offset, longitude: lng + offset } },
+    };
+  }
+  state.mapboxParams.bbox = [+(lng-offset).toFixed(6), +(lat-offset).toFixed(6), +(lng+offset).toFixed(6), +(lat+offset).toFixed(6)];
+  googleEditor?.setValue(JSON.stringify(state.googleParams, null, 2));
+  mapboxEditor?.setValue(JSON.stringify(state.mapboxParams, null, 2));
+  writeToURL(); drawRangeOverlays();
+}
+
+// ============================================================
+// URL SYNC
+// ============================================================
+function encodeState(s) {
+  return LZString.compressToEncodedURIComponent(JSON.stringify({ q: s.query, g: s.googleParams, m: s.mapboxParams, mode: googleApiMode }));
+}
+
+function decodeState(encoded) {
+  try {
+    const p = JSON.parse(LZString.decompressFromEncodedURIComponent(encoded));
+    if (p.mode) googleApiMode = p.mode;
+    const defaultG = googleApiMode === 'new' ? DEFAULT_GOOGLE_PARAMS_NEW : DEFAULT_GOOGLE_PARAMS_LEGACY;
+    return { query: p.q ?? '', googleParams: { ...structuredClone(defaultG), ...p.g }, mapboxParams: { ...structuredClone(DEFAULT_MAPBOX_PARAMS), ...p.m } };
+  } catch { return null; }
+}
+
+function readFromURL() {
+  const encoded = new URLSearchParams(window.location.search).get('state');
+  if (!encoded) return;
+  const decoded = decodeState(encoded);
+  if (decoded) state = decoded;
+}
+
+function writeToURL() {
+  state.mapboxParams.proximity = getCurrentLocation();
+  const url = new URL(window.location.href);
+  url.searchParams.set('state', encodeState(state));
+  window.history.replaceState(null, '', url.toString());
+}
+
+// ============================================================
+// RESIZERS
+// ============================================================
+function makeResizer(resizerId, topEl, getContainer, onResize) {
+  const resizer = document.getElementById(resizerId);
+  let dragging = false, startY = 0, startTopH = 0;
+  resizer.addEventListener('mousedown', (e) => {
+    dragging = true; startY = e.clientY; startTopH = topEl.offsetHeight;
+    resizer.classList.add('dragging'); document.body.style.userSelect = 'none'; document.body.style.cursor = 'row-resize';
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const container = getContainer();
+    let totalResizerH = 0; container.querySelectorAll('.resizer').forEach(r => totalResizerH += r.offsetHeight);
+    const newTopH = Math.max(60, Math.min(container.clientHeight - totalResizerH - 60, startTopH + e.clientY - startY));
+    topEl.style.height = newTopH + 'px'; topEl.style.flex = 'none';
+    if (onResize) onResize();
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return; dragging = false; resizer.classList.remove('dragging');
+    document.body.style.userSelect = ''; document.body.style.cursor = '';
+  });
+}
+
+function initResizers() {
+  const layout = document.getElementById('layout'), configPanel = document.getElementById('config-panel'), mapRow = document.getElementById('map-row');
+  const available = layout.clientHeight - 10;
+  configPanel.style.height = Math.floor(available * 0.2) + 'px'; configPanel.style.flex = 'none';
+  mapRow.style.height      = Math.floor(available * 0.45) + 'px'; mapRow.style.flex      = 'none';
+  const resize = () => { if (googleMap) google.maps.event.trigger(googleMap, 'resize'); if (mapboxMap) mapboxMap.resize(); };
+  makeResizer('resizer-config-map',  configPanel, () => layout, resize);
+  makeResizer('resizer-map-results', mapRow,      () => layout, resize);
+  // CSV ↔ layout
+  const csvPanel = document.getElementById('csv-panel');
+  const bodyEl   = document.body;
+  makeResizer('resizer-csv-layout', csvPanel, () => bodyEl, () => {
+    if (googleMap) google.maps.event.trigger(googleMap, 'resize');
+    if (mapboxMap) mapboxMap.resize();
+  });
+}
+
+// ============================================================
+// GOOGLE MAPS
+// ============================================================
+let googleMap = null, googleMarkers = [], googleServiceReady = false, placesService = null;
+
+let googleMapsLoadPromise = null;
+
+function loadGoogleMaps() {
+  if (googleMapsLoadPromise) return googleMapsLoadPromise;
+  if (window.google?.maps) return Promise.resolve();
+
+  googleMapsLoadPromise = new Promise((resolve, reject) => {
+    const savedDefine  = window.define;
+    const savedRequire = window.require;
+    window.define  = undefined;
+    window.require = undefined;
+
+    const script = document.createElement('script');
+    script.src   = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_API_KEY}&libraries=places`;
+    script.async  = true;
+    script.onload = () => {
+      window.define  = savedDefine;
+      window.require = savedRequire;
+      resolve();
+    };
+    script.onerror = () => {
+      window.define  = savedDefine;
+      window.require = savedRequire;
+      reject(new Error('Google Maps load failed'));
+    };
+    document.head.appendChild(script);
+  });
+
+  return googleMapsLoadPromise;
+}
+
+async function initGoogleMap() {
+  await loadGoogleMaps();
+  const loc = getCurrentLocation();
+  googleMap = new google.maps.Map(document.getElementById('google-map'), { center: loc, zoom: 12 });
+  placesService = new google.maps.places.PlacesService(document.createElement('div'));
+  googleServiceReady = true;
+  googleMap.addListener('idle', syncFromGoogle);
+  googleMap.addListener('click', (e) => setLocationPin(e.latLng.lat(), e.latLng.lng()));
+  setLocationPin(loc.lat, loc.lng);
+  drawGoogleOverlay();
+}
+
+function plotGoogleMarkers(results) {
+  googleMarkers.forEach(m => m.setMap(null)); googleMarkers = [];
+  results.forEach((r, i) => {
+    const marker = new google.maps.Marker({
+      position: { lat: r.geometry.location.lat, lng: r.geometry.location.lng },
+      map: googleMap,
+      title: r.name,
+      label: {
+        text: String(i + 1),
+        color: '#fff',
+        fontSize: '10px',
+        fontWeight: 'bold',
+      },
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 12,
+        fillColor: '#1a73e8',
+        fillOpacity: 1,
+        strokeColor: '#fff',
+        strokeWeight: 2,
+      },
+    });
+    googleMarkers.push(marker);
+  });
+}
+
+async function searchGoogleLegacy(query) {
+  if (!googleServiceReady) await initGoogleMap();
+  const p = state.googleParams;
+  return new Promise((resolve) => {
+    placesService.textSearch({
+      query, language: p.language, region: p.region,
+      location: new google.maps.LatLng(p.location.lat, p.location.lng),
+      radius: p.radius, ...(p.types?.length > 0 && { type: p.types[0] }),
+    }, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+        resolve(results.map(r => ({
+          place_id: r.place_id ?? '', name: r.name ?? '', formatted_address: r.formatted_address ?? '',
+          geometry: { location: { lat: r.geometry?.location?.lat() ?? 0, lng: r.geometry?.location?.lng() ?? 0 } },
+          types: r.types ?? [],
+        })));
+      } else { resolve({ error: `Places API error: ${status}` }); }
+    });
+  });
+}
+
+async function searchGoogleNew(query) {
+  const p = state.googleParams, rect = p.locationRestriction?.rectangle;
+  const body = {
+    textQuery: query, languageCode: p.languageCode, regionCode: p.regionCode,
+    maxResultCount: p.maxResultCount ?? 10, rankPreference: p.rankPreference ?? 'RELEVANCE',
+    ...(rect && { locationRestriction: { rectangle: { low: rect.low, high: rect.high } } }),
+    ...(p.includedType && { includedType: p.includedType }),
+  };
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_API_KEY, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.types' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Places API (New) error: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  return (data.places ?? []).map(p => ({
+    place_id: p.id ?? '', name: p.displayName?.text ?? '', formatted_address: p.formattedAddress ?? '',
+    geometry: { location: { lat: p.location?.latitude ?? 0, lng: p.location?.longitude ?? 0 } },
+    types: p.types ?? [],
+  }));
+}
+
+async function searchGoogle(query) {
+  return googleApiMode === 'new' ? searchGoogleNew(query) : searchGoogleLegacy(query);
+}
+
+// ============================================================
+// MAPBOX
+// ============================================================
+let mapboxMap = null, mapboxMarkers = [];
+
+function initMapboxMap() {
+  mapboxgl.accessToken = MAPBOX_TOKEN;
+  const center = state.mapboxParams.proximity;
+  mapboxMap = new mapboxgl.Map({ container: 'mapbox-map', style: MAPBOX_STYLE, center: [center.lng, center.lat], zoom: 12 });
+  mapboxMap.on('load', () => { mapboxMap.resize(); drawMapboxBbox(); applyPoiDensity(1);});
+  mapboxMap.on('moveend', syncFromMapbox);
+  mapboxMap.on('click', (e) => setLocationPin(e.lngLat.lat, e.lngLat.lng));
+}
+
+function plotMapboxMarkers(results) {
+  mapboxMarkers.forEach(m => m.remove()); mapboxMarkers = [];
+  if (!results.length || !mapboxMap) return;
+  results.forEach((r, i) => {
+    const el = document.createElement('div');
+    Object.assign(el.style, {
+      width: '24px', height: '24px', background: '#e74c3c', borderRadius: '50%',
+      color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: '10px', fontWeight: 'bold', border: '2px solid white',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.4)', cursor: 'pointer',
+    });
+    el.textContent = String(i + 1);
+    const marker = new mapboxgl.Marker({ element: el })
+      .setLngLat([r.coordinates.longitude, r.coordinates.latitude])
+      .setPopup(new mapboxgl.Popup({ offset: 16 })
+        .setHTML(`<b>${r.name}</b><br/><span style="font-size:11px">${r.full_address}</span>`))
+      .addTo(mapboxMap);
+    marker._customEl = el; // elへの参照を直接保持
+    mapboxMarkers.push(marker);
+  });
+}
+
+async function searchMapbox(query) {
+  const p = state.mapboxParams;
+  const params = new URLSearchParams({ q: query, language: p.language, country: p.country, limit: String(p.limit), access_token: MAPBOX_TOKEN });
+  if (p.proximity) params.set('proximity', `${p.proximity.lng},${p.proximity.lat}`);
+  if (p.types?.length > 0) params.set('types', p.types.join(','));
+  if (Array.isArray(p.bbox) && p.bbox.length === 4) params.set('bbox', p.bbox.join(','));
+  const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/forward?${params}`);
+  if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
+  const data = await res.json();
+  return (data.features ?? []).map(f => ({ ...f.properties, coordinates: { longitude: f.geometry?.coordinates?.[0] ?? 0, latitude: f.geometry?.coordinates?.[1] ?? 0 } }));
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function renderGoogleResults(data) {
+  const el = document.getElementById('google-results'), countEl = document.getElementById('google-count');
+  if (data.error) { el.innerHTML = `<p class="status-msg status-error">${data.error}</p>`; countEl.textContent = ''; return; }
+  if (!data.length) { el.innerHTML = `<p class="status-msg">No results</p>`; countEl.textContent = ''; return; }
+  countEl.textContent = `${data.length} results`;
+  el.innerHTML = data.map((r, i) => `
+    <div class="result-item" style="cursor:pointer;"
+         data-lat="${r.geometry.location.lat}" data-lng="${r.geometry.location.lng}">
+      <div class="result-index google-index">${i+1}</div>
+      <div>
+        <div class="result-name">${r.name}</div>
+        <div class="result-address">${r.formatted_address}</div>
+        <div class="result-type">${r.types.join(', ')}</div>
+      </div>
+    </div>`).join('');
+
+	el.querySelectorAll('.result-item').forEach((item, i) => {
+	  item.addEventListener('click', () => {
+	    const lat = parseFloat(item.dataset.lat);
+	    const lng = parseFloat(item.dataset.lng);
+	    centerMapsTo(lat, lng);
+	    highlightGoogleMarker(i);
+	  });
+	});
+}
+
+function renderMapboxResults(data) {
+  const el = document.getElementById('mapbox-results'), countEl = document.getElementById('mapbox-count');
+  if (data.error) { el.innerHTML = `<p class="status-msg status-error">${data.error}</p>`; countEl.textContent = ''; return; }
+  if (!data.length) { el.innerHTML = `<p class="status-msg">No results</p>`; countEl.textContent = ''; return; }
+  countEl.textContent = `${data.length} results`;
+  el.innerHTML = data.map((r, i) => `
+    <div class="result-item" style="cursor:pointer;"
+         data-lat="${r.coordinates.latitude}" data-lng="${r.coordinates.longitude}">
+      <div class="result-index mapbox-index">${i+1}</div>
+      <div>
+        <div class="result-name">${r.name??''}</div>
+        <div class="result-address">${r.full_address??''}</div>
+        <div class="result-type">${[r.feature_type,...(r.poi_category??[])].filter(Boolean).join(' · ')}</div>
+      </div>
+    </div>`).join('');
+	
+	el.querySelectorAll('.result-item').forEach((item, i) => {
+	  item.addEventListener('click', () => {
+	    console.log('mapbox click fired', i, mapboxMarkers.length);
+	    const lat = parseFloat(item.dataset.lat);
+	    const lng = parseFloat(item.dataset.lng);
+	    centerMapsTo(lat, lng);
+	    highlightMapboxMarker(i);
+	  });
+	});	
+}
+
+function setLoading(side) {
+  document.getElementById(`${side}-results`).innerHTML = `<p class="status-msg">Searching...</p>`;
+  document.getElementById(`${side}-count`).textContent = '';
+}
+
+// ============================================================
+// QUERY DISPLAY
+// ============================================================
+function buildGoogleQueryDisplay(query) {
+  if (googleApiMode === 'new') {
+    const p = state.googleParams;
+    return `POST https://places.googleapis.com/v1/places:searchText\n\n${JSON.stringify({ textQuery: query, languageCode: p.languageCode, regionCode: p.regionCode, maxResultCount: p.maxResultCount??10, locationRestriction: p.locationRestriction, rankPreference: p.rankPreference??'RELEVANCE', ...(p.includedType && { includedType: p.includedType }) }, null, 2)}`;
+  } else {
+    const p = state.googleParams;
+    return `GET https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&language=${p.language}&region=${p.region}&location=${p.location.lat},${p.location.lng}&radius=${p.radius}${p.types?.length>0?`&type=${p.types[0]}`:''}&key=****`;
+  }
+}
+
+function buildMapboxQueryDisplay(query) {
+  const p = state.mapboxParams;
+  const params = new URLSearchParams({ q: query, language: p.language, country: p.country, limit: String(p.limit), access_token: '****' });
+  if (p.proximity) params.set('proximity', `${p.proximity.lng},${p.proximity.lat}`);
+  if (p.types?.length > 0) params.set('types', p.types.join(','));
+  if (Array.isArray(p.bbox) && p.bbox.length === 4) params.set('bbox', p.bbox.join(','));
+  return `GET https://api.mapbox.com/search/searchbox/v1/forward?${params.toString()}`;
+}
+
+// ============================================================
+// SEARCH
+// ============================================================
+async function doSearch() {
+  const query = document.getElementById('query-input').value.trim();
+  if (!query) return;
+  state.query = query;
+
+  if (Array.isArray(state.mapboxParams.bbox) && state.mapboxParams.bbox.length === 4) {
+    const { lat, lng } = getCurrentLocation(), radius = getCurrentRadius(), offset = radius / 111000;
+    state.mapboxParams.bbox = [+(lng-offset).toFixed(6), +(lat-offset).toFixed(6), +(lng+offset).toFixed(6), +(lat+offset).toFixed(6)];
+    mapboxEditor?.setValue(JSON.stringify(state.mapboxParams, null, 2));
+  }
+
+  writeToURL();
+  
+  // 地図のセンターをlocationに即移動
+ const { lat, lng } = getCurrentLocation();
+ if (googleMap) googleMap.setCenter({ lat, lng });
+ if (mapboxMap) mapboxMap.jumpTo({ center: [lng, lat] });
+  
+  const googleDisplay = buildGoogleQueryDisplay(query), mapboxDisplay = buildMapboxQueryDisplay(query);
+  pendingGoogleUrl = googleDisplay; pendingMapboxUrl = mapboxDisplay;
+  queryEditor?.setValue(googleDisplay); queryMapboxEditor?.setValue(mapboxDisplay);
+
+  document.getElementById('query-google-label').textContent = `Google Places API (${googleApiMode === 'new' ? 'New' : 'Legacy'})`;
+  highlightedGoogleMarker = null;
+  highlightedMapboxMarker = null;
+  setLoading('google'); setLoading('mapbox');
+
+  const [gRes, mRes] = await Promise.allSettled([searchGoogle(query), searchMapbox(query)]);
+
+  if (gRes.status === 'fulfilled') {
+    googleRawResults = gRes.value.error ? [] : gRes.value;
+    renderGoogleResults(gRes.value);
+    if (!gRes.value.error) plotGoogleMarkers(gRes.value);
+  } else { googleRawResults = []; renderGoogleResults({ error: String(gRes.reason) }); }
+
+  if (mRes.status === 'fulfilled') {
+    mapboxRawResults = mRes.value.error ? [] : mRes.value;
+    renderMapboxResults(mRes.value);
+    if (!mRes.value.error) plotMapboxMarkers(mRes.value);
+  } else { mapboxRawResults = []; renderMapboxResults({ error: String(mRes.reason) }); }
+
+  drawRangeOverlays();
+  updateResultEditors();
+}
+
+// ============================================================
+// CSV
+// ============================================================
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+  const latIdx  = headers.indexOf('latitude');
+  const lngIdx  = headers.indexOf('longitude');
+  const qIdx    = headers.indexOf('query_text');
+  if (latIdx < 0 || lngIdx < 0 || qIdx < 0) return null; // カラムが見つからない
+
+  return lines.slice(1).map(line => {
+    const cols = line.split(',');
+    return {
+      latitude:   parseFloat(cols[latIdx]),
+      longitude:  parseFloat(cols[lngIdx]),
+      query_text: cols[qIdx]?.trim() ?? '',
+    };
+  }).filter(r => !isNaN(r.latitude) && !isNaN(r.longitude));
+}
+
+function renderCSVTable() {
+  const tbody   = document.getElementById('csv-tbody');
+  const WINDOW  = 20; // 前後に表示する行数
+  const start   = Math.max(0, csvIndex - WINDOW);
+  const end     = Math.min(csvRows.length - 1, csvIndex + WINDOW);
+  const visible = csvRows.slice(start, end + 1);
+
+  tbody.innerHTML = visible.map((r, i) => {
+    const realIdx = start + i;
+    return `
+      <tr class="${realIdx === csvIndex ? 'active' : ''}" data-idx="${realIdx}">
+        <td>${realIdx + 1}</td>
+        <td>${r.query_text}</td>
+        <td>${r.latitude.toFixed(6)}</td>
+        <td>${r.longitude.toFixed(6)}</td>
+      </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.addEventListener('click', () => jumpToCSVRow(parseInt(tr.dataset.idx)));
+  });
+
+  document.getElementById('csv-progress').textContent = csvRows.length > 0
+    ? `${csvIndex >= 0 ? csvIndex + 1 : '-'} / ${csvRows.length}`
+    : '';
+
+  document.getElementById('csv-prev-btn').disabled = csvRows.length === 0 || csvIndex <= 0;
+  document.getElementById('csv-next-btn').disabled = csvRows.length === 0 || csvIndex >= csvRows.length - 1;
+
+  const activeRow = tbody.querySelector('tr.active');
+  if (activeRow) activeRow.scrollIntoView({ block: 'nearest' });
+}
+
+async function jumpToCSVRow(idx) {
+  if (idx < 0 || idx >= csvRows.length) return;
+  csvIndex = idx;
+  const row = csvRows[idx];
+
+  // query をセット
+  document.getElementById('query-input').value = row.query_text;
+
+  // location をセット
+  setLocationPin(row.latitude, row.longitude);
+  drawRangeOverlays();
+
+  renderCSVTable();
+
+  // 検索実行
+  await doSearch();
+}
+
+function initCSV() {
+  // ヘッダークリックでアコーディオン
+  document.getElementById('csv-header').addEventListener('click', () => {
+    const body = document.getElementById('csv-body');
+    const icon = document.getElementById('csv-toggle-icon');
+    const isOpen = body.classList.toggle('open');
+    icon.classList.toggle('open', isOpen);
+  });
+
+  // ファイル選択
+  document.getElementById('csv-file-btn').addEventListener('click', () => {
+    document.getElementById('csv-file-input').click();
+  });
+
+  document.getElementById('csv-file-input').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      // UIをブロックしないようにsetTimeoutで非同期処理
+      setTimeout(() => {
+        const rows = parseCSV(ev.target.result);
+        if (rows === null) { alert('CSVのカラムが見つかりません。\nlatitude, longitude, query_text が必要です。'); return; }
+        if (rows.length === 0) { alert('有効な行がありません。'); return; }
+        csvRows  = rows;
+        csvIndex = -1;
+
+        document.getElementById('csv-body').classList.add('open');
+        document.getElementById('csv-toggle-icon').classList.add('open');
+        document.getElementById('csv-header-label').textContent = `📂 ${file.name} (${rows.length} rows)`;
+        renderCSVTable();
+      }, 0);
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // 同じファイルを再選択できるようにリセット
+  });
+
+  // 前へ / 次へ
+  document.getElementById('csv-prev-btn').addEventListener('click', () => jumpToCSVRow(csvIndex - 1));
+  document.getElementById('csv-next-btn').addEventListener('click', () => jumpToCSVRow(csvIndex + 1));
+
+	// 行ジャンプ
+	const jumpInput = document.getElementById('csv-jump-input');
+	const jumpBtn   = document.getElementById('csv-jump-btn');
+	const jumpHint  = document.getElementById('csv-jump-hint');
+	
+	const doJump = () => {
+	  const val = parseInt(jumpInput.value);
+	  if (isNaN(val) || val < 1) { jumpHint.textContent = '無効な値'; return; }
+	  if (val > csvRows.length) { jumpHint.textContent = `最大 ${csvRows.length}`; return; }
+	  csvIndex = val - 1; // 1始まり → 0始まりに変換
+	  renderCSVTable();
+	  jumpHint.textContent = `→ ${val}行目`;
+	  setTimeout(() => jumpHint.textContent = '', 2000);
+	};
+	
+	jumpBtn.addEventListener('click', doJump);
+	jumpInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJump(); });
+	
+}
+
+// ============================================================
+// EXPORT
+// ============================================================
+async function doExport() {
+  const query = state.query || 'export';
+  const safeQuery = query.replace(/[\\/:*?"<>|]/g, '_');
+
+  // --- テキストエクスポート ---
+  const txt = [
+    `=== QUERY (${new Date().toLocaleString()}) ===`,
+    '', `Query: ${query}`, '',
+    '--- Google ---',
+    pendingGoogleUrl,
+    '',
+    '--- Mapbox ---',
+    pendingMapboxUrl,
+    '',
+    '=== CONFIG ===',
+    JSON.stringify({ google: state.googleParams, mapbox: state.mapboxParams }, null, 2),
+    '',
+    '=== GOOGLE RESULTS ===',
+    JSON.stringify(googleRawResults, null, 2),
+    '',
+    '=== MAPBOX RESULTS ===',
+    JSON.stringify(mapboxRawResults, null, 2),
+  ].join('\n');
+
+  const txtBlob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+  const txtUrl  = URL.createObjectURL(txtBlob);
+  const txtLink = document.createElement('a');
+  txtLink.href = txtUrl; txtLink.download = `${safeQuery}.txt`;
+  txtLink.click(); URL.revokeObjectURL(txtUrl);
+
+  // --- スクリーンショット ---
+  const exportBtn = document.getElementById('export-btn');
+  exportBtn.textContent = '📸 撮影中...';
+  exportBtn.disabled = true;
+
+  try {
+    const canvas = await html2canvas(document.body, {
+      useCORS:        true,
+      allowTaint:     true,
+      backgroundColor: '#121212',
+      scale: window.devicePixelRatio || 1,
+    });
+    const pngUrl  = canvas.toDataURL('image/png');
+    const pngLink = document.createElement('a');
+    pngLink.href = pngUrl; pngLink.download = `${safeQuery}.png`;
+    pngLink.click();
+  } catch (e) {
+    console.warn('スクリーンショット失敗:', e);
+    alert('スクリーンショットの取得に失敗しました。テキストファイルのみエクスポートされました。');
+  } finally {
+    exportBtn.textContent = '📥 Export';
+    exportBtn.disabled = false;
+  }
+}
+
+// ============================================================
+// MONACO EDITORS
+// ============================================================
+let googleEditor = null, mapboxEditor = null, queryEditor = null;
+let queryMapboxEditor = null, googleResultEditor = null, mapboxResultEditor = null;
+let editorsInited = false, pendingGoogleUrl = '', pendingMapboxUrl = '';
+
+require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
+
+function initEditors(cb) {
+  if (editorsInited) { cb && cb(); return; }
+  editorsInited = true;
+  require(['vs/editor/editor.main'], function () {
+    const common = { language: 'json', theme: 'vs-dark', minimap: { enabled: false }, fontSize: 12, scrollBeyondLastLine: false, formatOnPaste: true, automaticLayout: true };
+
+    const gWrap = document.getElementById('google-editor-wrap'); gWrap.style.height = '160px';
+    googleEditor = monaco.editor.create(gWrap, { ...common, value: JSON.stringify(state.googleParams, null, 2) });
+    googleEditor.onDidChangeModelContent(() => { try { state.googleParams = JSON.parse(googleEditor.getValue()); writeToURL(); mapboxEditor?.setValue(JSON.stringify(state.mapboxParams, null, 2)); } catch {} });
+
+    const mWrap = document.getElementById('mapbox-editor-wrap'); mWrap.style.height = '160px';
+    mapboxEditor = monaco.editor.create(mWrap, { ...common, value: JSON.stringify(state.mapboxParams, null, 2) });
+    mapboxEditor.onDidChangeModelContent(() => { try { state.mapboxParams = JSON.parse(mapboxEditor.getValue()); writeToURL(); drawMapboxBbox(); } catch {} });
+
+    const qgWrap = document.getElementById('query-google-editor-wrap'); qgWrap.style.height = '220px';
+    queryEditor = monaco.editor.create(qgWrap, { ...common, language: 'plaintext', value: pendingGoogleUrl, readOnly: true });
+
+    const qmWrap = document.getElementById('query-mapbox-editor-wrap'); qmWrap.style.height = '220px';
+    queryMapboxEditor = monaco.editor.create(qmWrap, { ...common, language: 'plaintext', value: pendingMapboxUrl, readOnly: true });
+
+    const grWrap = document.getElementById('google-result-editor-wrap'); grWrap.style.height = '400px';
+    googleResultEditor = monaco.editor.create(grWrap, { ...common, value: JSON.stringify(googleRawResults, null, 2), readOnly: true });
+
+    const mrWrap = document.getElementById('mapbox-result-editor-wrap'); mrWrap.style.height = '400px';
+    mapboxResultEditor = monaco.editor.create(mrWrap, { ...common, value: JSON.stringify(mapboxRawResults, null, 2), readOnly: true });
+
+    cb && cb();
+  });
+}
+
+// ============================================================
+// DIALOGS
+// ============================================================
+function openDialog(id) { initEditors(() => document.getElementById(id).classList.add('open')); }
+function closeDialog(id) { document.getElementById(id).classList.remove('open'); }
+
+document.querySelectorAll('.dialog-overlay').forEach(overlay => {
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeDialog(overlay.id); });
+});
+document.querySelectorAll('.dialog-close').forEach(btn => {
+  btn.addEventListener('click', () => closeDialog(btn.dataset.close));
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.querySelectorAll('.dialog-overlay.open').forEach(el => closeDialog(el.id));
+});
+
+// ============================================================
+// CENTER MAPS
+// ============================================================
+function centerMapsTo(lat, lng) {
+  isSyncing = true; // sync一時停止
+  if (googleMap) googleMap.setCenter({ lat, lng });
+  if (mapboxMap) mapboxMap.jumpTo({ center: [lng, lat], zoom: 17 });
+  // 少し待ってからsync再開
+  setTimeout(() => { isSyncing = false; }, 300);
+}
+	
+// ============================================================
+// MAP SYNC
+// ============================================================
+let isSyncing = false, locationPin = { google: null, mapbox: null };
+let radiusCircle = null, radiusRectangle = null;
+
+function syncFromGoogle() {
+  if (isSyncing || !mapboxMap) return; isSyncing = true;
+  const c = googleMap.getCenter();
+  mapboxMap.jumpTo({ center: [c.lng(), c.lat()], zoom: googleMap.getZoom() - 1 });
+  isSyncing = false;
+}
+function syncFromMapbox() {
+  if (isSyncing || !googleMap) return; isSyncing = true;
+  const c = mapboxMap.getCenter();
+  googleMap.setCenter({ lat: c.lat, lng: c.lng }); googleMap.setZoom(mapboxMap.getZoom() + 1);
+  isSyncing = false;
+}
+
+// ============================================================
+// RANGE OVERLAYS
+// ============================================================
+function drawRangeOverlays() { drawGoogleOverlay(); drawMapboxBbox(); }
+
+function drawGoogleOverlay() {
+  if (!googleMap) return;
+  if (radiusCircle)    { radiusCircle.setMap(null);    radiusCircle    = null; }
+  if (radiusRectangle) { radiusRectangle.setMap(null); radiusRectangle = null; }
+  if (googleApiMode === 'legacy') {
+    const { lat, lng } = getCurrentLocation();
+    radiusCircle = new google.maps.Circle({ map: googleMap, center: { lat, lng }, radius: getCurrentRadius(), strokeColor: '#2563eb', strokeOpacity: 0.8, strokeWeight: 2, fillColor: '#2563eb', fillOpacity: 0.08, clickable: false });
+  } else {
+    const rect = state.googleParams.locationRestriction?.rectangle; if (!rect) return;
+    radiusRectangle = new google.maps.Rectangle({ map: googleMap, bounds: { south: rect.low.latitude, west: rect.low.longitude, north: rect.high.latitude, east: rect.high.longitude }, strokeColor: '#2563eb', strokeOpacity: 0.8, strokeWeight: 2, fillColor: '#2563eb', fillOpacity: 0.08, clickable: false });
+  }
+}
+
+function drawMapboxBbox() {
+  if (!mapboxMap) return;
+  const bbox = state.mapboxParams.bbox, hasBbox = Array.isArray(bbox) && bbox.length === 4;
+  if (!hasBbox) {
+    if (mapboxMap.getSource('bbox-source')) mapboxMap.getSource('bbox-source').setData({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[]] } });
+    return;
+  }
+  const [west, south, east, north] = bbox;
+  const geojson = { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[west,south],[east,south],[east,north],[west,north],[west,south]]] } };
+  if (mapboxMap.getSource('bbox-source')) {
+    mapboxMap.getSource('bbox-source').setData(geojson);
+  } else {
+    const addLayers = () => {
+      mapboxMap.addSource('bbox-source', { type: 'geojson', data: geojson });
+      mapboxMap.addLayer({ id: 'bbox-fill', type: 'fill', source: 'bbox-source', paint: { 'fill-color': '#e74c3c', 'fill-opacity': 0.08 } });
+      mapboxMap.addLayer({ id: 'bbox-line', type: 'line', source: 'bbox-source', paint: { 'line-color': '#e74c3c', 'line-width': 2, 'line-opacity': 0.8 } });
+    };
+    if (mapboxMap.isStyleLoaded()) addLayers(); else mapboxMap.once('load', addLayers);
+  }
+}
+
+// ============================================================
+// LOCATION PIN
+// ============================================================
+function setLocationPin(lat, lng) {
+  setLocationToState(lat, lng);
+  state.mapboxParams.proximity = { lng, lat };
+  writeToURL();
+  googleEditor?.setValue(JSON.stringify(state.googleParams, null, 2));
+  mapboxEditor?.setValue(JSON.stringify(state.mapboxParams, null, 2));
+
+  if (locationPin.google) locationPin.google.setMap(null);
+  locationPin.google = new google.maps.Marker({
+    position: { lat, lng }, map: googleMap,
+    icon: { path: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z', fillColor: '#f59e0b', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1, scale: 1.8, anchor: new google.maps.Point(12, 22) },
+    title: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, zIndex: 999,
+  });
+
+  if (locationPin.mapbox) locationPin.mapbox.remove();
+  const el = document.createElement('div');
+  el.innerHTML = `<svg width="28" height="38" viewBox="0 0 28 38" fill="none"><path d="M14 0C6.27 0 0 6.27 0 14C0 24.5 14 38 14 38C14 38 28 24.5 28 14C28 6.27 21.73 0 14 0Z" fill="#f59e0b" stroke="white" stroke-width="2"/><circle cx="14" cy="14" r="5" fill="white"/></svg>`;
+  el.style.cursor = 'pointer';
+  locationPin.mapbox = new mapboxgl.Marker({ element: el, anchor: 'bottom' }).setLngLat([lng, lat]).addTo(mapboxMap);
+}
+
+// ============================================================
+// POI DENSITY
+// ============================================================
+function applyPoiDensity(density) {
+  if (!mapboxMap) return;
+  if (!mapboxMap.isStyleLoaded()) {
+    mapboxMap.once('load', () => applyPoiDensity(density));
+    return;
+  }
+
+  const filterrankBase = [4, 6, 8, 10][density - 1];
+
+  mapboxMap.setFilter('poi-label', [
+    'all',
+    [
+      '<=',
+      ['get', 'filterrank'],
+      ['+', ['step', ['zoom'], 0, 16, 1, 17, 2], filterrankBase],
+    ],
+    [
+      'step', ['pitch'], true,
+      50, ['<', ['distance-from-center'], 2],
+      60, ['<', ['distance-from-center'], 2.5],
+      70, ['<', ['distance-from-center'], 3],
+    ],
+  ]);
+
+  const allowOverlap = density >= 3;
+  mapboxMap.setLayoutProperty('poi-label', 'text-allow-overlap', allowOverlap);
+  mapboxMap.setLayoutProperty('poi-label', 'icon-allow-overlap', allowOverlap);
+  mapboxMap.setLayoutProperty('poi-label', 'text-ignore-placement', allowOverlap);
+}
+	
+// ============================================================
+// BBOX TOGGLE
+// ============================================================
+function updateBboxBtn() {
+  const btn     = document.getElementById('bbox-toggle-btn');
+  const hasBbox = Array.isArray(state.mapboxParams.bbox) && state.mapboxParams.bbox.length === 4;
+  btn.textContent  = hasBbox ? 'BBOX ON(Switch to OFF)' : 'BBOX OFF (Switch to ON)';
+  btn.style.borderColor = hasBbox ? '#e74c3c' : '#444';
+  btn.style.color       = hasBbox ? '#e74c3c' : '#ccc';
+}
+
+function toggleBbox() {
+  const hasBbox = Array.isArray(state.mapboxParams.bbox) && state.mapboxParams.bbox.length === 4;
+  if (hasBbox) {
+    // OFF → bboxを削除
+    delete state.mapboxParams.bbox;
+  } else {
+    // ON → 現在のlocation + radiusからbboxを計算
+    const { lat, lng } = getCurrentLocation();
+    const offset = getCurrentRadius() / 111000;
+    state.mapboxParams.bbox = [
+      +(lng - offset).toFixed(6),
+      +(lat - offset).toFixed(6),
+      +(lng + offset).toFixed(6),
+      +(lat + offset).toFixed(6),
+    ];
+  }
+  mapboxEditor?.setValue(JSON.stringify(state.mapboxParams, null, 2));
+  writeToURL();
+  drawMapboxBbox();
+  updateBboxBtn();
+}
+
+// ============================================================
+// MARKER HIGHLIGHT
+// ============================================================
+let highlightedGoogleMarker = null;
+let highlightedMapboxMarker = null;
+
+function highlightGoogleMarker(index) {
+  // Mapbox側のハイライトをリセット
+  mapboxMarkers.forEach((m) => {
+    const el = m._customEl;
+    if (el) Object.assign(el.style, { width: '24px', height: '24px', background: '#e74c3c', fontSize: '10px' });
+  });
+  highlightedMapboxMarker = null;
+
+  // Google全マーカーを通常に戻す
+  googleMarkers.forEach((m) => {
+    m.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: '#1a73e8', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 });
+  });
+  // 対象をハイライト
+  if (googleMarkers[index]) {
+    googleMarkers[index].setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: 18, fillColor: '#f59e0b', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 });
+    highlightedGoogleMarker = index;
+  }
+}
+
+function highlightMapboxMarker(index) {
+  // Google側のハイライトをリセット
+  googleMarkers.forEach((m) => {
+    m.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: '#1a73e8', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 });
+  });
+  highlightedGoogleMarker = null;
+
+  // Mapbox全マーカーを通常に戻す
+  mapboxMarkers.forEach((m) => {
+    const el = m._customEl;
+    if (el) Object.assign(el.style, { width: '24px', height: '24px', background: '#e74c3c', fontSize: '10px' });
+  });
+  // 対象をハイライト
+  const el = mapboxMarkers[index]?._customEl;
+  if (el) {
+    Object.assign(el.style, { width: '36px', height: '36px', background: '#f59e0b', fontSize: '13px' });
+    highlightedMapboxMarker = index;
+  }
+}
+// ============================================================
+// RESULTS
+// ============================================================
+let googleRawResults = [], mapboxRawResults = [];
+
+function updateResultEditors() {
+  googleResultEditor?.setValue(JSON.stringify(googleRawResults, null, 2));
+  mapboxResultEditor?.setValue(JSON.stringify(mapboxRawResults, null, 2));
+}
+
+// ============================================================
+// MODE TOGGLE
+// ============================================================
+function updateModeBadge() {
+  const badge = document.getElementById('google-mode-badge'), label = document.getElementById('google-config-label');
+  if (googleApiMode === 'new') {
+    badge.textContent = 'New (Switch to Legacy)'; badge.className = 'mode-badge new';
+    label.innerHTML = 'Google Search Params (New) <span style="color:#555">※ URLに反映されます</span>';
+  } else {
+    badge.textContent = 'Legacy (Switch to New)'; badge.className = 'mode-badge legacy';
+    label.innerHTML = 'Google Search Params (Legacy) <span style="color:#555">※ URLに反映されます</span>';
+  }
+}
+
+function switchMode(newMode) {
+  if (googleApiMode === newMode) return;
+  const { lat, lng } = getCurrentLocation(), radius = getCurrentRadius();
+  googleApiMode = newMode;
+  if (googleApiMode === 'new') {
+    state.googleParams = structuredClone(DEFAULT_GOOGLE_PARAMS_NEW);
+    state.googleParams.locationRestriction = { rectangle: { low: { latitude: lat - radius/111000, longitude: lng - radius/111000 }, high: { latitude: lat + radius/111000, longitude: lng + radius/111000 } } };
+  } else {
+    state.googleParams = structuredClone(DEFAULT_GOOGLE_PARAMS_LEGACY);
+    state.googleParams.location = { lat, lng }; state.googleParams.radius = radius;
+  }
+  googleEditor?.setValue(JSON.stringify(state.googleParams, null, 2));
+  updateModeBadge(); writeToURL();
+}
+
+document.getElementById('google-mode-badge').addEventListener('click', () => switchMode(googleApiMode === 'new' ? 'legacy' : 'new'));
+
+// ============================================================
+// EVENT LISTENERS
+// ============================================================
+document.getElementById('search-btn').addEventListener('click', doSearch);
+document.getElementById('query-input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+document.getElementById('copy-url-btn').addEventListener('click', () => {
+  navigator.clipboard.writeText(window.location.href);
+  const btn = document.getElementById('copy-url-btn'); btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = '🔗 Copy URL', 2000);
+});
+document.getElementById('open-query-btn').addEventListener('click', () => openDialog('query-dialog'));
+document.getElementById('open-results-btn').addEventListener('click', () => openDialog('results-dialog'));
+document.getElementById('export-btn').addEventListener('click', doExport);
+document.getElementById('open-token-btn').addEventListener('click', openTokenModal);
+
+document.getElementById('reset-btn').addEventListener('click', () => {
+  const { lat, lng } = getCurrentLocation(), radius = getCurrentRadius();
+  if (googleApiMode === 'new') {
+    state.googleParams = structuredClone(DEFAULT_GOOGLE_PARAMS_NEW);
+    state.googleParams.locationRestriction = { rectangle: { low: { latitude: lat-radius/111000, longitude: lng-radius/111000 }, high: { latitude: lat+radius/111000, longitude: lng+radius/111000 } } };
+  } else {
+    state.googleParams = structuredClone(DEFAULT_GOOGLE_PARAMS_LEGACY); state.googleParams.location = { lat, lng }; state.googleParams.radius = radius;
+  }
+  state.mapboxParams = structuredClone(DEFAULT_MAPBOX_PARAMS);
+  googleEditor?.setValue(JSON.stringify(state.googleParams, null, 2)); mapboxEditor?.setValue(JSON.stringify(state.mapboxParams, null, 2)); writeToURL();
+});
+
+document.getElementById('copy-json-btn').addEventListener('click', () => {
+  navigator.clipboard.writeText(JSON.stringify({ google: state.googleParams, mapbox: state.mapboxParams }, null, 2));
+  const btn = document.getElementById('copy-json-btn'); btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = 'Copy JSON', 2000);
+});
+document.getElementById('copy-google-query-btn').addEventListener('click', () => { navigator.clipboard.writeText(pendingGoogleUrl); const btn = document.getElementById('copy-google-query-btn'); btn.textContent = '✅'; setTimeout(() => btn.textContent = 'Copy', 2000); });
+document.getElementById('copy-mapbox-query-btn').addEventListener('click', () => { navigator.clipboard.writeText(pendingMapboxUrl); const btn = document.getElementById('copy-mapbox-query-btn'); btn.textContent = '✅'; setTimeout(() => btn.textContent = 'Copy', 2000); });
+document.getElementById('copy-google-results-btn').addEventListener('click', () => { navigator.clipboard.writeText(JSON.stringify(googleRawResults, null, 2)); const btn = document.getElementById('copy-google-results-btn'); btn.textContent = '✅'; setTimeout(() => btn.textContent = 'Copy', 2000); });
+document.getElementById('copy-mapbox-results-btn').addEventListener('click', () => { navigator.clipboard.writeText(JSON.stringify(mapboxRawResults, null, 2)); const btn = document.getElementById('copy-mapbox-results-btn'); btn.textContent = '✅'; setTimeout(() => btn.textContent = 'Copy', 2000); });
+
+// POI density
+document.getElementById('poi-density-select').addEventListener('change', (e) => {
+  applyPoiDensity(Number(e.target.value));
+});
+	
+// BBOXボタン
+document.getElementById('bbox-toggle-btn').addEventListener('click', toggleBbox);
+
+document.getElementById('radius-select').addEventListener('change', (e) => {
+  const ci = document.getElementById('radius-custom');
+  if (e.target.value === 'custom') { ci.style.display = 'block'; ci.focus(); }
+  else { ci.style.display = 'none'; applyRadius(Number(e.target.value)); }
+});
+document.getElementById('radius-custom').addEventListener('change', (e) => { const v = Number(e.target.value); if (v > 0) applyRadius(v); });
+document.getElementById('radius-custom').addEventListener('keydown', (e) => { if (e.key === 'Enter') { const v = Number(e.target.value); if (v > 0) applyRadius(v); } });
+
+// ============================================================
+// APP START
+// ============================================================
+function startApp() {
+  readFromURL();
+  if (state.query) document.getElementById('query-input').value = state.query;
+  updateModeBadge();
+  initCSV();
+
+  loadGoogleMaps().then(() => {
+    initGoogleMap();
+    initMapboxMap();
+    initResizers();
+    updateBboxBtn();
+    setTimeout(() => initEditors(), 100);
+    if (state.query) doSearch();
+  });
+}
+
+// ============================================================
+// INIT
+// ============================================================
+initSetup();
+</script>
+</body>
+</html>
