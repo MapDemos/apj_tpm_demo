@@ -1,0 +1,17 @@
+[
+  {
+    "title": "ta_coverage",
+    "description": "Short description of Demo A",
+    "path": "./ta_coverage/"
+  },
+  {
+    "title": "Demo B",
+    "description": "Short description of Demo B",
+    "path": "./demo-b/"
+  },
+  {
+    "title": "Demo C",
+    "description": "Short description of Demo C",
+    "path": "./demo-c/"
+  }
+]

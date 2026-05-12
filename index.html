@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Demo List</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+        sans-serif;
+      background-color: #f5f7fa;
+      color: #222;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+
+    header {
+      margin-bottom: 32px;
+      text-align: center;
+    }
+
+    header h1 {
+      margin: 0 0 8px;
+      font-size: 2rem;
+      color: #1a1a1a;
+    }
+
+    header p {
+      margin: 0;
+      color: #555;
+      font-size: 1rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      display: flex;
+      flex-direction: column;
+      background: #ffffff;
+      border: 1px solid #e3e6eb;
+      border-radius: 10px;
+      padding: 20px;
+      text-decoration: none;
+      color: inherit;
+      transition: transform 0.15s ease, box-shadow 0.15s ease,
+        border-color 0.15s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+      border-color: #4a90e2;
+    }
+
+    .card:focus-visible {
+      outline: 2px solid #4a90e2;
+      outline-offset: 2px;
+    }
+
+    .card h2 {
+      margin: 0 0 8px;
+      font-size: 1.2rem;
+      color: #1a1a1a;
+    }
+
+    .card p {
+      margin: 0 0 16px;
+      color: #555;
+      font-size: 0.95rem;
+      flex-grow: 1;
+    }
+
+    .card .open {
+      align-self: flex-start;
+      font-size: 0.9rem;
+      color: #4a90e2;
+      font-weight: 600;
+    }
+
+    .card:hover .open {
+      text-decoration: underline;
+    }
+
+    .message {
+      text-align: center;
+      padding: 40px 20px;
+      color: #666;
+      background: #ffffff;
+      border: 1px dashed #cbd0d6;
+      border-radius: 10px;
+    }
+
+    .message.error {
+      color: #b00020;
+      border-color: #f3b8be;
+      background: #fff5f6;
+    }
+
+    @media (max-width: 480px) {
+      header h1 {
+        font-size: 1.6rem;
+      }
+      .container {
+        padding: 20px 14px 40px;
+      }
+      .card {
+        padding: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Demo List</h1>
+      <p>Select a demo to open.</p>
+    </header>
+
+    <main id="app">
+      <div class="message" id="loading">Loading demos...</div>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      const app = document.getElementById("app");
+
+      function escapeHtml(str) {
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function showMessage(text, isError) {
+        app.innerHTML =
+          '<div class="message' +
+          (isError ? " error" : "") +
+          '">' +
+          escapeHtml(text) +
+          "</div>";
+      }
+
+      function renderDemos(demos) {
+        if (!Array.isArray(demos) || demos.length === 0) {
+          showMessage("No demos found.", false);
+          return;
+        }
+
+        const grid = document.createElement("div");
+        grid.className = "grid";
+
+        demos.forEach(function (demo) {
+          if (!demo || !demo.path) return;
+
+          const a = document.createElement("a");
+          a.className = "card";
+          a.href = demo.path;
+
+          const title = demo.title || demo.path;
+          const description = demo.description || "";
+
+          a.innerHTML =
+            "<h2>" +
+            escapeHtml(title) +
+            "</h2>" +
+            "<p>" +
+            escapeHtml(description) +
+            "</p>" +
+            '<span class="open">Open demo →</span>';
+
+          grid.appendChild(a);
+        });
+
+        app.innerHTML = "";
+        app.appendChild(grid);
+      }
+
+      fetch("./demos.json", { cache: "no-cache" })
+        .then(function (res) {
+          if (!res.ok) {
+            throw new Error("HTTP " + res.status);
+          }
+          return res.json();
+        })
+        .then(function (data) {
+          renderDemos(data);
+        })
+        .catch(function (err) {
+          console.error(err);
+          showMessage(
+            "Failed to load demos.json (" + err.message + ")",
+            true
+          );
+        });
+    })();
+  </script>
+</body>
+</html>
