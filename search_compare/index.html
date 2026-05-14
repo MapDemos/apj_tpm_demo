@@ -344,7 +344,7 @@ let GOOGLE_API_KEY = '';
 let MAPBOX_TOKEN   = '';
 const LS_GKEY      = 'apc_google_api_key';
 const LS_MBTOKEN   = 'apc_mapbox_token';
-const MAPBOX_STYLE = 'mapbox://styles/10da032y/cmp3njajn000l01shg4523cre';
+const MAPBOX_STYLE = 'mapbox://styles/10da032y/cmp29b79d001601so7q6d07ls';
 
 // ============================================================
 // SETUP MODAL
@@ -1214,6 +1214,14 @@ function setLocationPin(lat, lng) {
 // ============================================================
 // POI DENSITY
 // ============================================================
+function getPoiLayerIds() {
+  if (!mapboxMap || !mapboxMap.isStyleLoaded()) return [];
+  // styleの全レイヤーから "poi" を含むsymbolレイヤーを抽出
+  return mapboxMap.getStyle().layers
+    .filter(l => l.type === 'symbol' && /poi/i.test(l.id))
+    .map(l => l.id);
+}
+
 function applyPoiDensity(density) {
   if (!mapboxMap) return;
   if (!mapboxMap.isStyleLoaded()) {
@@ -1221,27 +1229,48 @@ function applyPoiDensity(density) {
     return;
   }
 
+  const poiLayers = getPoiLayerIds();
+  if (poiLayers.length === 0) {
+    console.warn('POI layer not found in current style');
+    return;
+  }
+
   const filterrankBase = [4, 6, 8, 10][density - 1];
+  const allowOverlap   = density >= 3;
 
-  mapboxMap.setFilter('poi-label', [
-    'all',
-    [
-      '<=',
-      ['get', 'filterrank'],
-      ['+', ['step', ['zoom'], 0, 16, 1, 17, 2], filterrankBase],
-    ],
-    [
-      'step', ['pitch'], true,
-      50, ['<', ['distance-from-center'], 2],
-      60, ['<', ['distance-from-center'], 2.5],
-      70, ['<', ['distance-from-center'], 3],
-    ],
-  ]);
+  poiLayers.forEach((layerId) => {
+    try {
+      // filterrank プロパティを持つレイヤーのみフィルタ適用
+      const layer = mapboxMap.getLayer(layerId);
+      if (!layer) return;
 
-  const allowOverlap = density >= 3;
-  mapboxMap.setLayoutProperty('poi-label', 'text-allow-overlap', allowOverlap);
-  mapboxMap.setLayoutProperty('poi-label', 'icon-allow-overlap', allowOverlap);
-  mapboxMap.setLayoutProperty('poi-label', 'text-ignore-placement', allowOverlap);
+      // filter は filterrank が存在する場合のみ
+      try {
+        mapboxMap.setFilter(layerId, [
+          'all',
+          [
+            '<=',
+            ['get', 'filterrank'],
+            ['+', ['step', ['zoom'], 0, 16, 1, 17, 2], filterrankBase],
+          ],
+          [
+            'step', ['pitch'], true,
+            50, ['<', ['distance-from-center'], 2],
+            60, ['<', ['distance-from-center'], 2.5],
+            70, ['<', ['distance-from-center'], 3],
+          ],
+        ]);
+      } catch (e) {
+        // filterrank が無いレイヤーは無視
+      }
+
+      mapboxMap.setLayoutProperty(layerId, 'text-allow-overlap',    allowOverlap);
+      mapboxMap.setLayoutProperty(layerId, 'icon-allow-overlap',    allowOverlap);
+      mapboxMap.setLayoutProperty(layerId, 'text-ignore-placement', allowOverlap);
+    } catch (e) {
+      console.warn(`Failed to apply POI density to layer '${layerId}':`, e);
+    }
+  });
 }
 	
 // ============================================================
