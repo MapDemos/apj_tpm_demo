@@ -1214,62 +1214,42 @@ function setLocationPin(lat, lng) {
 // ============================================================
 // POI DENSITY
 // ============================================================
-function getPoiLayerIds() {
-  if (!mapboxMap || !mapboxMap.isStyleLoaded()) return [];
-  // styleの全レイヤーから "poi" を含むsymbolレイヤーを抽出
-  return mapboxMap.getStyle().layers
-    .filter(l => l.type === 'symbol' && /poi/i.test(l.id))
-    .map(l => l.id);
-}
-
 function applyPoiDensity(density) {
   if (!mapboxMap) return;
   if (!mapboxMap.isStyleLoaded()) {
-    mapboxMap.once('load', () => applyPoiDensity(density));
+    mapboxMap.once('idle', () => applyPoiDensity(density));
     return;
   }
 
-  const poiLayers = getPoiLayerIds();
+  // style内のPOI関連 symbolレイヤーを動的取得
+  const poiLayers = mapboxMap.getStyle().layers
+    .filter(l => l.type === 'symbol' && /poi/i.test(l.id))
+    .map(l => l.id);
+
   if (poiLayers.length === 0) {
-    console.warn('POI layer not found in current style');
+    console.warn('[POI density] No POI layers found in current style');
     return;
   }
+  console.log('[POI density] target layers:', poiLayers);
 
   const filterrankBase = [4, 6, 8, 10][density - 1];
   const allowOverlap   = density >= 3;
 
   poiLayers.forEach((layerId) => {
+    // filter: filterrank を持たないレイヤーはエラーになるので try
     try {
-      // filterrank プロパティを持つレイヤーのみフィルタ適用
-      const layer = mapboxMap.getLayer(layerId);
-      if (!layer) return;
+      mapboxMap.setFilter(layerId, [
+        'all',
+        ['<=',
+          ['coalesce', ['get', 'filterrank'], 0],
+          ['+', ['step', ['zoom'], 0, 16, 1, 17, 2], filterrankBase],
+        ],
+      ]);
+    } catch (e) { /* ignore */ }
 
-      // filter は filterrank が存在する場合のみ
-      try {
-        mapboxMap.setFilter(layerId, [
-          'all',
-          [
-            '<=',
-            ['get', 'filterrank'],
-            ['+', ['step', ['zoom'], 0, 16, 1, 17, 2], filterrankBase],
-          ],
-          [
-            'step', ['pitch'], true,
-            50, ['<', ['distance-from-center'], 2],
-            60, ['<', ['distance-from-center'], 2.5],
-            70, ['<', ['distance-from-center'], 3],
-          ],
-        ]);
-      } catch (e) {
-        // filterrank が無いレイヤーは無視
-      }
-
-      mapboxMap.setLayoutProperty(layerId, 'text-allow-overlap',    allowOverlap);
-      mapboxMap.setLayoutProperty(layerId, 'icon-allow-overlap',    allowOverlap);
-      mapboxMap.setLayoutProperty(layerId, 'text-ignore-placement', allowOverlap);
-    } catch (e) {
-      console.warn(`Failed to apply POI density to layer '${layerId}':`, e);
-    }
+    try { mapboxMap.setLayoutProperty(layerId, 'text-allow-overlap',    allowOverlap); } catch (e) {}
+    try { mapboxMap.setLayoutProperty(layerId, 'icon-allow-overlap',    allowOverlap); } catch (e) {}
+    try { mapboxMap.setLayoutProperty(layerId, 'text-ignore-placement', allowOverlap); } catch (e) {}
   });
 }
 	
