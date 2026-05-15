@@ -23,7 +23,7 @@
   #main-screen { display: none; height: 100vh; position: relative; }
   #map { width: 100%; height: 100%; }
 
-  #search-box { position: absolute; top: 10px; left: 10px; z-index: 10; width: 320px; max-width: calc(100vw - 80px); }
+  #search-box { position: absolute; top: 10px; left: 10px; z-index: 10; width: 320px; max-width: calc(100vw - 80px); transition: left 0.25s ease; }
   #search-input { width: 100%; padding: 10px 36px 10px 12px; border: none; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.2); font-size: 14px; outline: none; }
   #search-clear { position: absolute; right: 10px; top: 10px; background: none; border: none; cursor: pointer; color: #6b7280; font-size: 18px; line-height: 1; padding: 0; display: none; }
   #search-clear.show { display: block; }
@@ -36,19 +36,19 @@
   .search-item-desc { font-size: 12px; color: #6b7280; margin-top: 2px; }
   .search-empty { padding: 14px; text-align: center; color: #6b7280; font-size: 13px; }
 
-  #filter-btn { position: absolute; top: 130px; right: 10px; z-index: 10; width: 29px; height: 29px; border-radius: 4px; background: #fff; border: none; cursor: pointer; box-shadow: 0 0 0 2px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center; }
-  #filter-btn:hover { background: #f3f4f6; }
-  #filter-btn svg { width: 18px; height: 18px; }
-  #filter-btn .filter-badge { position: absolute; top: -4px; right: -4px; background: #ef4444; color: #fff; border-radius: 9px; min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; display: none; align-items: center; justify-content: center; line-height: 1; }
-  #filter-btn.has-filter .filter-badge { display: flex; }
+  .map-btn { position: absolute; right: 10px; z-index: 10; width: 29px; height: 29px; border-radius: 4px; background: #fff; border: none; cursor: pointer; box-shadow: 0 0 0 2px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center; }
+  .map-btn:hover { background: #f3f4f6; }
+  .map-btn svg { width: 18px; height: 18px; }
+  #filter-btn { top: 130px; }
+  #favorites-btn { top: 170px; }
+  .map-btn .filter-badge { position: absolute; top: -4px; right: -4px; background: #ef4444; color: #fff; border-radius: 9px; min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; display: none; align-items: center; justify-content: center; line-height: 1; }
+  .map-btn.has-filter .filter-badge { display: flex; }
 
-  /* Messages (bottom-left) */
-  #messages { position: absolute; bottom: 16px; left: 16px; z-index: 10; display: flex; flex-direction: column-reverse; gap: 8px; pointer-events: none; max-width: calc(100vw - 32px); }
+  #messages { position: absolute; bottom: 16px; left: 16px; z-index: 10; display: flex; flex-direction: column-reverse; gap: 8px; pointer-events: none; max-width: calc(100vw - 32px); transition: left 0.25s ease; }
   .msg { background: rgba(17, 24, 39, 0.88); color: #fff; padding: 10px 14px; border-radius: 6px; font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); animation: slideUp 0.18s ease; display: flex; align-items: center; gap: 8px; pointer-events: auto; }
   .msg-info    { background: rgba(37, 99, 235, 0.92); }
   .msg-warning { background: rgba(245, 158, 11, 0.94); }
   .msg-success { background: rgba(16, 185, 129, 0.94); }
-  .msg svg { width: 16px; height: 16px; flex-shrink: 0; }
   @keyframes slideUp { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
   .mapboxgl-popup-content { font-size: 12px; padding: 10px 12px; max-width: 280px; }
@@ -56,26 +56,77 @@
   .popup-key { color: #6b7280; font-weight: 600; }
   .popup-cat { display: inline-block; background: #eef2ff; color: #4338ca; padding: 1px 6px; border-radius: 4px; margin: 1px 2px 1px 0; font-size: 11px; }
 
+  /* ===== Details Side Panel ===== */
+  #details-panel {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 400px; max-width: 100%;
+    background: #fff;
+    box-shadow: 2px 0 12px rgba(0,0,0,0.18);
+    z-index: 50;
+    display: flex; flex-direction: column;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+  }
+  #details-panel.open { transform: translateX(0); }
+  #main-screen.panel-open #search-box { left: 410px; }
+  #main-screen.panel-open #messages { left: 410px; }
+  @media (max-width: 768px) {
+    #details-panel { width: 100%; }
+    #main-screen.panel-open #search-box { display: none; }
+  }
+  .panel-top {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px;
+    background: #f3f4f6; border-bottom: 1px solid #e5e7eb;
+    font-size: 11px;
+  }
+  .panel-id-row {
+    flex: 1; min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #6b7280;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .panel-id-value {
+    color: #111827; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1;
+  }
+  .panel-copy-id { background: none; border: none; cursor: pointer; padding: 2px 4px; font-size: 12px; color: #6b7280; }
+  .panel-copy-id:hover { color: #2563eb; }
+  #panel-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #6b7280; padding: 0 4px; line-height: 1; }
+  #panel-close:hover { color: #111827; }
+  .panel-title-row { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; }
+  .panel-title-row h2 { margin: 0; font-size: 18px; flex: 1; word-break: break-word; }
+  #bookmark-btn { background: none; border: none; cursor: pointer; padding: 4px 6px; border-radius: 6px; display: flex; align-items: center; }
+  #bookmark-btn:hover { background: #f3f4f6; }
+  #bookmark-btn svg { width: 22px; height: 22px; fill: none; stroke: #6b7280; stroke-width: 2; }
+  #bookmark-btn.active svg { fill: #fbbf24; stroke: #f59e0b; }
+  .panel-tabs { display: flex; border-bottom: 1px solid #e5e7eb; padding: 0 20px; }
+  .panel-tab { padding: 10px 14px; border: none; background: none; cursor: pointer; font-size: 13px; color: #6b7280; border-bottom: 2px solid transparent; font-weight: 500; }
+  .panel-tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+  .panel-body { flex: 1; padding: 20px; overflow-y: auto; }
+  .panel-body .tab-pane { display: none; }
+  .panel-body .tab-pane.active { display: block; }
+
+  /* ===== Modal ===== */
   .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
   .modal-overlay.active { display: flex; }
+  #filter-history-overlay { z-index: 1100; }
   .modal { background: #fff; border-radius: 12px; width: 560px; max-width: 92%; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
   .modal-lg { width: 720px; max-height: 90vh; }
   .modal-header { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .modal-header h2 { margin: 0; font-size: 18px; flex: 1; }
-  .modal-header-actions { display: flex; gap: 4px; align-items: center; }
   .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280; line-height: 1; padding: 0 4px; }
   .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+  .modal-body.no-padding { padding: 0; }
   .modal-footer { padding: 12px 20px; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 8px; }
   .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid transparent; font-weight: 500; }
   .btn-primary { background: #2563eb; color: #fff; }
   .btn-primary:hover { background: #1d4ed8; }
   .btn-secondary { background: #fff; color: #374151; border-color: #d1d5db; }
   .btn-secondary:hover { background: #f9fafb; }
-
-  #bookmark-btn { background: none; border: none; cursor: pointer; padding: 4px 6px; border-radius: 6px; display: flex; align-items: center; }
-  #bookmark-btn:hover { background: #f3f4f6; }
-  #bookmark-btn svg { width: 22px; height: 22px; fill: none; stroke: #6b7280; stroke-width: 2; }
-  #bookmark-btn.active svg { fill: #fbbf24; stroke: #f59e0b; }
+  .btn-danger { background: #fff; color: #b91c1c; border-color: #fca5a5; }
+  .btn-danger:hover { background: #fef2f2; }
 
   .modal-tabs { display: flex; border-bottom: 1px solid #e5e7eb; padding: 0 20px; }
   .modal-tabs .tab { padding: 12px 16px; border: none; background: none; cursor: pointer; font-size: 14px; color: #6b7280; border-bottom: 2px solid transparent; font-weight: 500; }
@@ -83,25 +134,21 @@
   .tab-pane { display: none; }
   .tab-pane.active { display: block; }
 
-  .modal-body .field { margin-bottom: 12px; }
-  .modal-body .field-label { font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
-  .modal-body .field-value { font-size: 14px; color: #111827; word-break: break-word; }
-  .modal-body a { color: #2563eb; text-decoration: none; }
-  .modal-body a:hover { text-decoration: underline; }
+  /* Details body */
+  .panel-body .field, .modal-body .field { margin-bottom: 12px; }
+  .panel-body .field-label, .modal-body .field-label { font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
+  .panel-body .field-value, .modal-body .field-value { font-size: 14px; color: #111827; word-break: break-word; }
+  .panel-body a, .modal-body a { color: #2563eb; text-decoration: none; }
+  .panel-body a:hover, .modal-body a:hover { text-decoration: underline; }
   .photos { display: flex; flex-direction: column; gap: 8px; }
   .photos img { width: 100%; height: auto; border-radius: 8px; display: block; }
   .loading { text-align: center; padding: 40px; color: #6b7280; }
   .badge { display: inline-block; background: #eef2ff; color: #4338ca; padding: 2px 8px; border-radius: 4px; margin: 2px 4px 2px 0; font-size: 12px; }
-  .json-view { background: #1f2937; color: #e5e7eb; padding: 12px; border-radius: 6px; font-size: 11px; line-height: 1.5; overflow: auto; max-height: 60vh; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; margin: 0; }
+  .json-view { background: #1f2937; color: #e5e7eb; padding: 12px; border-radius: 6px; font-size: 11px; line-height: 1.5; overflow: auto; max-height: 70vh; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; margin: 0; }
 
-  .bookmark-section { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
-  .bookmark-section label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; font-weight: 600; color: #92400e; flex: 1; }
-  .bookmark-section input[type="checkbox"] { cursor: pointer; }
-  .bookmark-section .count-badge { background: #f59e0b; color: #fff; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-
-  .filter-toolbar { display: flex; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; align-items: center; }
-  .filter-search { flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; }
-  .category-tree.dimmed { opacity: 0.45; pointer-events: none; }
+  /* Filter tree */
+  .filter-toolbar { display: flex; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; align-items: center; flex-wrap: wrap; }
+  .filter-search { flex: 1; min-width: 180px; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; }
   .category-tree .group { margin-bottom: 8px; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
   .category-tree .group-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #f9fafb; cursor: pointer; user-select: none; }
   .category-tree .group-header:hover { background: #f3f4f6; }
@@ -116,6 +163,28 @@
   .category-tree .child:hover { background: #f3f4f6; }
   .category-tree input[type="checkbox"] { cursor: pointer; }
   .empty-msg { text-align: center; color: #6b7280; padding: 20px; font-size: 13px; }
+
+  /* Favorites/History list */
+  .list-container { max-height: 60vh; overflow-y: auto; }
+  .list-item { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #f3f4f6; cursor: pointer; }
+  .list-item:hover { background: #f9fafb; }
+  .list-item:last-child { border-bottom: none; }
+  .list-item-main { flex: 1; min-width: 0; }
+  .list-item-name { font-weight: 600; font-size: 14px; color: #111827; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .list-item-meta { font-size: 11px; color: #6b7280; font-family: ui-monospace, monospace; }
+  .list-item-cats { margin-top: 6px; }
+  .list-item-cats .badge { font-size: 10px; padding: 1px 6px; }
+  .list-item-remove { background: none; border: none; cursor: pointer; padding: 4px 8px; color: #9ca3af; font-size: 16px; flex-shrink: 0; }
+  .list-item-remove:hover { color: #ef4444; }
+  .list-item-icon { font-size: 18px; line-height: 1; flex-shrink: 0; margin-top: 2px; }
+
+  /* Filter history list */
+  .fhist-item { padding: 12px 16px; border-bottom: 1px solid #f3f4f6; cursor: pointer; }
+  .fhist-item:hover { background: #f9fafb; }
+  .fhist-item-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 6px; }
+  .fhist-item-count { font-weight: 600; color: #111827; }
+  .fhist-item-date { color: #6b7280; font-size: 11px; }
+  .fhist-item-preview .badge { font-size: 10px; padding: 1px 6px; }
 </style>
 </head>
 <body>
@@ -133,42 +202,56 @@
 
 <div id="main-screen">
   <div id="map"></div>
+
   <div id="search-box">
     <input id="search-input" type="text" placeholder="Search places..." autocomplete="off" />
     <button id="search-clear" title="Clear">&times;</button>
     <div id="search-results"></div>
   </div>
-  <button id="filter-btn" title="Category Filter">
+
+  <button id="filter-btn" class="map-btn" title="Category Filter">
     <svg viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
     </svg>
     <span class="filter-badge" id="filter-badge">!</span>
   </button>
-  <div id="messages"></div>
-</div>
 
-<div id="details-overlay" class="modal-overlay">
-  <div class="modal">
-    <div class="modal-header">
-      <h2 id="details-title">POI Details</h2>
-      <div class="modal-header-actions">
-        <button id="bookmark-btn" title="Bookmark">
-          <svg viewBox="0 0 24 24"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
-        </button>
-        <button class="modal-close" data-close="details">&times;</button>
+  <button id="favorites-btn" class="map-btn" title="Bookmarks & History">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"></polygon>
+    </svg>
+  </button>
+
+  <div id="messages"></div>
+
+  <!-- ====== Side Panel: Details ====== -->
+  <aside id="details-panel">
+    <div class="panel-top">
+      <div class="panel-id-row">
+        <span>mapbox_id:</span>
+        <span id="panel-id-value" class="panel-id-value" title="">-</span>
+        <button class="panel-copy-id" id="panel-copy-id" title="Copy">⎘</button>
       </div>
+      <button id="panel-close" title="Close">&times;</button>
     </div>
-    <div class="modal-tabs">
-      <button class="tab active" data-detail-tab="info">Info</button>
-      <button class="tab" data-detail-tab="json">Raw JSON</button>
+    <div class="panel-title-row">
+      <h2 id="details-title">POI Details</h2>
+      <button id="bookmark-btn" title="Bookmark">
+        <svg viewBox="0 0 24 24"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
+      </button>
     </div>
-    <div class="modal-body">
+    <div class="panel-tabs">
+      <button class="panel-tab active" data-detail-tab="info">Info</button>
+      <button class="panel-tab" data-detail-tab="json">Raw JSON</button>
+    </div>
+    <div class="panel-body">
       <div id="detail-tab-info" class="tab-pane active"><div class="loading">Loading...</div></div>
       <div id="detail-tab-json" class="tab-pane"><pre class="json-view">Loading...</pre></div>
     </div>
-  </div>
+  </aside>
 </div>
 
+<!-- ====== Filter Modal ====== -->
 <div id="filter-overlay" class="modal-overlay">
   <div class="modal modal-lg">
     <div class="modal-header">
@@ -176,15 +259,9 @@
       <button class="modal-close" data-close="filter">&times;</button>
     </div>
     <div class="modal-body">
-      <div class="bookmark-section">
-        <label>
-          <input type="checkbox" id="bookmark-toggle"/>
-          <span>★ Show only bookmarked POIs</span>
-        </label>
-        <span class="count-badge" id="bookmark-count">0</span>
-      </div>
       <div class="filter-toolbar">
         <input id="filter-search" class="filter-search" placeholder="Search categories..." />
+        <button class="btn btn-secondary" id="open-filter-history">⟲ Past filters</button>
         <button class="btn btn-secondary" id="check-all">Select All</button>
         <button class="btn btn-secondary" id="uncheck-all">Deselect All</button>
       </div>
@@ -197,6 +274,50 @@
   </div>
 </div>
 
+<!-- ====== Past Filter Modal (nested) ====== -->
+<div id="filter-history-overlay" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Past Filters</h2>
+      <button class="modal-close" data-close="filter-history">&times;</button>
+    </div>
+    <div class="modal-body no-padding">
+      <div id="filter-history-list" class="list-container"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="clear-filter-history">Clear All</button>
+      <button class="btn btn-secondary" data-close="filter-history">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== Favorites/History Modal ====== -->
+<div id="favorites-overlay" class="modal-overlay">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h2>Bookmarks &amp; History</h2>
+      <button class="modal-close" data-close="favorites">&times;</button>
+    </div>
+    <div class="modal-tabs">
+      <button class="tab active" data-fav-tab="bookmarks">★ Bookmarks <span id="bm-count">(0)</span></button>
+      <button class="tab" data-fav-tab="poiHistory">⏱ History <span id="hist-count">(0)</span></button>
+    </div>
+    <div class="modal-body no-padding">
+      <div id="fav-tab-bookmarks" class="tab-pane active">
+        <div id="bookmarks-list" class="list-container"></div>
+      </div>
+      <div id="fav-tab-history" class="tab-pane">
+        <div id="history-list" class="list-container"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="clear-current-list">Clear All</button>
+      <button class="btn btn-secondary" id="export-current-list">⬇ Export</button>
+      <button class="btn btn-secondary" data-close="favorites">Close</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ============================================================
  *  Constants
@@ -204,13 +325,17 @@
 const TILESET_ID    = "10da032y.ta_headmap_0511";
 const SOURCE_LAYER  = "photos";
 const STYLE_URL     = "mapbox://styles/mapbox/standard";
-const TOKEN_KEY     = "mapbox_demo_pk_token";
-const VISITED_KEY   = "mapbox_demo_visited_pois";
-const BOOKMARK_KEY  = "mapbox_demo_bookmarks";
+const TOKEN_KEY      = "mapbox_demo_pk_token";
+const VISITED_KEY    = "mapbox_demo_visited_pois";
+const HISTORY_KEY    = "mapbox_demo_history";
+const BOOKMARK_KEY   = "mapbox_demo_bookmarks";
+const FILTER_HIST_KEY= "mapbox_demo_filter_history";
 const DETAILS_API   = "https://api.mapbox.com/search/details/v1/retrieve/";
 const SEARCH_SUGGEST_API  = "https://api.mapbox.com/search/searchbox/v1/suggest";
 const SEARCH_RETRIEVE_API = "https://api.mapbox.com/search/searchbox/v1/retrieve/";
 const HEATMAP_MIN_ZOOM = 6;
+const LABEL_MIN_ZOOM   = 18;
+const FILTER_HIST_MAX  = 20;
 
 const TILESETS = [
   { key:"services_business", name:"Services & Business", color:"#2563eb",
@@ -221,7 +346,7 @@ const TILESETS = [
     categories:["shopping","grocery","clothing_store","wholesale_store","supermarket","beauty_store","pharmacy","furniture_store","electronics_shop","car_dealership","clothing","shopping_mall","hardware_store","phone_store","jewelry_store","convenience_store","market","pet_store","gift_shop","shoe_store","butcher_shop","florist","womens_clothing_store","paper_goods_store","liquor_store","book_store","tobacco_shop","arts_and_craft_store","bicycle_shop","sports_shop","health_food_store","fashion_accessory_shop","boutique","department_store","motorcycle_dealer","fabric_store","news_kiosk","video_game_store","baby_goods_shop","toy_store","fishing_store","music_shop","antique_shop","mattress_store","party_store","garden_store","discount_store","lighting_store","thrift_shop","pawnshop","watch_store","vape_shop","bridal_shop","video_store","kitchen_store","leather_goods","outlet_store","sewing_shop","cannabis_dispensary","hobby_shop","frame_store","camera_shop","gun_store","cheese_shop","fireworks_store","luggage_store","hunting_store","fishmonger","motorsports_store","surfboard_store","duty_free_shop","chocolate_shop","outdoors_store","ski_shop","pop_up_shop","variety_store"] },
   { key:"education_health", name:"Education & Health", color:"#10b981",
     categories:["health_services","education","school","medical_practice","doctors_office","medical_clinic","dentist","hospital","hospital_unit","alternative_healthcare","elementary_school","psychotherapist","physiotherapist","kindergarten","psychological_services","care_services","chiropractor","college","medical_supply_store","childcare","veterinarian","university","medical_laboratory","optician","assisted_living_facility","driving_school","high_school","counselling","library","tutor","language_school","music_school","university_building","laboratory","rehabilitation_center","trade_school","herbalist","community_college","emergency_room","dialysis_center","optometrist","university_laboratory","university_book_store"] },
-    { key:"transportation_leisure", name:"Transportation & Leisure", color:"#f59e0b",
+  { key:"transportation_leisure", name:"Transportation & Leisure", color:"#f59e0b",
     categories:["transportation","outdoors","lodging","bus_stop","park","tourist_attraction","sports","hotel","entertainment","fitness_center","historic_site","gas_station","monument","parking_lot","river","lake","playground","bed_and_breakfast","sports_club","field","cemetery","garden","charging_station","internet_cafe","mountain","social_club","public_transportation_station","event_space","art","taxi","community_center","museum","hostel","forest","dance_studio","island","bridge","art_gallery","soccer_field","yoga_studio","swimming_pool","bus_station","theatre","theme_park","dormitory","campground","nature_reserve","public_artwork","outdoor_sculpture","music_venue","stadium","tours","cinema","tourist_information","tennis_courts","motel","canal","railway_station","rest_area","golf_course","pilates_studio","vacation_rental","boat_rental","basketball_court","martial_arts_studio","recreation_center","arts_center","airport","fair_grounds","beach","animal_shelter","concert_hall","gymnastics","stable","casino","karaoke_bar","viewpoint","sports_center","marina","billiards","pier","baseball_field","resort","picnic_shelter","dog_park","sauna","waterfall","racetrack","zoo","dam","boxing_gym","climbing","climbing_gym","bowling_alley","fishing","aquarium","light_rail_station","cricket_club","summer_camp","ice_rink","ski_area","exhibit","boat_or_ferry","fountain","hunting_area","plaza","disc_golf_course","miniature_golf","observatory","cable_car","cave","train","rugby_stadium","trailhead","airport_terminal","street","intersection","windmill","bike_rental","arcade","water_park","service_area","surf_spot","track","soccer_stadium","skatepark","cruise","theme_park_attraction","baseball_stadium","mountain_hut","football_stadium","lighthouse","airport_gate","go_kart_racing","hockey_stadium","basketball_stadium","laser_tag","tunnel","driving_range","well","boat_launch","racecourse","scuba_diving_shop","ski_trail","planetarium","tennis_stadium","rafting_spot","tree","zoo_exhibit","chairlift","indoor_cycling","baggage_claim","airport_ticket_counter","bus_line","graffiti","railway_platform","road"] },
   { key:"others", name:"Others", color:"#6b7280",
     categories:["apartment_or_condo","place_of_worship","temple","church","farm","home","mosque","buddhist_temple","tanning_salon","carpet_store","synagogue","town","skydiving_drop_zone","village","neighbourhood","city","country","county","state"] }
@@ -233,15 +358,19 @@ const ALL_CATEGORIES = TILESETS.flatMap(t => t.categories);
  *  State
  * ============================================================ */
 let map = null;
-// ★ デフォルト: フィルタオフ = 全選択 = レイヤーに何もフィルタかけない
 let selectedSet = new Set(ALL_CATEGORIES);
-let showOnlyBookmarks = false;
 
 let visitedPois = new Set(JSON.parse(localStorage.getItem(VISITED_KEY) || "[]"));
+let poiHistory     = new Map(Object.entries(JSON.parse(localStorage.getItem(HISTORY_KEY)  || "{}")));
 let bookmarks   = new Map(Object.entries(JSON.parse(localStorage.getItem(BOOKMARK_KEY) || "{}")));
+let filterHistory = JSON.parse(localStorage.getItem(FILTER_HIST_KEY) || "[]");
 
 let currentDetailMapboxId = null;
-let currentDetailProps = null;
+let currentDetailProps    = null;
+let currentDetailLat      = null;
+let currentDetailLon      = null;
+
+let currentFavTab = "bookmarks";
 
 let searchSessionToken = generateUUID();
 let searchMarker = null;
@@ -278,11 +407,16 @@ function extractPhotos(props, meta) {
 function truncate(s, n) { if (!s) return "-"; s = String(s); return s.length > n ? s.slice(0, n) + "..." : s; }
 function escapeHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function escapeAttr(s) { return escapeHtml(s); }
+function fmtTime(ts) {
+  if (!ts) return "-";
+  const d = new Date(ts);
+  return d.toLocaleString();
+}
 
 /* ============================================================
- *  Messages (bottom-left)
+ *  Messages
  * ============================================================ */
-const persistentMessages = {}; // id -> element
+const persistentMessages = {};
 
 function showPersistentMessage(id, text, type = "info") {
   const container = document.getElementById("messages");
@@ -296,14 +430,9 @@ function showPersistentMessage(id, text, type = "info") {
   container.appendChild(el);
   persistentMessages[id] = el;
 }
-
 function hidePersistentMessage(id) {
-  if (persistentMessages[id]) {
-    persistentMessages[id].remove();
-    delete persistentMessages[id];
-  }
+  if (persistentMessages[id]) { persistentMessages[id].remove(); delete persistentMessages[id]; }
 }
-
 function showTransientMessage(text, type = "success", duration = 3000) {
   const container = document.getElementById("messages");
   const el = document.createElement("div");
@@ -311,47 +440,50 @@ function showTransientMessage(text, type = "success", duration = 3000) {
   el.innerHTML = `<span class="msg-text">${escapeHtml(text)}</span>`;
   container.appendChild(el);
   setTimeout(() => {
-    el.style.transition = "opacity 0.3s";
-    el.style.opacity = "0";
+    el.style.transition = "opacity 0.3s"; el.style.opacity = "0";
     setTimeout(() => el.remove(), 300);
   }, duration);
 }
-
 function updateZoomMessage() {
   if (!map) return;
-  if (map.getZoom() < HEATMAP_MIN_ZOOM) {
-    showPersistentMessage("zoom-hint", "Please zoom in to see heatmap", "info");
-  } else {
-    hidePersistentMessage("zoom-hint");
-  }
+  if (map.getZoom() < HEATMAP_MIN_ZOOM) showPersistentMessage("zoom-hint", "Please zoom in to see heatmap", "info");
+  else hidePersistentMessage("zoom-hint");
 }
-
 function updateFilterMessage() {
-  // showOnlyBookmarks のときはカテゴリの選択状況は意味なし → 無視
-  const allDeselected = !showOnlyBookmarks && [...selectedSet].length === 0;
-  if (allDeselected) {
-    showPersistentMessage("filter-empty", "Filter is all deselected", "warning");
-  } else {
-    hidePersistentMessage("filter-empty");
-  }
-
-  // showOnlyBookmarks で bookmark が空のとき
-  if (showOnlyBookmarks && bookmarks.size === 0) {
-    showPersistentMessage("bookmark-empty", "No bookmarks yet. Click ★ in a POI's details to add one.", "warning");
-  } else {
-    hidePersistentMessage("bookmark-empty");
-  }
+  if ([...selectedSet].length === 0) showPersistentMessage("filter-empty", "Filter is all deselected", "warning");
+  else hidePersistentMessage("filter-empty");
 }
 
 /* ============================================================
- *  Visited POIs
+ *  Visited / History / Bookmarks storage
  * ============================================================ */
+function saveVisited() {
+  try { localStorage.setItem(VISITED_KEY, JSON.stringify([...visitedPois])); } catch(e){}
+}
+function saveHistory() {
+  try {
+    const obj = {};
+    poiHistory.forEach((v, k) => obj[k] = v);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(obj));
+  } catch(e){}
+}
+function saveBookmarks() {
+  try {
+    const obj = {};
+    bookmarks.forEach((v, k) => obj[k] = v);
+    localStorage.setItem(BOOKMARK_KEY, JSON.stringify(obj));
+  } catch(e){}
+  refreshCounts();
+}
+function saveFilterHistoryStorage() {
+  try { localStorage.setItem(FILTER_HIST_KEY, JSON.stringify(filterHistory)); } catch(e){}
+}
+
 function markVisited(mapboxId) {
   if (!mapboxId) return;
   if (!visitedPois.has(mapboxId)) {
     visitedPois.add(mapboxId);
-    try { localStorage.setItem(VISITED_KEY, JSON.stringify([...visitedPois])); }
-    catch (e) { console.warn("visited save failed:", e); }
+    saveVisited();
   }
   map.setFeatureState({ source: "poi-src", sourceLayer: SOURCE_LAYER, id: mapboxId }, { visited: true });
 }
@@ -361,37 +493,52 @@ function restoreAllVisited() {
   });
 }
 
-/* ============================================================
- *  Bookmarks
- * ============================================================ */
-function saveBookmarks() {
-  try {
-    const obj = {};
-    bookmarks.forEach((v, k) => obj[k] = v);
-    localStorage.setItem(BOOKMARK_KEY, JSON.stringify(obj));
-  } catch (e) { console.warn("bookmark save failed:", e); }
-  refreshBookmarkUI();
+function addToHistory(id, info) {
+  if (!id) return;
+  const existing = poiHistory.get(id) || {};
+  poiHistory.set(id, {
+    name: info.name || existing.name || "",
+    lat:  info.lat  ?? existing.lat  ?? null,
+    lon:  info.lon  ?? existing.lon  ?? null,
+    categories: info.categories || existing.categories || [],
+    viewedAt: Date.now()
+  });
+  saveHistory();
+}
+function updateHistoryName(id, name) {
+  if (!poiHistory.has(id) || !name) return;
+  const cur = poiHistory.get(id);
+  if (cur.name !== name) {
+    cur.name = name;
+    poiHistory.set(id, cur);
+    saveHistory();
+  }
 }
 
-function toggleBookmark(mapboxId, props) {
-  if (!mapboxId) return;
-  if (bookmarks.has(mapboxId)) {
-    bookmarks.delete(mapboxId);
+function toggleBookmark(id) {
+  if (!id) return;
+  if (bookmarks.has(id)) {
+    bookmarks.delete(id);
+    showTransientMessage("Removed from bookmarks", "info", 2500);
   } else {
-    bookmarks.set(mapboxId, {
-      name: (props && props.name) || "",
+    const histEntry = poiHistory.get(id) || {};
+    bookmarks.set(id, {
+      name: histEntry.name || "",
+      lat:  currentDetailLat ?? histEntry.lat ?? null,
+      lon:  currentDetailLon ?? histEntry.lon ?? null,
+      categories: histEntry.categories || [],
       addedAt: Date.now()
     });
-    showTransientMessage("Added to the bookmark", "success", 3000);
+    showTransientMessage("Added to bookmarks", "success", 2500);
   }
   saveBookmarks();
-  updateBookmarkButton(mapboxId);
-
-  // bookmark フィルタが ON ならレイヤーも更新
-  if (showOnlyBookmarks) applyFilter();
-  updateFilterMessage();
+  updateBookmarkButton(id);
 }
-
+function updateBookmarkName(id, name) {
+  if (!bookmarks.has(id) || !name) return;
+  const cur = bookmarks.get(id);
+  if (cur.name !== name) { cur.name = name; bookmarks.set(id, cur); saveBookmarks(); }
+}
 function updateBookmarkButton(mapboxId) {
   const btn = document.getElementById("bookmark-btn");
   if (!btn) return;
@@ -399,10 +546,9 @@ function updateBookmarkButton(mapboxId) {
   btn.classList.toggle("active", on);
   btn.title = on ? "Remove bookmark" : "Add bookmark";
 }
-
-function refreshBookmarkUI() {
-  const cnt = document.getElementById("bookmark-count");
-  if (cnt) cnt.textContent = String(bookmarks.size);
+function refreshCounts() {
+  const bm = document.getElementById("bm-count"); if (bm) bm.textContent = `(${bookmarks.size})`;
+  const hi = document.getElementById("hist-count"); if (hi) hi.textContent = `(${poiHistory.size})`;
 }
 
 /* ============================================================
@@ -430,19 +576,14 @@ function initMainScreen(token) {
 
   mapboxgl.accessToken = token;
   map = new mapboxgl.Map({
-    container: "map",
-    style: STYLE_URL,
-    hash: true,
-    center: [-156.772803, 71.297321],
-    zoom: 3
+    container: "map", style: STYLE_URL, hash: true,
+    center: [-156.772803, 71.297321], zoom: 3
   });
   map.addControl(new mapboxgl.NavigationControl(), "top-right");
 
   map.on("load", () => {
     map.addSource("poi-src", {
-      type: "vector",
-      url: `mapbox://${TILESET_ID}`,
-      promoteId: "mapbox_id"
+      type: "vector", url: `mapbox://${TILESET_ID}`, promoteId: "mapbox_id"
     });
 
     map.addLayer({
@@ -472,14 +613,42 @@ function initMainScreen(token) {
       }
     });
 
+    // ★ Category label layer (zoom 18+)
+    map.addLayer({
+      id: "poi-label", type: "symbol", source: "poi-src", "source-layer": SOURCE_LAYER,
+      minzoom: LABEL_MIN_ZOOM,
+      layout: {
+        "text-field": [
+          "let",
+          "raw", ["to-string", ["coalesce", ["get", "categories"], ""]],
+          ["case",
+            [">", ["length", ["var", "raw"]], 32],
+            ["concat", ["slice", ["var", "raw"], 0, 32], "..."],
+            ["var", "raw"]
+          ]
+        ],
+        "text-size": 11,
+        "text-offset": [0, 1.2],
+        "text-anchor": "top",
+        "text-allow-overlap": false,
+        "text-optional": true,
+        "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"]
+      },
+      paint: {
+        "text-color": "#111827",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.6
+      }
+    });
+
     restoreAllVisited();
-    refreshBookmarkUI();
+    refreshCounts();
     setupInteractions();
     setupFilter();
     setupSearchBox();
-    setupDetailModal();
+    setupDetailPanel();
+    setupFavorites();
 
-    // 初期メッセージ
     updateZoomMessage();
     updateFilterMessage();
     map.on("zoom", updateZoomMessage);
@@ -524,12 +693,18 @@ function setupInteractions() {
     const p = e.features[0].properties || {};
     if (!p.mapbox_id) return;
     markVisited(p.mapbox_id);
-    openDetailsModal(p.mapbox_id, p);
+    addToHistory(p.mapbox_id, {
+      lat: typeof p.lat === "number" ? p.lat : parseFloat(p.lat),
+      lon: typeof p.lon === "number" ? p.lon : parseFloat(p.lon),
+      categories: parseCategories(p.categories)
+    });
+    refreshCounts();
+    openDetailsPanel(p.mapbox_id, p);
   });
 }
 
 /* ============================================================
- *  Search Box (Mapbox Search Box API)
+ *  Search Box
  * ============================================================ */
 function setupSearchBox() {
   const input    = document.getElementById("search-input");
@@ -543,20 +718,13 @@ function setupSearchBox() {
     if (!q) { results.classList.remove("active"); results.innerHTML = ""; return; }
     searchDebounce = setTimeout(() => doSuggest(q), 250);
   });
-
-  input.addEventListener("focus", () => {
-    if (results.innerHTML.trim()) results.classList.add("active");
-  });
-
+  input.addEventListener("focus", () => { if (results.innerHTML.trim()) results.classList.add("active"); });
   document.addEventListener("mousedown", (e) => {
     if (!document.getElementById("search-box").contains(e.target)) results.classList.remove("active");
   });
-
   clearBtn.addEventListener("click", () => {
-    input.value = "";
-    clearBtn.classList.remove("show");
-    results.innerHTML = "";
-    results.classList.remove("active");
+    input.value = ""; clearBtn.classList.remove("show");
+    results.innerHTML = ""; results.classList.remove("active");
     if (searchMarker) { searchMarker.remove(); searchMarker = null; }
     input.focus();
   });
@@ -566,11 +734,9 @@ async function doSuggest(query) {
   const token = localStorage.getItem(TOKEN_KEY);
   const center = map.getCenter();
   const params = new URLSearchParams({
-    q: query,
-    session_token: searchSessionToken,
+    q: query, session_token: searchSessionToken,
     proximity: `${center.lng.toFixed(6)},${center.lat.toFixed(6)}`,
-    access_token: token,
-    limit: "8"
+    access_token: token, limit: "8"
   });
   try {
     const res = await fetch(`${SEARCH_SUGGEST_API}?${params}`);
@@ -587,8 +753,7 @@ function renderSuggestions(suggestions) {
   const results = document.getElementById("search-results");
   if (!suggestions.length) {
     results.innerHTML = `<div class="search-empty">No results</div>`;
-    results.classList.add("active");
-    return;
+    results.classList.add("active"); return;
   }
   results.innerHTML = suggestions.map(s => `
     <div class="search-item" data-id="${escapeAttr(s.mapbox_id)}">
@@ -596,7 +761,6 @@ function renderSuggestions(suggestions) {
       <div class="search-item-desc">${escapeHtml(s.place_formatted || s.full_address || s.feature_type || "")}</div>
     </div>`).join("");
   results.classList.add("active");
-
   results.querySelectorAll(".search-item").forEach(el => {
     el.addEventListener("mousedown", async (ev) => {
       ev.preventDefault();
@@ -653,14 +817,10 @@ function dropSearchMarker(coords, props) {
  * ============================================================ */
 function setupFilter() {
   document.getElementById("filter-btn").addEventListener("click", () => {
-    // モーダル表示時にチェックボックスを現在の状態と同期
-    document.getElementById("bookmark-toggle").checked = showOnlyBookmarks;
     renderTree();
     document.getElementById("filter-overlay").classList.add("active");
   });
-
   document.getElementById("filter-search").addEventListener("input", renderTree);
-
   document.getElementById("check-all").addEventListener("click", () => {
     ALL_CATEGORIES.forEach(id => selectedSet.add(id));
     renderTree();
@@ -669,27 +829,29 @@ function setupFilter() {
     ALL_CATEGORIES.forEach(id => selectedSet.delete(id));
     renderTree();
   });
-
-  document.getElementById("bookmark-toggle").addEventListener("change", (e) => {
-    // この時点ではUIに反映するのみ。Applyで実適用。
-    e.target.parentElement.style.opacity = e.target.checked ? "1" : "1";
-    const tree = document.getElementById("category-tree");
-    tree.classList.toggle("dimmed", e.target.checked);
+  document.getElementById("apply-filter").addEventListener("click", () => {
+    applyFilter(true);
+    closeModal("filter");
+    // ★ Auto-close details panel on apply
+    closeDetailsPanel();
   });
 
-  document.getElementById("apply-filter").addEventListener("click", () => {
-    showOnlyBookmarks = document.getElementById("bookmark-toggle").checked;
-    applyFilter();
-    closeModal("filter");
+  // Past filters
+  document.getElementById("open-filter-history").addEventListener("click", () => {
+    renderFilterHistory();
+    document.getElementById("filter-history-overlay").classList.add("active");
+  });
+  document.getElementById("clear-filter-history").addEventListener("click", () => {
+    if (!confirm("Clear all past filters?")) return;
+    filterHistory = [];
+    saveFilterHistoryStorage();
+    renderFilterHistory();
   });
 }
 
 function renderTree() {
   const search = (document.getElementById("filter-search").value || "").toLowerCase().trim();
   const container = document.getElementById("category-tree");
-  const isBmMode = document.getElementById("bookmark-toggle").checked;
-  container.classList.toggle("dimmed", isBmMode);
-
   const html = TILESETS.map(t => {
     const visibleChildren = search ? t.categories.filter(c => c.toLowerCase().includes(search)) : t.categories;
     const groupMatches = !search || t.name.toLowerCase().includes(search);
@@ -747,56 +909,97 @@ function renderTree() {
   });
 }
 
-function applyFilter() {
+function isFilterActive() {
+  return selectedSet.size !== ALL_CATEGORIES.length;
+}
+
+function applyFilter(saveToHistory) {
   let filter = null;
   let hasFilter = false;
 
-  if (showOnlyBookmarks) {
-    const ids = [...bookmarks.keys()];
-    if (ids.length === 0) {
-      filter = ["==", ["literal", 1], 0];
-    } else {
-      filter = ["in", ["get", "mapbox_id"], ["literal", ids]];
-    }
+  const totalAll = ALL_CATEGORIES.length;
+  const selected = [...selectedSet].filter(id => ALL_CATEGORIES.includes(id));
+  if (selected.length === 0) {
+    filter = ["==", ["literal", 1], 0];
     hasFilter = true;
+  } else if (selected.length === totalAll) {
+    filter = null; hasFilter = false;
   } else {
-    const totalAll = ALL_CATEGORIES.length;
-    const selected = [...selectedSet].filter(id => ALL_CATEGORIES.includes(id));
-    if (selected.length === 0) {
-      filter = ["==", ["literal", 1], 0];
-      hasFilter = true;
-    } else if (selected.length === totalAll) {
-      filter = null;       // ★ デフォルト = 全選択 = フィルタなし
-      hasFilter = false;
-    } else {
-      filter = ["any", ...selected.map(cat => ["in", cat, ["to-string", ["get", "categories"]]])];
-      hasFilter = true;
-    }
+    filter = ["any", ...selected.map(cat => ["in", cat, ["to-string", ["get", "categories"]]])];
+    hasFilter = true;
   }
 
   if (map.getLayer("poi-symbol"))  map.setFilter("poi-symbol",  filter);
   if (map.getLayer("poi-heatmap")) map.setFilter("poi-heatmap", filter);
+  if (map.getLayer("poi-label"))   map.setFilter("poi-label",   filter);
 
-  // フィルタアイコンにバッジ表示
   document.getElementById("filter-btn").classList.toggle("has-filter", hasFilter);
-
   updateFilterMessage();
+
+  if (saveToHistory && hasFilter) saveFilterSnapshot(selected);
+}
+
+function clearFilterIfActive() {
+  if (isFilterActive()) {
+    selectedSet = new Set(ALL_CATEGORIES);
+    applyFilter(false);
+    showTransientMessage("Filter cleared", "info", 2500);
+  }
+}
+
+/* ----- Filter History (past filters) ----- */
+function saveFilterSnapshot(categories) {
+  const key = [...categories].sort().join(",");
+  filterHistory = filterHistory.filter(e => [...e.categories].sort().join(",") !== key);
+  filterHistory.unshift({ timestamp: Date.now(), categories: [...categories] });
+  if (filterHistory.length > FILTER_HIST_MAX) filterHistory = filterHistory.slice(0, FILTER_HIST_MAX);
+  saveFilterHistoryStorage();
+}
+
+function renderFilterHistory() {
+  const container = document.getElementById("filter-history-list");
+  if (!filterHistory.length) {
+    container.innerHTML = `<div class="empty-msg">No past filters yet.</div>`;
+    return;
+  }
+  container.innerHTML = filterHistory.map((entry, idx) => {
+    const preview = entry.categories.slice(0, 5).map(c => `<span class="badge">${escapeHtml(c)}</span>`).join("");
+    const more = entry.categories.length > 5 ? `<span class="badge">+${entry.categories.length - 5}</span>` : "";
+    return `
+      <div class="fhist-item" data-idx="${idx}">
+        <div class="fhist-item-head">
+          <span class="fhist-item-count">${entry.categories.length} categories</span>
+          <span class="fhist-item-date">${escapeHtml(fmtTime(entry.timestamp))}</span>
+        </div>
+        <div class="fhist-item-preview">${preview}${more}</div>
+      </div>`;
+  }).join("");
+  container.querySelectorAll(".fhist-item").forEach(el => {
+    el.addEventListener("click", () => {
+      const idx = parseInt(el.dataset.idx, 10);
+      const entry = filterHistory[idx];
+      if (!entry) return;
+      // Apply immediately
+      selectedSet = new Set(entry.categories.filter(c => ALL_CATEGORIES.includes(c)));
+      applyFilter(true);
+      closeModal("filter-history");
+      closeModal("filter");
+      closeDetailsPanel();
+      showTransientMessage(`Applied filter (${entry.categories.length} categories)`, "success", 2500);
+    });
+  });
 }
 
 /* ============================================================
- *  Details Modal
+ *  Details Panel (left side)
  * ============================================================ */
 const detailsTitle   = document.getElementById("details-title");
 const detailInfoPane = document.getElementById("detail-tab-info");
 const detailJsonPane = document.getElementById("detail-tab-json");
 
-function setupDetailModal() {
-  document.querySelectorAll("[data-close]").forEach(btn => {
-    btn.addEventListener("click", () => closeModal(btn.dataset.close));
-  });
-  document.querySelectorAll(".modal-overlay").forEach(ov => {
-    ov.addEventListener("click", (e) => { if (e.target === ov) ov.classList.remove("active"); });
-  });
+function setupDetailPanel() {
+  document.getElementById("panel-close").addEventListener("click", closeDetailsPanel);
+
   document.querySelectorAll("[data-detail-tab]").forEach(btn => {
     btn.addEventListener("click", () => {
       const target = btn.dataset.detailTab;
@@ -806,29 +1009,68 @@ function setupDetailModal() {
     });
   });
 
-  // bookmark ボタン
   document.getElementById("bookmark-btn").addEventListener("click", () => {
     if (!currentDetailMapboxId) return;
-    toggleBookmark(currentDetailMapboxId, currentDetailProps || {});
+    toggleBookmark(currentDetailMapboxId);
+    refreshCounts();
+    // also refresh list if favorites modal open
+    if (document.getElementById("favorites-overlay").classList.contains("active")) renderFavTab();
+  });
+
+  document.getElementById("panel-copy-id").addEventListener("click", () => {
+    if (!currentDetailMapboxId) return;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(currentDetailMapboxId)
+        .then(() => showTransientMessage("mapbox_id copied", "success", 1500))
+        .catch(() => {});
+    }
+  });
+
+  // Close modal handlers
+  document.querySelectorAll("[data-close]").forEach(btn => {
+    btn.addEventListener("click", () => closeModal(btn.dataset.close));
+  });
+  document.querySelectorAll(".modal-overlay").forEach(ov => {
+    ov.addEventListener("click", (e) => { if (e.target === ov) ov.classList.remove("active"); });
   });
 }
 
 function closeModal(name) {
   document.getElementById(`${name}-overlay`).classList.remove("active");
 }
+function closeDetailsPanel() {
+  document.getElementById("details-panel").classList.remove("open");
+  document.getElementById("main-screen").classList.remove("panel-open");
+}
 
-async function openDetailsModal(mapboxId, srcProps) {
+async function openDetailsPanel(mapboxId, srcProps) {
   currentDetailMapboxId = mapboxId;
   currentDetailProps    = srcProps || null;
+  if (srcProps) {
+    const la = typeof srcProps.lat === "number" ? srcProps.lat : parseFloat(srcProps.lat);
+    const lo = typeof srcProps.lon === "number" ? srcProps.lon : parseFloat(srcProps.lon);
+    if (!isNaN(la)) currentDetailLat = la;
+    if (!isNaN(lo)) currentDetailLon = lo;
+  }
+
+  // ID display
+  const idEl = document.getElementById("panel-id-value");
+  idEl.textContent = mapboxId;
+  idEl.title = mapboxId;
 
   detailsTitle.textContent = "POI Details";
   detailInfoPane.innerHTML = `<div class="loading">Loading...</div>`;
   detailJsonPane.querySelector(".json-view").textContent = "Loading...";
+  // reset tabs to info
   document.querySelectorAll("[data-detail-tab]").forEach(b => b.classList.toggle("active", b.dataset.detailTab === "info"));
   detailInfoPane.classList.add("active");
   detailJsonPane.classList.remove("active");
+
   updateBookmarkButton(mapboxId);
-  document.getElementById("details-overlay").classList.add("active");
+
+  // open panel
+  document.getElementById("details-panel").classList.add("open");
+  document.getElementById("main-screen").classList.add("panel-open");
 
   const token = localStorage.getItem(TOKEN_KEY);
   const params = new URLSearchParams({ attribute_sets: "basic,photos,visit,venue", access_token: token });
@@ -837,10 +1079,21 @@ async function openDetailsModal(mapboxId, srcProps) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    // bookmark 用のプロパティを更新(retrieve 結果優先)
     currentDetailProps = (data && data.properties) || currentDetailProps;
+    // try to get lat/lon from geometry
+    if (data && data.geometry && Array.isArray(data.geometry.coordinates)) {
+      currentDetailLon = data.geometry.coordinates[0];
+      currentDetailLat = data.geometry.coordinates[1];
+    }
     renderDetails(data);
     detailJsonPane.querySelector(".json-view").textContent = JSON.stringify(data, null, 2);
+
+    // update name in storage
+    const name = data && data.properties && data.properties.name;
+    if (name) {
+      updateHistoryName(mapboxId, name);
+      updateBookmarkName(mapboxId, name);
+    }
   } catch (err) {
     detailInfoPane.innerHTML = `<div class="loading">Failed to load: ${escapeHtml(err.message)}</div>`;
     detailJsonPane.querySelector(".json-view").textContent = `Error: ${err.message}`;
@@ -903,6 +1156,193 @@ function renderDetails(data) {
 function field(label, value) {
   return `<div class="field"><div class="field-label">${escapeHtml(label)}</div><div class="field-value">${value}</div></div>`;
 }
+
+/* ============================================================
+ *  Favorites / History Modal
+ * ============================================================ */
+function setupFavorites() {
+  document.getElementById("favorites-btn").addEventListener("click", () => {
+    refreshCounts();
+    currentFavTab = "bookmarks";
+    setFavTab("bookmarks");
+    document.getElementById("favorites-overlay").classList.add("active");
+  });
+
+  document.querySelectorAll("[data-fav-tab]").forEach(btn => {
+    btn.addEventListener("click", () => setFavTab(btn.dataset.favTab));
+  });
+
+  document.getElementById("export-current-list").addEventListener("click", exportCurrentList);
+  document.getElementById("clear-current-list").addEventListener("click", clearCurrentList);
+}
+
+function setFavTab(tabName) {
+  currentFavTab = tabName;
+  document.querySelectorAll("[data-fav-tab]").forEach(b => b.classList.toggle("active", b.dataset.favTab === tabName));
+  document.getElementById("fav-tab-bookmarks").classList.toggle("active", tabName === "bookmarks");
+  document.getElementById("fav-tab-history").classList.toggle("active", tabName === "poiHistory");
+  renderFavTab();
+}
+
+function renderFavTab() {
+  if (currentFavTab === "bookmarks") renderBookmarksList();
+  else renderHistoryList();
+}
+
+function renderBookmarksList() {
+  const container = document.getElementById("bookmarks-list");
+  const arr = [...bookmarks.entries()].map(([id, v]) => ({ id, ...v }));
+  arr.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+  if (!arr.length) {
+    container.innerHTML = `<div class="empty-msg">No bookmarks yet. Click ★ in a POI's details to add one.</div>`;
+    return;
+  }
+  container.innerHTML = arr.map(item => listItemHtml(item, "bookmark")).join("");
+  bindListItems(container, "bookmark");
+}
+
+function renderHistoryList() {
+  const container = document.getElementById("history-list");
+  const arr = [...poiHistory.entries()].map(([id, v]) => ({ id, ...v }));
+  arr.sort((a, b) => (b.viewedAt || 0) - (a.viewedAt || 0));
+  if (!arr.length) {
+    container.innerHTML = `<div class="empty-msg">No history yet. Click a POI on the map.</div>`;
+    return;
+  }
+  container.innerHTML = arr.map(item => listItemHtml(item, "poiHistory")).join("");
+  bindListItems(container, "poiHistory");
+}
+
+function listItemHtml(item, kind) {
+  const name = item.name || "(no name)";
+  const cats = Array.isArray(item.categories) ? item.categories.slice(0, 3) : [];
+  const more = (item.categories && item.categories.length > 3) ? `<span class="badge">+${item.categories.length - 3}</span>` : "";
+  const ts = kind === "bookmark" ? item.addedAt : item.viewedAt;
+  const tsLabel = kind === "bookmark" ? "Added" : "Viewed";
+  const icon = kind === "bookmark" ? "★" : "⏱";
+  const iconStyle = kind === "bookmark" ? "color:#f59e0b;" : "color:#6b7280;";
+  return `
+    <div class="list-item" data-id="${escapeAttr(item.id)}">
+      <div class="list-item-icon" style="${iconStyle}">${icon}</div>
+      <div class="list-item-main">
+        <div class="list-item-name">${escapeHtml(name)}</div>
+        <div class="list-item-meta">${escapeHtml(item.id)} · ${tsLabel}: ${escapeHtml(fmtTime(ts))}</div>
+        ${cats.length ? `<div class="list-item-cats">${cats.map(c=>`<span class="badge">${escapeHtml(c)}</span>`).join("")}${more}</div>` : ""}
+      </div>
+      <button class="list-item-remove" data-remove-id="${escapeAttr(item.id)}" data-kind="${kind}" title="Remove">×</button>
+    </div>`;
+}
+
+function bindListItems(container, kind) {
+  container.querySelectorAll(".list-item").forEach(el => {
+    el.addEventListener("click", (e) => {
+      if (e.target.classList.contains("list-item-remove")) return;
+      const id = el.dataset.id;
+      flyToAndOpen(id, kind);
+    });
+  });
+  container.querySelectorAll(".list-item-remove").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.removeId;
+      const kindLocal = btn.dataset.kind;
+      if (kindLocal === "bookmark") {
+        bookmarks.delete(id);
+        saveBookmarks();
+        showTransientMessage("Bookmark removed", "info", 2000);
+      } else {
+        poiHistory.delete(id);
+        saveHistory();
+        showTransientMessage("History entry removed", "info", 2000);
+      }
+      refreshCounts();
+      renderFavTab();
+      if (currentDetailMapboxId === id) updateBookmarkButton(id);
+    });
+  });
+}
+
+function flyToAndOpen(id, kind) {
+  const entry = (kind === "bookmark" ? bookmarks.get(id) : poiHistory.get(id))
+    || bookmarks.get(id) || poiHistory.get(id);
+  if (!entry) return;
+
+  // Auto clear filter if active
+  clearFilterIfActive();
+
+  // close favorites modal so user sees the map
+  closeModal("favorites");
+
+  const lat = entry.lat;
+  const lon = entry.lon;
+  if (typeof lat === "number" && typeof lon === "number") {
+    map.flyTo({ center: [lon, lat], zoom: 16, essential: true, duration: 1500 });
+  }
+
+  // Mark visited & open panel
+  markVisited(id);
+  // also bump poiHistory (re-viewed)
+  addToHistory(id, {
+    name: entry.name,
+    lat, lon,
+    categories: entry.categories || []
+  });
+  refreshCounts();
+
+  openDetailsPanel(id, {
+    mapbox_id: id,
+    lat: lat,
+    lon: lon,
+    categories: entry.categories || [],
+    name: entry.name
+  });
+}
+
+function exportCurrentList() {
+  const isBm = currentFavTab === "bookmarks";
+  const data = isBm
+    ? [...bookmarks.entries()].map(([id, v]) => ({ id, ...v }))
+    : [...poiHistory.entries()].map(([id, v]) => ({ id, ...v }));
+  if (!data.length) {
+    showTransientMessage("Nothing to export", "warning", 2000);
+    return;
+  }
+  const payload = {
+    type: isBm ? "bookmarks" : "poiHistory",
+    exportedAt: new Date().toISOString(),
+    count: data.length,
+    items: data
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const ymd = new Date().toISOString().slice(0,10);
+  a.href = url;
+  a.download = `mapbox-${isBm ? "bookmarks" : "poiHistory"}-${ymd}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showTransientMessage(`Exported ${data.length} item(s)`, "success", 2000);
+}
+
+function clearCurrentList() {
+  const isBm = currentFavTab === "bookmarks";
+  const label = isBm ? "all bookmarks" : "all poiHistory";
+  if (!confirm(`Clear ${label}?`)) return;
+  if (isBm) {
+    bookmarks.clear();
+    saveBookmarks();
+  } else {
+    poiHistory.clear();
+    saveHistory();
+    // Note: visited feature-state retained so colors stay
+  }
+  refreshCounts();
+  renderFavTab();
+  if (currentDetailMapboxId) updateBookmarkButton(currentDetailMapboxId);
+}
 </script>
 </body>
 </html>
+  
