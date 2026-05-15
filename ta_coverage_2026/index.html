@@ -497,7 +497,7 @@ function addToHistory(id, info) {
   if (!id) return;
   const existing = poiHistory.get(id) || {};
   poiHistory.set(id, {
-    name: info.name || existing.name || "",
+    //name: info.name || existing.name || "",
     lat:  info.lat  ?? existing.lat  ?? null,
     lon:  info.lon  ?? existing.lon  ?? null,
     categories: info.categories || existing.categories || [],
@@ -506,13 +506,7 @@ function addToHistory(id, info) {
   saveHistory();
 }
 function updateHistoryName(id, name) {
-  if (!poiHistory.has(id) || !name) return;
-  const cur = poiHistory.get(id);
-  if (cur.name !== name) {
-    cur.name = name;
-    poiHistory.set(id, cur);
-    saveHistory();
-  }
+  return; //no returned value
 }
 
 function toggleBookmark(id) {
@@ -523,7 +517,7 @@ function toggleBookmark(id) {
   } else {
     const histEntry = poiHistory.get(id) || {};
     bookmarks.set(id, {
-      name: histEntry.name || "",
+      //name: histEntry.name || "",
       lat:  currentDetailLat ?? histEntry.lat ?? null,
       lon:  currentDetailLon ?? histEntry.lon ?? null,
       categories: histEntry.categories || [],
@@ -535,9 +529,7 @@ function toggleBookmark(id) {
   updateBookmarkButton(id);
 }
 function updateBookmarkName(id, name) {
-  if (!bookmarks.has(id) || !name) return;
-  const cur = bookmarks.get(id);
-  if (cur.name !== name) { cur.name = name; bookmarks.set(id, cur); saveBookmarks(); }
+  return;
 }
 function updateBookmarkButton(mapboxId) {
   const btn = document.getElementById("bookmark-btn");
@@ -1214,18 +1206,18 @@ function renderHistoryList() {
 }
 
 function listItemHtml(item, kind) {
-  const name = item.name || "(no name)";
   const cats = Array.isArray(item.categories) ? item.categories.slice(0, 3) : [];
   const more = (item.categories && item.categories.length > 3) ? `<span class="badge">+${item.categories.length - 3}</span>` : "";
   const ts = kind === "bookmark" ? item.addedAt : item.viewedAt;
   const tsLabel = kind === "bookmark" ? "Added" : "Viewed";
   const icon = kind === "bookmark" ? "★" : "⏱";
   const iconStyle = kind === "bookmark" ? "color:#f59e0b;" : "color:#6b7280;";
+
   return `
     <div class="list-item" data-id="${escapeAttr(item.id)}">
       <div class="list-item-icon" style="${iconStyle}">${icon}</div>
       <div class="list-item-main">
-        <div class="list-item-name">${escapeHtml(name)}</div>
+        <!-- 名前(list-item-name)の表示を削除 -->
         <div class="list-item-meta">${escapeHtml(item.id)} · ${tsLabel}: ${escapeHtml(fmtTime(ts))}</div>
         ${cats.length ? `<div class="list-item-cats">${cats.map(c=>`<span class="badge">${escapeHtml(c)}</span>`).join("")}${more}</div>` : ""}
       </div>
@@ -1267,10 +1259,7 @@ function flyToAndOpen(id, kind) {
     || bookmarks.get(id) || poiHistory.get(id);
   if (!entry) return;
 
-  // Auto clear filter if active
   clearFilterIfActive();
-
-  // close favorites modal so user sees the map
   closeModal("favorites");
 
   const lat = entry.lat;
@@ -1279,22 +1268,19 @@ function flyToAndOpen(id, kind) {
     map.flyTo({ center: [lon, lat], zoom: 16, essential: true, duration: 1500 });
   }
 
-  // Mark visited & open panel
   markVisited(id);
-  // also bump poiHistory (re-viewed)
-  addToHistory(id, {
-    name: entry.name,
-    lat, lon,
-    categories: entry.categories || []
-  });
+  
+  // 履歴に追加（ここでも名前は保存されない）
+  addToHistory(id, { lat, lon, categories: entry.categories || [] });
   refreshCounts();
 
+  // パネルを開く（srcPropsにnameを入れない）
   openDetailsPanel(id, {
     mapbox_id: id,
     lat: lat,
     lon: lon,
-    categories: entry.categories || [],
-    name: entry.name
+    categories: entry.categories || []
+    // name は渡さない
   });
 }
 
