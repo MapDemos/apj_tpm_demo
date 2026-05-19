@@ -234,6 +234,7 @@
     const SOURCE_LAYER = "fc0778414b83399b7e70";
     const STYLE_URL = "mapbox://styles/mapbox/standard";
     const TOKEN_KEY = "mapbox_demo_pk_token";
+    const PRESET_MAPBOX_TOKEN = "pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw";
     const VISITED_KEY = "mapbox_demo_visited_pois";
     const HISTORY_KEY = "mapbox_demo_history";
     const BOOKMARK_KEY = "mapbox_demo_bookmarks";
@@ -276,10 +277,9 @@
       runUnitTests();
       setupTokenScreen();
       const savedToken = localStorage.getItem(TOKEN_KEY);
-      if (isPublicToken(savedToken)) {
-        getRequiredEl("token-input").value = savedToken;
-        startApp(savedToken);
-      }
+      const presetToken = isPublicToken(PRESET_MAPBOX_TOKEN) ? PRESET_MAPBOX_TOKEN : "";
+      const initialToken = presetToken || (isPublicToken(savedToken) ? savedToken : "");
+      getRequiredEl("token-input").value = initialToken;
     });
 
     function setupTokenScreen() {
@@ -1416,6 +1416,7 @@
       const tests = [];
       tests.push(["isPublicToken accepts pk", isPublicToken("pk.abc") === true]);
       tests.push(["isPublicToken rejects sk", isPublicToken("sk.abc") === false]);
+      tests.push(["preset token is pk format", isPublicToken(PRESET_MAPBOX_TOKEN) === true]);
       tests.push(["parseCategories comma", JSON.stringify(parseCategories("a,b")) === JSON.stringify(["a", "b"])]);
       tests.push(["parseCategories json", JSON.stringify(parseCategories('["a","b"]')) === JSON.stringify(["a", "b"])]);
       tests.push(["getPoiCategories uses poi_category", JSON.stringify(getPoiCategories({ poi_category: "coffee,cafe" })) === JSON.stringify(["coffee", "cafe"])]);
