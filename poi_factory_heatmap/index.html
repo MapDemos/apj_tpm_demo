@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mapbox POI Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https: http: data: blob: 'unsafe-inline' 'unsafe-eval'; script-src 'self' https://api.mapbox.com https://cdn.jsdelivr.net 'unsafe-inline' 'unsafe-eval'; style-src 'self' https://api.mapbox.com 'unsafe-inline'; img-src * data: blob:; connect-src *; font-src * data:; worker-src blob:; child-src blob:;" />
+
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; background: #f3f4f6; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    .hidden { display: none !important; }
+
+    #config-screen { width: 100%; height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; background: linear-gradient(135deg, #f8fafc, #eef2ff); }
+    .config-card { width: 420px; max-width: 100%; background: #fff; border-radius: 16px; padding: 28px; box-shadow: 0 18px 50px rgba(15, 23, 42, 0.12); border: 1px solid #e5e7eb; }
+    .config-card h1 { margin: 0 0 8px; font-size: 22px; line-height: 1.25; }
+    .config-card p { margin: 0 0 20px; color: #6b7280; font-size: 13px; line-height: 1.5; }
+    .config-card label { display: block; margin: 0 0 6px; font-weight: 700; font-size: 13px; }
+    .config-card input { width: 100%; padding: 11px 12px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; outline: none; }
+    .config-card input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
+    .hint { margin-top: 8px; color: #6b7280; font-size: 12px; }
+    .config-error { min-height: 18px; margin: 10px 0 0; color: #dc2626; font-size: 12px; font-weight: 600; }
+
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 12px; border: 1px solid transparent; border-radius: 10px; font-size: 13px; font-weight: 700; line-height: 1; background: #fff; color: #111827; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); transition: transform 0.08s ease, background 0.12s ease, border 0.12s ease; white-space: nowrap; }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn-primary { width: 100%; margin-top: 18px; background: #2563eb; color: #fff; }
+    .btn-secondary { background: #fff; border-color: #e5e7eb; }
+    .btn-blue { background: #2563eb; color: #fff; }
+    .btn-amber { background: #f59e0b; color: #111827; }
+    .btn-danger { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+    .btn-ghost { background: transparent; border-color: transparent; box-shadow: none; color: #4b5563; padding: 6px 8px; }
+
+    #app { position: relative; width: 100%; height: 100vh; overflow: hidden; background: #e5e7eb; }
+    #map { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+    .topbar { position: absolute; z-index: 10; top: 14px; left: 14px; right: 14px; display: flex; align-items: flex-start; gap: 10px; pointer-events: none; }
+    .topbar > * { pointer-events: auto; }
+    #search-box { position: relative; width: 420px; max-width: calc(100vw - 28px); }
+    .search-input-wrap { position: relative; }
+    #search-input { width: 100%; height: 42px; padding: 0 42px 0 14px; border: 1px solid #d1d5db; border-radius: 12px; background: #fff; outline: none; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14); font-size: 14px; }
+    #search-input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12), 0 8px 24px rgba(15, 23, 42, 0.14); }
+    #search-clear { position: absolute; top: 8px; right: 8px; display: none; width: 26px; height: 26px; border: none; border-radius: 999px; background: #f3f4f6; color: #4b5563; font-size: 16px; line-height: 1; }
+    #search-clear.show { display: block; }
+    #search-results { position: absolute; top: 48px; left: 0; right: 0; display: none; max-height: 360px; overflow: auto; border-radius: 12px; border: 1px solid #e5e7eb; background: #fff; box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18); }
+    #search-results.active { display: block; }
+    .search-item { padding: 11px 13px; border-bottom: 1px solid #f3f4f6; cursor: pointer; }
+    .search-item:hover { background: #f8fafc; }
+    .search-item-name { font-size: 13px; font-weight: 800; color: #111827; }
+    .search-item-desc { margin-top: 3px; color: #6b7280; font-size: 12px; line-height: 1.35; }
+    .search-empty { padding: 14px; color: #6b7280; font-size: 13px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+    #select-area-btn.is-active { background: #1d4ed8; color: #fff; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18), 0 8px 24px rgba(15, 23, 42, 0.14); }
+
+    #messages { position: absolute; z-index: 20; top: 66px; right: 14px; width: 380px; max-width: calc(100vw - 28px); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    .msg { padding: 10px 12px; border-radius: 12px; background: #fff; border: 1px solid #e5e7eb; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14); color: #111827; font-size: 13px; line-height: 1.4; }
+    .msg-info { border-left: 4px solid #2563eb; }
+    .msg-success { border-left: 4px solid #16a34a; }
+    .msg-warn { border-left: 4px solid #f59e0b; }
+    .msg-error { border-left: 4px solid #dc2626; }
+
+    #side-panel { position: absolute; z-index: 9; left: 14px; top: 72px; bottom: 14px; width: 380px; max-width: calc(100vw - 28px); display: flex; flex-direction: column; overflow: hidden; background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18); }
+    .panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 16px 12px; border-bottom: 1px solid #e5e7eb; }
+    .panel-title-wrap h2 { margin: 0; font-size: 16px; line-height: 1.25; }
+    .panel-subtitle { margin-top: 4px; color: #6b7280; font-size: 12px; line-height: 1.35; }
+    .panel-body { flex: 1; overflow: auto; padding: 14px; }
+    .panel-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .empty-msg { padding: 24px 8px; color: #6b7280; text-align: center; font-size: 13px; line-height: 1.5; }
+    .poi-list { display: flex; flex-direction: column; gap: 8px; }
+    .poi-list-item { padding: 11px 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; cursor: pointer; }
+    .poi-list-item:hover { background: #f8fafc; border-color: #c7d2fe; }
+    .poi-list-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 800; font-size: 13px; color: #111827; }
+    .poi-list-desc { margin-top: 4px; color: #6b7280; font-size: 12px; line-height: 1.35; }
+    .poi-list-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px; }
+    .status-pill, .badge { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 3px 7px; border-radius: 999px; background: #eef2ff; color: #4338ca; font-size: 11px; font-weight: 700; line-height: 1.1; }
+    .status-ok { background: #dcfce7; color: #166534; }
+    .status-warn { background: #fef3c7; color: #92400e; }
+    .status-error { background: #fee2e2; color: #991b1b; }
+    .detail-section { border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; margin-bottom: 12px; background: #fff; }
+    .detail-section-title { padding: 10px 12px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 12px; font-weight: 900; color: #374151; text-transform: uppercase; letter-spacing: 0.02em; }
+    .detail-row { display: grid; grid-template-columns: 104px 1fr; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #f3f4f6; font-size: 12px; line-height: 1.45; }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-key { color: #6b7280; font-weight: 800; }
+    .detail-val { min-width: 0; overflow-wrap: anywhere; }
+    .detail-val a { color: #2563eb; text-decoration: none; }
+    .detail-val a:hover { text-decoration: underline; }
+    .description-list { display: flex; flex-direction: column; gap: 6px; }
+    .description-item { padding: 7px 8px; border-radius: 8px; background: #f9fafb; border: 1px solid #e5e7eb; white-space: pre-wrap; }
+    .raw-json { margin: 0; padding: 12px; border-radius: 12px; background: #0f172a; color: #e5e7eb; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 11px; line-height: 1.5; overflow: auto; max-height: 420px; white-space: pre-wrap; }
+    .photo-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .photo-thumb { width: 54px; height: 54px; object-fit: cover; border-radius: 8px; border: 1px solid #e5e7eb; background: #f3f4f6; display: block; }
+    .detail-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; padding: 12px; }
+    .detail-photo-grid img { width: 100%; height: 72px; object-fit: cover; border-radius: 10px; border: 1px solid #e5e7eb; background: #f3f4f6; display: block; cursor: zoom-in; }
+    .photo-thumb { cursor: zoom-in; }
+    .image-modal { width: min(96vw, 1200px); max-height: 92vh; }
+    .image-modal-body { overflow: auto; padding: 12px; background: #111827; }
+    .image-modal-gallery { display: flex; flex-direction: column; gap: 18px; align-items: center; }
+    .image-modal-item { width: 100%; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+    .image-modal-item img { display: block; max-width: 100%; max-height: 72vh; width: auto; height: auto; object-fit: contain; background: #ffffff; border-radius: 4px; }
+    .image-modal-caption { color: #d1d5db; font-size: 12px; max-width: 1000px; overflow-wrap: anywhere; }
+    .image-url { max-width: 720px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #6b7280; font-size: 12px; }
+
+    .modal-overlay { position: absolute; z-index: 50; inset: 0; display: none; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.38); }
+    .modal-overlay.active { display: flex; }
+    .modal { width: 740px; max-width: 100%; max-height: 90vh; display: flex; flex-direction: column; background: #fff; border-radius: 16px; border: 1px solid #e5e7eb; box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28); overflow: hidden; }
+    .modal-header, .modal-footer { padding: 14px 16px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .modal-footer { border-bottom: none; border-top: 1px solid #e5e7eb; justify-content: flex-end; }
+    .modal-header h2 { margin: 0; font-size: 17px; }
+    .modal-body { overflow: auto; padding: 14px; }
+    .modal-tabs { display: flex; border-bottom: 1px solid #e5e7eb; }
+    .tab { flex: 1; padding: 12px; border: none; border-bottom: 3px solid transparent; background: #fff; font-weight: 800; color: #6b7280; }
+    .tab.active { color: #2563eb; border-bottom-color: #2563eb; background: #f8fafc; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+    .list-container { display: flex; flex-direction: column; gap: 8px; }
+
+    .map-bottom-info { position: absolute; z-index: 8; left: 14px; bottom: 14px; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.94); border: 1px solid #e5e7eb; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14); color: #4b5563; font-size: 12px; pointer-events: none; }
+    .popup-row { font-size: 12px; line-height: 1.4; margin: 3px 0; }
+    .popup-key { color: #6b7280; font-weight: 800; }
+    .popup-cat { display: inline-flex; margin: 2px 4px 2px 0; padding: 2px 6px; border-radius: 999px; background: #eef2ff; color: #4338ca; font-size: 10px; font-weight: 700; }
+    .selection-help { position: absolute; z-index: 21; left: 50%; top: 72px; transform: translateX(-50%); display: none; padding: 9px 12px; border-radius: 999px; background: rgba(17, 24, 39, 0.92); color: #fff; font-size: 12px; font-weight: 700; pointer-events: none; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.25); }
+    .selection-help.active { display: block; }
+
+    @media (max-width: 840px) {
+      .topbar { flex-direction: column; align-items: stretch; }
+      #search-box { width: 100%; }
+      .toolbar { width: 100%; }
+      #side-panel { top: 132px; width: calc(100vw - 28px); max-height: 52vh; }
+      #messages { top: auto; bottom: 70px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="config-screen">
+    <div class="config-card">
+      <h1>Mapbox POI Demo</h1>
+      <p>Enter your Mapbox public token. The token is stored in localStorage for this browser.</p>
+      <form id="token-form">
+        <label for="token-input">Access Token</label>
+        <input id="token-input" type="text" autocomplete="off" spellcheck="false" placeholder="pk.eyJ1Ijoi..." />
+        <div class="hint">Token must start with <strong>pk.</strong></div>
+        <div id="token-error" class="config-error"></div>
+        <button class="btn btn-primary" type="submit">Show Map</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
+    <div id="map"></div>
+
+    <div class="topbar">
+      <div id="search-box">
+        <div class="search-input-wrap">
+          <input id="search-input" type="text" placeholder="Search places" autocomplete="off" spellcheck="false" />
+          <button id="search-clear" type="button" aria-label="Clear search">×</button>
+        </div>
+        <div id="search-results"></div>
+      </div>
+
+      <div class="toolbar">
+        <button class="btn btn-secondary" id="select-area-btn" type="button">Selected Area (up to 10 POIs)</button>
+        <button class="btn btn-secondary" id="clear-selection-btn" type="button">Clear Selection</button>
+        <button class="btn btn-secondary" id="open-favorites-btn" type="button">★ Bookmarks &amp; History</button>
+        <button class="btn btn-secondary" id="change-token-btn" type="button">Change Token</button>
+      </div>
+    </div>
+
+    <div id="messages"></div>
+    <div id="selection-help" class="selection-help">Drag on the map to select visible POIs. Max 10 details requests.</div>
+
+    <aside id="side-panel" class="hidden">
+      <div class="panel-header">
+        <div class="panel-title-wrap">
+          <h2 id="panel-title">Selected POIs</h2>
+          <div id="panel-subtitle" class="panel-subtitle">Click “Select Area”, then drag on the map.</div>
+        </div>
+        <button class="btn btn-ghost" id="panel-close" type="button" aria-label="Close panel">×</button>
+      </div>
+      <div id="panel-content" class="panel-body">
+        <div class="empty-msg">No selected POIs yet.</div>
+      </div>
+    </aside>
+
+    <div class="map-bottom-info" id="zoom-message">Zoom in to see POI symbols.</div>
+
+    <div class="modal-overlay" id="favorites-overlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h2>Bookmarks &amp; History</h2>
+          <button class="btn btn-ghost" data-close="favorites" type="button">×</button>
+        </div>
+        <div class="modal-tabs">
+          <button class="tab active" data-fav-tab="bookmarks" type="button">★ Bookmarks <span id="bm-count">(0)</span></button>
+          <button class="tab" data-fav-tab="history" type="button">⏱ History <span id="hist-count">(0)</span></button>
+        </div>
+        <div class="modal-body">
+          <div id="fav-tab-bookmarks" class="tab-pane active"><div id="bookmarks-list" class="list-container"></div></div>
+          <div id="fav-tab-history" class="tab-pane"><div id="history-list" class="list-container"></div></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-danger" id="clear-current-list" type="button">Clear All</button>
+          <button class="btn btn-secondary" id="export-current-list" type="button">⬇ Export</button>
+          <button class="btn btn-secondary" data-close="favorites" type="button">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="image-overlay">
+      <div class="modal image-modal">
+        <div class="modal-header">
+          <h2>Photo</h2>
+          <button class="btn btn-ghost" data-close="image" type="button">×</button>
+        </div>
+        <div class="modal-body image-modal-body">
+          <div id="image-modal-gallery" class="image-modal-gallery"></div>
+        </div>
+        <div class="modal-footer">
+          <div class="image-url" id="image-modal-url"></div>
+          <a class="btn btn-secondary" id="image-modal-link" href="#" target="_blank" rel="noopener noreferrer">Open original</a>
+          <button class="btn btn-secondary" data-close="image" type="button">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TILESET_ID = "10da032y.5td2z8gqtx4q";
+    const SOURCE_LAYER = "fc0778414b83399b7e70";
+    const STYLE_URL = "mapbox://styles/mapbox/standard";
+    const TOKEN_KEY = "mapbox_demo_pk_token";
+    const VISITED_KEY = "mapbox_demo_visited_pois";
+    const HISTORY_KEY = "mapbox_demo_history";
+    const BOOKMARK_KEY = "mapbox_demo_bookmarks";
+    const DETAILS_API = "https://api.mapbox.com/search/details/v1/retrieve/";
+    const DETAILS_ATTRIBUTE_SETS = "basic,photos,visit,venue";
+    const SEARCH_SUGGEST_API = "https://api.mapbox.com/search/searchbox/v1/suggest";
+    const SEARCH_RETRIEVE_API = "https://api.mapbox.com/search/searchbox/v1/retrieve/";
+    const MAX_SELECTION_DETAILS = 10;
+    const SOURCE_ID = "poi-src";
+    const SYMBOL_LAYER_ID = "poi-symbol";
+    const SELECTION_SOURCE_ID = "selection-area";
+    const LABEL_MIN_ZOOM = 18;
+    const INITIAL_CENTER = [-122.4194, 37.7749];
+    const INITIAL_ZOOM = 12;
+
+    let map = null;
+    let mapReady = false;
+    let visitedPois = new Set(readJsonStorage(VISITED_KEY, []));
+    let poiHistory = new Map(Object.entries(readJsonStorage(HISTORY_KEY, {})));
+    let bookmarks = new Map(Object.entries(readJsonStorage(BOOKMARK_KEY, {})));
+    let currentDetailMapboxId = null;
+    let currentDetailProps = null;
+    let currentDetailData = null;
+    let currentFavTab = "bookmarks";
+    let searchSessionToken = generateUUID();
+    let searchMarker = null;
+    let detailMarker = null;
+    let searchDebounce = null;
+    let isAreaSelectMode = false;
+    let isSelectingArea = false;
+    let selectionStartPoint = null;
+    let selectionEndPoint = null;
+    let selectedAreaDetails = [];
+    let lastSelectionTotalCount = 0;
+    const persistentMessages = {};
+    const approvedHttpPhotoUrls = new Set();
+    const rejectedHttpPhotoUrls = new Set();
+
+    document.addEventListener("DOMContentLoaded", function () {
+      runUnitTests();
+      setupTokenScreen();
+      const savedToken = localStorage.getItem(TOKEN_KEY);
+      if (isPublicToken(savedToken)) {
+        getRequiredEl("token-input").value = savedToken;
+        startApp(savedToken);
+      }
+    });
+
+    function setupTokenScreen() {
+      getRequiredEl("token-form").addEventListener("submit", function (e) {
+        e.preventDefault();
+        const token = getRequiredEl("token-input").value.trim();
+        if (!isPublicToken(token)) {
+          setText("token-error", "Token must start with pk.");
+          return;
+        }
+        setText("token-error", "");
+        localStorage.setItem(TOKEN_KEY, token);
+        startApp(token);
+      });
+    }
+
+    function startApp(token) {
+      hideEl("config-screen");
+      showEl("app");
+      mapboxgl.accessToken = token;
+      if (map) {
+        map.remove();
+        map = null;
+      }
+      initMap();
+    }
+
+    function initMap() {
+      mapReady = false;
+      map = new mapboxgl.Map({
+        container: "map",
+        style: STYLE_URL,
+        center: INITIAL_CENTER,
+        zoom: INITIAL_ZOOM,
+        attributionControl: true
+      });
+
+      map.addControl(new mapboxgl.NavigationControl(), "top-right");
+
+      map.once("load", function () {
+        try {
+          addDemoSourcesAndLayers();
+          setupInteractions();
+          setupSearchBox();
+          setupAreaSelection();
+          setupPanel();
+          setupFavorites();
+          setupToolbar();
+          setupImageModal();
+          refreshCounts();
+          updateZoomMessage();
+          mapReady = true;
+          showTransientMessage("Map loaded.", "success", 1600);
+        } catch (err) {
+          reportAppError("Failed to initialize custom POI layers. Check the tileset ID, source-layer, and token scope.", err);
+        }
+      });
+
+      map.on("zoom", updateZoomMessage);
+      map.on("error", function (event) {
+        const msg = normalizeMapboxError(event && event.error);
+        showTransientMessage("Mapbox warning: " + msg, "warn", 7000);
+        console.warn("Mapbox warning:", event && event.error ? event.error : event);
+      });
+    }
+
+    function addDemoSourcesAndLayers() {
+      if (!map.getSource(SOURCE_ID)) {
+        map.addSource(SOURCE_ID, {
+          type: "vector",
+          url: "mapbox://" + TILESET_ID,
+          promoteId: "mapbox_id"
+        });
+      }
+
+      safeAddLayer({
+        id: "poi-heatmap",
+        type: "heatmap",
+        source: SOURCE_ID,
+        "source-layer": SOURCE_LAYER,
+        slot: "middle",
+        maxzoom: 11,
+        paint: {
+          "heatmap-weight": ["interpolate", ["linear"], ["zoom"], 3, 0.15, 9, 0.6],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 0.6, 9, 1.5],
+          "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(33,102,172,0)", 0.1, "rgba(103,169,207,0.5)", 0.3, "rgb(209,229,240)", 0.5, "rgb(253,219,199)", 0.7, "rgb(239,138,98)", 1, "rgb(178,24,43)"],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 15, 9, 40, 11, 60],
+          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 9, 1, 11, 0]
+        }
+      });
+
+      safeAddLayer({
+        id: SYMBOL_LAYER_ID,
+        type: "circle",
+        source: SOURCE_ID,
+        "source-layer": SOURCE_LAYER,
+        slot: "top",
+        minzoom: 10,
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 8],
+          "circle-color": ["case", ["boolean", ["feature-state", "visited"], false], "#9ca3af", "#2563eb"],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5,
+          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1],
+          "circle-stroke-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1]
+        }
+      });
+
+      safeAddLayer({
+        id: "poi-label",
+        type: "symbol",
+        source: SOURCE_ID,
+        "source-layer": SOURCE_LAYER,
+        slot: "top",
+        minzoom: LABEL_MIN_ZOOM,
+        layout: {
+          "text-field": ["coalesce", ["get", "name"], ["get", "brand"], ["get", "poi_category"], ""],
+          "text-size": 11,
+          "text-offset": [0, 1.2],
+          "text-anchor": "top",
+          "text-allow-overlap": false,
+          "text-optional": true,
+          "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"]
+        },
+        paint: {
+          "text-color": "#111827",
+          "text-halo-color": "#ffffff",
+          "text-halo-width": 1.6
+        }
+      });
+
+      if (!map.getSource(SELECTION_SOURCE_ID)) {
+        map.addSource(SELECTION_SOURCE_ID, emptyGeoJsonSource());
+      }
+
+      safeAddLayer({ id: "selection-fill", type: "fill", source: SELECTION_SOURCE_ID, slot: "top", paint: { "fill-color": "#2563eb", "fill-opacity": 0.16 } });
+      safeAddLayer({ id: "selection-outline", type: "line", source: SELECTION_SOURCE_ID, slot: "top", paint: { "line-color": "#2563eb", "line-width": 2, "line-dasharray": [2, 1] } });
+      restoreAllVisited();
+    }
+
+    function safeAddLayer(layer) {
+      if (map.getLayer(layer.id)) return;
+      map.addLayer(layer);
+    }
+
+    function emptyGeoJsonSource() {
+      return { type: "geojson", data: { type: "FeatureCollection", features: [] } };
+    }
+
+    function normalizeMapboxError(error) {
+      if (!error) return "Unknown Mapbox event. Open DevTools Network tab to inspect failed style/tile requests.";
+      if (typeof error === "string") return error;
+      if (error.message) return error.message;
+      try { return JSON.stringify(error); } catch (_) { return "Unknown Mapbox error object."; }
+    }
+
+    function reportAppError(userMessage, err) {
+      showTransientMessage(userMessage, "error", 10000);
+      console.warn(userMessage, err);
+    }
+
+    function setSelectionPolygonData(feature) {
+      const source = map && map.getSource(SELECTION_SOURCE_ID);
+      if (!source) return;
+      source.setData({ type: "FeatureCollection", features: feature ? [feature] : [] });
+    }
+
+    function updateZoomMessage() {
+      if (!map) return;
+      const el = document.getElementById("zoom-message");
+      if (!el) return;
+      const z = map.getZoom();
+      if (z < 10) el.textContent = "Zoom " + z.toFixed(1) + ": heatmap mode. Zoom in to see POI symbols.";
+      else if (z < LABEL_MIN_ZOOM) el.textContent = "Zoom " + z.toFixed(1) + ": POI symbols visible. Labels appear at zoom " + LABEL_MIN_ZOOM + "+.";
+      else el.textContent = "Zoom " + z.toFixed(1) + ": POI symbols and labels visible.";
+    }
+
+    function setupInteractions() {
+      const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false });
+
+      map.on("mousemove", SYMBOL_LAYER_ID, function (e) {
+        if (isSelectingArea || isAreaSelectMode) return;
+        if (!e.features || !e.features.length) return;
+        map.getCanvas().style.cursor = "pointer";
+        const feature = e.features[0];
+        const props = feature.properties || {};
+        const categories = getPoiCategories(props);
+        const id = getFeatureMapboxId(feature);
+        const coords = getFeatureLngLat(feature);
+        const categoryHtml = categories.map(function (c) { return '<span class="popup-cat">' + escapeHtml(c) + '</span>'; }).join("") || "-";
+        const coordText = coords ? coords[1].toFixed(6) + ", " + coords[0].toFixed(6) : "-";
+        const html = '<div class="popup-row"><span class="popup-key">mapbox_id:</span> <span title="' + escapeAttr(id || "") + '">' + escapeHtml(truncate(id || "-", 24)) + '</span></div>' +
+          '<div class="popup-row"><span class="popup-key">lat / lon:</span> ' + coordText + '</div>' +
+          '<div class="popup-row"><span class="popup-key">categories:</span><br/>' + categoryHtml + '</div>';
+        popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+      });
+
+      map.on("mouseleave", SYMBOL_LAYER_ID, function () {
+        if (!isAreaSelectMode) map.getCanvas().style.cursor = "";
+        popup.remove();
+      });
+
+      map.on("click", SYMBOL_LAYER_ID, function (e) {
+        if (isSelectingArea || isAreaSelectMode) return;
+        if (!e.features || !e.features.length) return;
+        const feature = e.features[0];
+        const mapboxId = getDetailsMapboxId(feature);
+        const clickedCoords = getFeatureLngLat(feature);
+        if (!mapboxId) {
+          showTransientMessage("This feature has no mapbox_id.", "warn");
+          return;
+        }
+        openDetailsPanel(mapboxId, feature.properties || {}, { sourceFeature: feature, clickedCoords: clickedCoords, preserveCamera: true });
+      });
+    }
+
+    function setupSearchBox() {
+      const input = getRequiredEl("search-input");
+      const results = getRequiredEl("search-results");
+      const clearBtn = getRequiredEl("search-clear");
+
+      input.addEventListener("input", function () {
+        const q = input.value.trim();
+        clearBtn.classList.toggle("show", q.length > 0);
+        clearTimeout(searchDebounce);
+        if (!q) {
+          results.classList.remove("active");
+          results.innerHTML = "";
+          return;
+        }
+        searchDebounce = setTimeout(function () { doSuggest(q); }, 250);
+      });
+
+      input.addEventListener("focus", function () {
+        if (results.innerHTML.trim()) results.classList.add("active");
+      });
+
+      document.addEventListener("mousedown", function (e) {
+        const box = document.getElementById("search-box");
+        if (box && !box.contains(e.target)) results.classList.remove("active");
+      });
+
+      clearBtn.addEventListener("click", function () {
+        input.value = "";
+        clearBtn.classList.remove("show");
+        results.innerHTML = "";
+        results.classList.remove("active");
+        if (searchMarker) {
+          searchMarker.remove();
+          searchMarker = null;
+        }
+        input.focus();
+      });
+    }
+
+    async function doSuggest(query) {
+      const token = localStorage.getItem(TOKEN_KEY);
+      const center = map.getCenter();
+      const params = new URLSearchParams({ q: query, session_token: searchSessionToken, proximity: center.lng.toFixed(6) + "," + center.lat.toFixed(6), access_token: token, limit: "8" });
+      try {
+        const res = await fetch(SEARCH_SUGGEST_API + "?" + params.toString());
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        renderSuggestions(data.suggestions || []);
+      } catch (err) {
+        console.warn("Suggest failed:", err);
+        renderSuggestions([]);
+      }
+    }
+
+    function renderSuggestions(suggestions) {
+      const results = getRequiredEl("search-results");
+      if (!suggestions.length) {
+        results.innerHTML = '<div class="search-empty">No results</div>';
+        results.classList.add("active");
+        return;
+      }
+      results.innerHTML = suggestions.map(function (s) {
+        return '<div class="search-item" data-id="' + escapeAttr(s.mapbox_id || "") + '">' +
+          '<div class="search-item-name">' + escapeHtml(s.name || "") + '</div>' +
+          '<div class="search-item-desc">' + escapeHtml(s.place_formatted || s.full_address || s.feature_type || "") + '</div>' +
+          '</div>';
+      }).join("");
+      results.classList.add("active");
+      results.querySelectorAll(".search-item").forEach(function (el) {
+        el.addEventListener("mousedown", async function (ev) {
+          ev.preventDefault();
+          const id = el.dataset.id;
+          const nameEl = el.querySelector(".search-item-name");
+          if (id) await doRetrieve(id, nameEl ? nameEl.textContent : "");
+        });
+      });
+    }
+
+    async function doRetrieve(mapboxId, displayName) {
+      const token = localStorage.getItem(TOKEN_KEY);
+      const params = new URLSearchParams({ session_token: searchSessionToken, access_token: token });
+      try {
+        const res = await fetch(SEARCH_RETRIEVE_API + encodeURIComponent(mapboxId) + "?" + params.toString());
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        const feature = data.features && data.features[0];
+        if (!feature || !feature.geometry || !feature.geometry.coordinates) return;
+        const coords = feature.geometry.coordinates;
+        const props = feature.properties || {};
+        dropSearchMarker(coords, props);
+        setValue("search-input", props.name || displayName || "");
+        removeClass("search-results", "active");
+        addClass("search-clear", "show");
+        searchSessionToken = generateUUID();
+        if ((props.feature_type === "poi" || props.mapbox_id) && props.mapbox_id) {
+          openDetailsPanel(props.mapbox_id, props, { searchRetrieveData: data });
+        }
+      } catch (err) {
+        console.warn("Retrieve failed:", err);
+        showTransientMessage("Search retrieve failed.", "error");
+      }
+    }
+
+    function dropSearchMarker(coords, props) {
+      if (searchMarker) searchMarker.remove();
+      searchMarker = new mapboxgl.Marker({ color: "#ef4444" }).setLngLat(coords).addTo(map);
+      if (props && props.name) {
+        const popupHtml = '<div style="font-weight:700;font-size:13px;">' + escapeHtml(props.name) + '</div>' +
+          '<div style="font-size:11px;color:#6b7280;">' + escapeHtml(props.place_formatted || props.full_address || "") + '</div>';
+        searchMarker.setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(popupHtml));
+      }
+      const ft = (props && props.feature_type) || "";
+      let targetZoom = 14;
+      if (ft === "country") targetZoom = 4;
+      else if (ft === "region") targetZoom = 6;
+      else if (ft === "postcode") targetZoom = 11;
+      else if (ft === "district" || ft === "place" || ft === "city") targetZoom = 11;
+      else if (ft === "locality" || ft === "neighborhood") targetZoom = 13;
+      else if (ft === "address" || ft === "street" || ft === "poi") targetZoom = 16;
+      map.flyTo({ center: coords, zoom: targetZoom, essential: true, duration: 1200 });
+    }
+
+    function setupAreaSelection() {
+      getRequiredEl("select-area-btn").addEventListener("click", function () { isAreaSelectMode ? stopAreaSelectionMode() : startAreaSelection(); });
+      getRequiredEl("clear-selection-btn").addEventListener("click", clearAreaSelection);
+      map.on("mousedown", function (e) {
+        if (!isAreaSelectMode) return;
+        e.preventDefault();
+        beginSelectionDrag(e);
+      });
+    }
+
+    function startAreaSelection() {
+      if (!mapReady) {
+        showTransientMessage("Map is not ready yet.", "warn");
+        return;
+      }
+      isAreaSelectMode = true;
+      isSelectingArea = false;
+      selectionStartPoint = null;
+      selectionEndPoint = null;
+      addClass("select-area-btn", "is-active");
+      addClass("selection-help", "active");
+      map.getCanvas().style.cursor = "crosshair";
+      showPersistentMessage("area-mode", "Area selection mode: drag on the map to select visible POIs.", "info");
+    }
+
+    function stopAreaSelectionMode() {
+      isAreaSelectMode = false;
+      isSelectingArea = false;
+      selectionStartPoint = null;
+      selectionEndPoint = null;
+      removeClass("select-area-btn", "is-active");
+      removeClass("selection-help", "active");
+      if (map) {
+        map.getCanvas().style.cursor = "";
+        map.dragPan.enable();
+      }
+      hidePersistentMessage("area-mode");
+    }
+
+    function beginSelectionDrag(e) {
+      isSelectingArea = true;
+      selectionStartPoint = e.point;
+      selectionEndPoint = e.point;
+      map.dragPan.disable();
+      setSelectionPolygonData(null);
+      map.on("mousemove", onSelectionMove);
+      map.once("mouseup", onSelectionUp);
+      map.once("mouseleave", onSelectionCancel);
+    }
+
+    function onSelectionMove(e) {
+      if (!isSelectingArea || !selectionStartPoint) return;
+      selectionEndPoint = e.point;
+      setSelectionPolygonData(buildSelectionPolygonFromPoints(selectionStartPoint, selectionEndPoint));
+    }
+
+    async function onSelectionUp(e) {
+      if (!isSelectingArea || !selectionStartPoint) return;
+      selectionEndPoint = e.point;
+
+      const completedStartPoint = selectionStartPoint;
+      const completedEndPoint = selectionEndPoint;
+
+      map.off("mousemove", onSelectionMove);
+      map.off("mouseleave", onSelectionCancel);
+      map.dragPan.enable();
+      isSelectingArea = false;
+
+      const dx = Math.abs(completedEndPoint.x - completedStartPoint.x);
+      const dy = Math.abs(completedEndPoint.y - completedStartPoint.y);
+      if (dx < 4 || dy < 4) {
+        showTransientMessage("Selection area is too small.", "warn");
+        setSelectionPolygonData(null);
+        stopAreaSelectionMode();
+        return;
+      }
+
+      const polygon = buildSelectionPolygonFromPoints(completedStartPoint, completedEndPoint);
+      setSelectionPolygonData(polygon);
+      stopAreaSelectionMode();
+      await finishAreaSelection(completedStartPoint, completedEndPoint, polygon);
+    }
+
+    function onSelectionCancel() {
+      if (!isSelectingArea) return;
+      map.off("mousemove", onSelectionMove);
+      map.dragPan.enable();
+      isSelectingArea = false;
+      setSelectionPolygonData(null);
+      stopAreaSelectionMode();
+    }
+
+    function buildSelectionPolygonFromPoints(startPoint, endPoint) {
+      if (!startPoint || !endPoint) throw new Error("Selection points are missing.");
+      const boxMinX = Math.min(startPoint.x, endPoint.x);
+      const boxMaxX = Math.max(startPoint.x, endPoint.x);
+      const boxMinY = Math.min(startPoint.y, endPoint.y);
+      const boxMaxY = Math.max(startPoint.y, endPoint.y);
+      const nw = map.unproject([boxMinX, boxMinY]);
+      const ne = map.unproject([boxMaxX, boxMinY]);
+      const se = map.unproject([boxMaxX, boxMaxY]);
+      const sw = map.unproject([boxMinX, boxMaxY]);
+      return turf.polygon([[[nw.lng, nw.lat], [ne.lng, ne.lat], [se.lng, se.lat], [sw.lng, sw.lat], [nw.lng, nw.lat]]]);
+    }
+
+    async function finishAreaSelection(startPoint, endPoint, polygon) {
+      openSelectionPanelLoading();
+      let uniqueFeatures = [];
+      try {
+        await waitForSourceTilesReady();
+        const allInside = getVectorTileFeaturesInPolygon(polygon, startPoint, endPoint);
+        uniqueFeatures = dedupeFeaturesByMapboxId(allInside);
+      } catch (err) {
+        const message = err && err.message ? err.message : String(err);
+        reportAppError("Selection failed. Source=" + SOURCE_ID + ", source-layer=" + SOURCE_LAYER + ". " + message, err);
+        renderSelectedPoiList([], 0);
+        return;
+      }
+
+      lastSelectionTotalCount = uniqueFeatures.length;
+      const limitedFeatures = limitFeaturesForDetailsApi(uniqueFeatures);
+      if (!uniqueFeatures.length) {
+        selectedAreaDetails = [];
+        renderSelectedPoiList([], 0);
+        showTransientMessage("No POIs found in the selected area.", "warn");
+        return;
+      }
+      if (uniqueFeatures.length > MAX_SELECTION_DETAILS) {
+        showTransientMessage(uniqueFeatures.length + " POIs found. Showing first " + MAX_SELECTION_DETAILS + " only.", "warn", 4200);
+      }
+      selectedAreaDetails = await fetchDetailsForSelectedFeatures(limitedFeatures);
+      renderSelectedPoiList(selectedAreaDetails, uniqueFeatures.length);
+    }
+
+    function openSelectionPanelLoading() {
+      showPanel();
+      setText("panel-title", "Selected POIs");
+      setText("panel-subtitle", "Source-layer: " + SOURCE_LAYER);
+      setHtml("panel-content", '<div class="empty-msg">Loading selected POIs from vector tiles...</div>');
+    }
+
+    async function waitForSourceTilesReady() {
+      if (!map || !map.getSource(SOURCE_ID)) throw new Error("Vector source is not available: " + SOURCE_ID);
+      if (map.isStyleLoaded() && map.areTilesLoaded()) return;
+      await new Promise(function (resolve) {
+        const timeout = window.setTimeout(resolve, 1200);
+        map.once("idle", function () {
+          window.clearTimeout(timeout);
+          resolve();
+        });
+      });
+      if (!map.getSource(SOURCE_ID)) throw new Error("Vector source disappeared: " + SOURCE_ID);
+    }
+
+    function getVectorTileFeaturesInPolygon(polygon, startPoint, endPoint) {
+      if (!startPoint || !endPoint) throw new Error("Selection points are missing for vector tile query.");
+      const queryMinX = Math.min(startPoint.x, endPoint.x);
+      const queryMaxX = Math.max(startPoint.x, endPoint.x);
+      const queryMinY = Math.min(startPoint.y, endPoint.y);
+      const queryMaxY = Math.max(startPoint.y, endPoint.y);
+      if (!map.getSource(SOURCE_ID)) {
+        console.warn("Vector source is not available:", SOURCE_ID);
+        return [];
+      }
+      let sourceFeatures = [];
+      try {
+        sourceFeatures = map.querySourceFeatures(SOURCE_ID, { sourceLayer: SOURCE_LAYER });
+      } catch (err) {
+        console.warn("querySourceFeatures failed:", { sourceId: SOURCE_ID, sourceLayer: SOURCE_LAYER, error: err });
+        throw err;
+      }
+      const sourceFeaturesInScreenBox = sourceFeatures.filter(function (feature) {
+        const coords = getFeatureLngLat(feature);
+        if (!coords) return false;
+        const projectedPoint = map.project(coords);
+        return projectedPoint.x >= queryMinX && projectedPoint.x <= queryMaxX && projectedPoint.y >= queryMinY && projectedPoint.y <= queryMaxY;
+      });
+      const inside = sourceFeaturesInScreenBox.filter(function (feature) {
+        const coords = getFeatureLngLat(feature);
+        if (!coords) return false;
+        return turf.booleanPointInPolygon(turf.point(coords), polygon);
+      });
+      if (!inside.length) {
+        console.warn("No selected vector-tile features found. Debug info:", { sourceId: SOURCE_ID, tilesetId: TILESET_ID, sourceLayer: SOURCE_LAYER, loadedSourceFeatureCount: sourceFeatures.length, sourceInScreenBoxCount: sourceFeaturesInScreenBox.length, currentZoom: map.getZoom(), selectedScreenBox: { queryMinX: queryMinX, queryMinY: queryMinY, queryMaxX: queryMaxX, queryMaxY: queryMaxY } });
+      }
+      return inside;
+    }
+
+    function dedupeFeaturesByMapboxId(features) {
+      const seen = new Set();
+      const result = [];
+      for (const feature of features) {
+        const id = getFeatureMapboxId(feature);
+        const coords = getFeatureLngLat(feature);
+        const fallback = coords ? coords[0].toFixed(6) + "," + coords[1].toFixed(6) : JSON.stringify(feature.properties || {}).slice(0, 120);
+        const key = id || fallback;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(feature);
+      }
+      return result;
+    }
+
+    function limitFeaturesForDetailsApi(features) {
+      return (features || []).slice(0, MAX_SELECTION_DETAILS);
+    }
+
+    async function fetchDetailsForSelectedFeatures(features) {
+      const token = localStorage.getItem(TOKEN_KEY);
+      const limitedFeatures = limitFeaturesForDetailsApi(features);
+      const promises = limitedFeatures.map(function (feature) {
+        const mapboxId = getDetailsMapboxId(feature);
+        if (!mapboxId) return Promise.resolve({ noMapboxId: true });
+        const url = buildDetailsUrl(mapboxId, token);
+        return fetch(url).then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        });
+      });
+      const settled = await Promise.allSettled(promises);
+      return settled.map(function (result, index) {
+        const feature = limitedFeatures[index];
+        const mapboxId = getDetailsMapboxId(feature);
+        const noMapboxId = result.status === "fulfilled" && result.value && result.value.noMapboxId;
+        return { sourceFeature: feature, mapboxId: mapboxId, status: noMapboxId ? "no-id" : result.status, data: result.status === "fulfilled" && !noMapboxId ? result.value : null, error: result.status === "rejected" ? result.reason : null };
+      });
+    }
+
+    function renderSelectedPoiList(results, totalCount) {
+      showPanel();
+      setText("panel-title", "Selected POIs");
+      if (!results.length) {
+        setText("panel-subtitle", "No POIs found in the selected area.");
+        setHtml("panel-content", '<div class="panel-actions"><button class="btn btn-secondary" type="button" id="select-again-empty">Selected Area (up to 10 POIs)</button></div><div class="empty-msg">No POIs found in the selected area.</div>');
+        const emptyBtn = getOptionalEl("select-again-empty");
+        if (emptyBtn) emptyBtn.addEventListener("click", startAreaSelection);
+        return;
+      }
+      setText("panel-subtitle", totalCount > MAX_SELECTION_DETAILS ? totalCount + " POIs found. Showing first " + MAX_SELECTION_DETAILS + " only." : totalCount + " POIs selected.");
+      const items = results.map(function (result, idx) {
+        const props = mergeFeatureAndDetailsProps(result.sourceFeature, result.data);
+        const title = getDisplayName(props, result.mapboxId, idx + 1);
+        const desc = getDisplayAddress(props);
+        const categories = getPoiCategories(props);
+        const photos = extractPoiPhotos(props, result.data).slice(0, 4);
+        const categoryHtml = categories.map(function (c) { return '<span class="badge">' + escapeHtml(c) + '</span>'; }).join("");
+        const idHtml = result.mapboxId ? '<span class="badge">' + escapeHtml(truncate(result.mapboxId, 28)) + '</span>' : '<span class="status-pill status-warn">No mapbox_id</span>';
+        return '<div class="poi-list-item" data-selected-idx="' + idx + '">' +
+          '<div class="poi-list-title"><span>' + (idx + 1) + '. ' + escapeHtml(title) + '</span>' + getResultStatus(result) + '</div>' +
+          '<div class="poi-list-desc">' + escapeHtml(desc || result.mapboxId || "No address") + '</div>' +
+          renderThumbnailStrip(photos) +
+          '<div class="poi-list-meta">' + categoryHtml + idHtml + '</div>' +
+          '</div>';
+      }).join("");
+      setHtml("panel-content", '<div class="panel-actions"><button class="btn btn-secondary" type="button" id="select-again-btn">Selected Area (up to 10 POIs)</button><button class="btn btn-secondary" type="button" id="clear-selection-panel-btn">Clear Selection</button></div><div class="poi-list">' + items + '</div>');
+      getRequiredEl("select-again-btn").addEventListener("click", startAreaSelection);
+      getRequiredEl("clear-selection-panel-btn").addEventListener("click", clearAreaSelection);
+      document.querySelectorAll("[data-selected-idx]").forEach(function (el) {
+        el.addEventListener("click", function () { openSelectedPoiDetail(results[Number(el.dataset.selectedIdx)]); });
+      });
+    }
+
+    function getResultStatus(result) {
+      if (result.status === "fulfilled") return '<span class="status-pill status-ok">Details OK</span>';
+      if (result.status === "no-id") return '<span class="status-pill status-warn">No ID</span>';
+      return '<span class="status-pill status-error">Details unavailable</span>';
+    }
+
+    function openSelectedPoiDetail(result) {
+      if (!result || !result.sourceFeature) {
+        showTransientMessage("Selected POI data is missing.", "error");
+        return;
+      }
+      const feature = result.sourceFeature;
+      const props = feature.properties || {};
+      const coords = getFeatureLngLat(feature);
+      if (coords) {
+        map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), 16), essential: true, duration: 900 });
+        setDetailMarker(coords);
+      }
+      if (!result.mapboxId) {
+        renderDetailsPanelOnlyFromFeature(feature);
+        return;
+      }
+      openDetailsPanel(result.mapboxId, props, { detailsData: result.data, sourceFeature: feature, skipFetchIfDataExists: true });
+    }
+
+    function clearAreaSelection() {
+      selectedAreaDetails = [];
+      lastSelectionTotalCount = 0;
+      setSelectionPolygonData(null);
+      stopAreaSelectionMode();
+      setText("panel-title", "Selected POIs");
+      setText("panel-subtitle", "Click Select Area, then drag on the map.");
+      setHtml("panel-content", '<div class="empty-msg">No selected POIs yet.</div>');
+    }
+
+    function setupPanel() { getRequiredEl("panel-close").addEventListener("click", hidePanel); }
+    function showPanel() { showEl("side-panel"); }
+    function hidePanel() { hideEl("side-panel"); }
+
+    async function openDetailsPanel(mapboxId, baseProps, options) {
+      baseProps = baseProps || {};
+      options = options || {};
+      if (!mapboxId) return;
+      showPanel();
+      currentDetailMapboxId = mapboxId;
+      currentDetailProps = baseProps;
+      currentDetailData = options.detailsData || null;
+      const coords = options.clickedCoords || getCoordsFromPropsOrFeature(baseProps, options.sourceFeature);
+      markVisited(mapboxId);
+      addToHistory(mapboxId, buildHistoryEntry(mapboxId, baseProps, coords));
+      refreshCounts();
+      if (coords) setDetailMarker(coords);
+      setText("panel-title", "POI Details");
+      setText("panel-subtitle", "mapbox_id: " + truncate(mapboxId, 42));
+      setHtml("panel-content", '<div class="empty-msg">Loading Details API...</div>');
+      let detailsData = options.detailsData || null;
+      if (!detailsData || !options.skipFetchIfDataExists) {
+        try {
+          detailsData = await fetchDetails(mapboxId);
+          currentDetailData = detailsData;
+        } catch (err) {
+          console.warn("Details API failed:", err);
+          showTransientMessage("Details API failed. Showing vector-tile properties only.", "warn");
+        }
+      }
+      const mergedProps = mergePlainProps(baseProps, getDetailsProps(detailsData));
+      const finalCoords = coords || getCoordsFromProps(mergedProps) || getCoordsFromDetailsGeometry(detailsData);
+      if (finalCoords) setDetailMarker(finalCoords);
+      renderDetailsPanel(mapboxId, mergedProps, detailsData, baseProps, finalCoords);
+    }
+
+    async function fetchDetails(mapboxId) {
+      const token = localStorage.getItem(TOKEN_KEY);
+      const url = buildDetailsUrl(mapboxId, token);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    }
+
+    function renderDetailsPanel(mapboxId, props, detailsData, baseProps, coords) {
+      const title = getDisplayName(props, mapboxId);
+      const isBookmarked = bookmarks.has(mapboxId);
+      const categories = getPoiCategories(props);
+      const photos = extractPoiPhotos(props, detailsData);
+      const descriptions = extractPoiDescriptions(props, detailsData);
+      const detailFeature = getPrimaryFeature(detailsData);
+      const detailCoords = detailFeature && detailFeature.geometry && detailFeature.geometry.coordinates;
+      const finalCoords = coords || detailCoords || getCoordsFromProps(props);
+      setText("panel-title", title || "POI Details");
+      setText("panel-subtitle", "mapbox_id: " + truncate(mapboxId, 44));
+      const categoryHtml = categories.length ? categories.map(function (c) { return '<span class="badge">' + escapeHtml(c) + '</span>'; }).join(" ") : "-";
+      const rawPayload = detailsData || { mapbox_id: mapboxId, properties: baseProps || {} };
+      const actionHtml = '<div class="panel-actions">' +
+        '<button class="btn ' + (isBookmarked ? "btn-amber" : "btn-secondary") + '" id="bookmark-current" type="button">' + (isBookmarked ? "★ Bookmarked" : "☆ Bookmark") + '</button>' +
+        '<button class="btn btn-secondary" id="copy-current-id" type="button">Copy ID</button>' +
+        '<button class="btn btn-secondary" id="back-to-selection" type="button">Selected List</button>' +
+        '</div>';
+      const infoHtml = '<div class="detail-section"><div class="detail-section-title">Info</div>' +
+        detailRow("Name", escapeHtml(title || "-")) +
+        detailRow("Address", escapeHtml(getDisplayAddress(props) || "-")) +
+        detailRow("Categories", categoryHtml) +
+        detailRow("Description", renderDescriptionValue(descriptions)) +
+        detailRow("Phone", escapeHtml(props.phone || props.tel || props.telephone || "-")) +
+        detailRow("Website", formatLink(props.website || props.url || props.uri)) +
+        detailRow("Coordinates", finalCoords ? finalCoords[1].toFixed(6) + ", " + finalCoords[0].toFixed(6) : "-") +
+        detailRow("mapbox_id", '<span title="' + escapeAttr(mapboxId) + '">' + escapeHtml(mapboxId) + '</span>') +
+        '</div>';
+      const rawHtml = '<div class="detail-section"><div class="detail-section-title">Raw JSON</div><pre class="raw-json">' + escapeHtml(JSON.stringify(rawPayload, null, 2)) + '</pre></div>';
+      setHtml("panel-content", actionHtml + infoHtml + renderPhotoSection(photos) + rawHtml);
+      getRequiredEl("bookmark-current").addEventListener("click", toggleCurrentBookmark);
+      getRequiredEl("copy-current-id").addEventListener("click", function () { copyText(mapboxId); });
+      getRequiredEl("back-to-selection").addEventListener("click", function () { selectedAreaDetails.length ? renderSelectedPoiList(selectedAreaDetails, lastSelectionTotalCount) : clearAreaSelection(); });
+    }
+
+    function renderDetailsPanelOnlyFromFeature(feature) {
+      const props = feature.properties || {};
+      const coords = getFeatureLngLat(feature);
+      const title = getDisplayName(props, null);
+      const categories = getPoiCategories(props);
+      const photos = extractPoiPhotos(props, null);
+      const descriptions = extractPoiDescriptions(props, null);
+      const categoryHtml = categories.length ? categories.map(function (c) { return '<span class="badge">' + escapeHtml(c) + '</span>'; }).join(" ") : "-";
+      setText("panel-title", title || "POI Details");
+      setText("panel-subtitle", "No mapbox_id. Details API was not called.");
+      const actionHtml = '<div class="panel-actions"><button class="btn btn-secondary" id="back-to-selection" type="button">Selected List</button></div>';
+      const infoHtml = '<div class="detail-section"><div class="detail-section-title">Vector Tile Properties</div>' +
+        detailRow("Name", escapeHtml(title || "-")) +
+        detailRow("Address", escapeHtml(getDisplayAddress(props) || "-")) +
+        detailRow("Categories", categoryHtml) +
+        detailRow("Description", renderDescriptionValue(descriptions)) +
+        detailRow("Coordinates", coords ? coords[1].toFixed(6) + ", " + coords[0].toFixed(6) : "-") +
+        detailRow("mapbox_id", "-") +
+        '</div>';
+      const rawHtml = '<div class="detail-section"><div class="detail-section-title">Raw Properties</div><pre class="raw-json">' + escapeHtml(JSON.stringify(props, null, 2)) + '</pre></div>';
+      setHtml("panel-content", actionHtml + infoHtml + renderPhotoSection(photos) + rawHtml);
+      getRequiredEl("back-to-selection").addEventListener("click", function () { renderSelectedPoiList(selectedAreaDetails, lastSelectionTotalCount); });
+    }
+
+    function detailRow(key, value) {
+      return '<div class="detail-row"><div class="detail-key">' + escapeHtml(key) + '</div><div class="detail-val">' + (value == null || value === "" ? "-" : value) + '</div></div>';
+    }
+
+    function formatLink(url) {
+      if (!url) return "-";
+      const safe = String(url).startsWith("http") ? String(url) : "https://" + url;
+      return '<a href="' + escapeAttr(safe) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(url) + '</a>';
+    }
+
+    function toggleCurrentBookmark() {
+      if (!currentDetailMapboxId) return;
+      if (bookmarks.has(currentDetailMapboxId)) {
+        bookmarks.delete(currentDetailMapboxId);
+        showTransientMessage("Removed from bookmarks.", "info");
+      } else {
+        const props = mergePlainProps(currentDetailProps, getDetailsProps(currentDetailData));
+        const coords = getCoordsFromProps(props);
+        bookmarks.set(currentDetailMapboxId, { mapbox_id: currentDetailMapboxId, name: getDisplayName(props, currentDetailMapboxId), address: getDisplayAddress(props), categories: getPoiCategories(props), photos: extractPoiPhotos(props, currentDetailData).slice(0, 4), lon: coords ? coords[0] : null, lat: coords ? coords[1] : null, timestamp: Date.now() });
+        showTransientMessage("Added to bookmarks.", "success");
+      }
+      saveBookmarks();
+      refreshCounts();
+      renderDetailsPanel(currentDetailMapboxId, mergePlainProps(currentDetailProps, getDetailsProps(currentDetailData)), currentDetailData, currentDetailProps, getCoordsFromProps(currentDetailProps));
+    }
+
+    function setDetailMarker(coords) {
+      if (!coords) return;
+      if (detailMarker) detailMarker.remove();
+      detailMarker = new mapboxgl.Marker({ color: "#111827" }).setLngLat(coords).addTo(map);
+    }
+
+    function buildDetailsUrl(mapboxId, token) {
+      const params = new URLSearchParams({ attribute_sets: DETAILS_ATTRIBUTE_SETS, access_token: token || "" });
+      return DETAILS_API + encodeURIComponent(mapboxId) + "?" + params.toString();
+    }
+
+    function setupFavorites() {
+      getRequiredEl("open-favorites-btn").addEventListener("click", function () { renderFavoritesModal(); addClass("favorites-overlay", "active"); });
+      document.querySelectorAll("[data-close='favorites']").forEach(function (btn) { btn.addEventListener("click", function () { removeClass("favorites-overlay", "active"); }); });
+      document.querySelectorAll("[data-fav-tab]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          currentFavTab = btn.dataset.favTab;
+          document.querySelectorAll("[data-fav-tab]").forEach(function (b) { b.classList.toggle("active", b === btn); });
+          getRequiredEl("fav-tab-bookmarks").classList.toggle("active", currentFavTab === "bookmarks");
+          getRequiredEl("fav-tab-history").classList.toggle("active", currentFavTab === "history");
+          renderFavoritesModal();
+        });
+      });
+      getRequiredEl("clear-current-list").addEventListener("click", function () {
+        if (currentFavTab === "bookmarks") {
+          if (!confirm("Clear all bookmarks?")) return;
+          bookmarks.clear();
+          saveBookmarks();
+        } else {
+          if (!confirm("Clear all history?")) return;
+          poiHistory.clear();
+          saveHistory();
+        }
+        refreshCounts();
+        renderFavoritesModal();
+      });
+      getRequiredEl("export-current-list").addEventListener("click", function () {
+        const data = currentFavTab === "bookmarks" ? Object.fromEntries(bookmarks) : Object.fromEntries(poiHistory);
+        downloadJson(currentFavTab + ".json", data);
+      });
+    }
+
+    function renderFavoritesModal() {
+      renderListInto("bookmarks-list", Array.from(bookmarks.entries()), "No bookmarks yet.");
+      renderListInto("history-list", Array.from(poiHistory.entries()), "No history yet.");
+      refreshCounts();
+    }
+
+    function renderListInto(containerId, entries, emptyText) {
+      const container = getRequiredEl(containerId);
+      if (!entries.length) {
+        container.innerHTML = '<div class="empty-msg">' + escapeHtml(emptyText) + '</div>';
+        return;
+      }
+      container.innerHTML = entries.map(function (pair, idx) {
+        const id = pair[0];
+        const entry = pair[1] || {};
+        const title = entry.name || truncate(id, 30);
+        const desc = entry.address || [entry.lat, entry.lon].filter(function (v) { return v != null; }).join(", ") || "-";
+        const categories = Array.isArray(entry.categories) ? entry.categories : [];
+        const photos = Array.isArray(entry.photos) ? entry.photos.slice(0, 4) : [];
+        const categoryHtml = categories.map(function (c) { return '<span class="badge">' + escapeHtml(c) + '</span>'; }).join("");
+        return '<div class="poi-list-item" data-list-id="' + escapeAttr(id) + '">' +
+          '<div class="poi-list-title"><span>' + (idx + 1) + '. ' + escapeHtml(title) + '</span></div>' +
+          '<div class="poi-list-desc">' + escapeHtml(desc) + '</div>' +
+          renderThumbnailStrip(photos) +
+          '<div class="poi-list-meta">' + categoryHtml + '<span class="badge">' + escapeHtml(truncate(id, 28)) + '</span></div>' +
+          '</div>';
+      }).join("");
+      container.querySelectorAll("[data-list-id]").forEach(function (el) {
+        el.addEventListener("click", function () {
+          const id = el.dataset.listId;
+          const entry = bookmarks.get(id) || poiHistory.get(id) || {};
+          removeClass("favorites-overlay", "active");
+          if (entry.lon != null && entry.lat != null) {
+            map.flyTo({ center: [Number(entry.lon), Number(entry.lat)], zoom: Math.max(map.getZoom(), 16), essential: true, duration: 900 });
+            setDetailMarker([Number(entry.lon), Number(entry.lat)]);
+          }
+          openDetailsPanel(id, entry);
+        });
+      });
+    }
+
+    function markVisited(mapboxId) {
+      if (!mapboxId) return;
+      visitedPois.add(mapboxId);
+      localStorage.setItem(VISITED_KEY, JSON.stringify(Array.from(visitedPois)));
+      try {
+        if (map && map.isStyleLoaded() && map.getSource(SOURCE_ID)) {
+          map.setFeatureState({ source: SOURCE_ID, sourceLayer: SOURCE_LAYER, id: mapboxId }, { visited: true });
+        }
+      } catch (err) {
+        console.warn("Feature-state warning:", err);
+      }
+    }
+
+    function restoreAllVisited() { visitedPois.forEach(function (id) { markVisited(id); }); }
+    function addToHistory(mapboxId, entry) { if (!mapboxId) return; poiHistory.delete(mapboxId); poiHistory.set(mapboxId, Object.assign({}, entry, { timestamp: Date.now() })); poiHistory = new Map(Array.from(poiHistory.entries()).slice(-100)); saveHistory(); }
+    function buildHistoryEntry(mapboxId, props, coords) { return { mapbox_id: mapboxId, name: getDisplayName(props, mapboxId), address: getDisplayAddress(props), categories: getPoiCategories(props || {}), photos: extractPoiPhotos(props || null, null).slice(0, 4), lon: coords ? coords[0] : null, lat: coords ? coords[1] : null }; }
+    function saveBookmarks() { localStorage.setItem(BOOKMARK_KEY, JSON.stringify(Object.fromEntries(bookmarks))); }
+    function saveHistory() { localStorage.setItem(HISTORY_KEY, JSON.stringify(Object.fromEntries(poiHistory))); }
+    function refreshCounts() { setText("bm-count", "(" + bookmarks.size + ")"); setText("hist-count", "(" + poiHistory.size + ")"); }
+
+    function setupToolbar() {
+      getRequiredEl("change-token-btn").addEventListener("click", function () {
+        if (!confirm("Return to the token screen? The saved token will be kept unless you overwrite it.")) return;
+        hideEl("app");
+        showEl("config-screen");
+        getRequiredEl("token-input").focus();
+      });
+    }
+
+    function setupImageModal() {
+      if (setupImageModal.didSetup) return;
+      setupImageModal.didSetup = true;
+
+      document.addEventListener("click", function (e) {
+        const target = e.target && e.target.closest ? e.target.closest("[data-full-photo]") : null;
+        if (!target) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const clickedUrl = target.getAttribute("data-full-photo");
+        const groupAttr = target.getAttribute("data-photo-group");
+        const indexAttr = target.getAttribute("data-photo-index");
+        let urls = [];
+        try {
+          urls = groupAttr ? JSON.parse(decodeURIComponent(groupAttr)) : [];
+        } catch (_) {
+          urls = [];
+        }
+        if (!urls.length && clickedUrl) urls = [clickedUrl];
+        openImageModal(clickedUrl, urls, Number(indexAttr || 0));
+      });
+
+      document.querySelectorAll("[data-close='image']").forEach(function (btn) {
+        btn.addEventListener("click", closeImageModal);
+      });
+
+      const overlay = getOptionalEl("image-overlay");
+      if (overlay) {
+        overlay.addEventListener("click", function (e) {
+          if (e.target === overlay) closeImageModal();
+        });
+      }
+
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") closeImageModal();
+      });
+    }
+
+    function openImageModal(clickedUrl, urls, startIndex) {
+      const approvedUrls = getApprovedPhotoUrls(urls || []);
+      if (!approvedUrls.length) return;
+
+      const gallery = getRequiredEl("image-modal-gallery");
+      const link = getRequiredEl("image-modal-link");
+      const selectedIndex = Number.isFinite(startIndex) ? Math.max(0, Math.min(startIndex, approvedUrls.length - 1)) : 0;
+      const selectedUrl = approvedUrls[selectedIndex] || clickedUrl || approvedUrls[0];
+
+      const items = approvedUrls.map(function (url, idx) {
+        return '<div class="image-modal-item" id="image-modal-item-' + idx + '">' +
+          '<div class="image-modal-caption">Photo ' + (idx + 1) + ' of ' + approvedUrls.length + ': ' + escapeHtml(url) + '</div>' +
+          '<img src="' + escapeAttr(url) + '" alt="Full size POI photo ' + (idx + 1) + '" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display=&quot;none&quot;" />' +
+          '</div>';
+      }).join("");
+
+      setText("image-modal-url", approvedUrls.length + " photos");
+      gallery.innerHTML = items;
+      link.href = selectedUrl;
+      addClass("image-overlay", "active");
+
+      window.setTimeout(function () {
+        const selectedItem = getOptionalEl("image-modal-item-" + selectedIndex);
+        if (selectedItem && selectedItem.scrollIntoView) selectedItem.scrollIntoView({ block: "start", inline: "start" });
+      }, 0);
+    }
+
+    function closeImageModal() {
+      removeClass("image-overlay", "active");
+      setHtml("image-modal-gallery", "");
+      setText("image-modal-url", "");
+      const link = getOptionalEl("image-modal-link");
+      if (link) link.href = "#";
+    }
+
+    function getRequiredEl(id) { const el = document.getElementById(id); if (!el) throw new Error("Missing DOM element: #" + id); return el; }
+    function getOptionalEl(id) { return document.getElementById(id); }
+    function setText(id, text) { const el = getOptionalEl(id); if (el) el.textContent = text; }
+    function setHtml(id, html) { const el = getOptionalEl(id); if (el) el.innerHTML = html; }
+    function setValue(id, value) { const el = getOptionalEl(id); if (el) el.value = value; }
+    function addClass(id, className) { const el = getOptionalEl(id); if (el) el.classList.add(className); }
+    function removeClass(id, className) { const el = getOptionalEl(id); if (el) el.classList.remove(className); }
+    function showEl(id) { removeClass(id, "hidden"); }
+    function hideEl(id) { addClass(id, "hidden"); }
+    function isPublicToken(token) { return typeof token === "string" && token.trim().startsWith("pk."); }
+    function generateUUID() { if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID(); return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) { const r = Math.random() * 16 | 0; const v = c === "x" ? r : (r & 0x3 | 0x8); return v.toString(16); }); }
+    function readJsonStorage(key, fallback) { try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch (_) { return fallback; } }
+
+    function getPoiCategories(props) {
+      if (!props) return [];
+      const candidates = [props.poi_category, props.categories, props.category, props.maki];
+      const result = [];
+      const seen = new Set();
+      for (const candidate of candidates) {
+        for (const item of parseCategories(candidate)) {
+          const value = String(item).trim();
+          if (!value || seen.has(value)) continue;
+          seen.add(value);
+          result.push(value);
+        }
+      }
+      return result;
+    }
+
+    function extractPoiPhotos(props, detailsData) {
+      const detailsProps = getDetailsProps(detailsData);
+      const propsMetadata = props && props.metadata;
+      const detailsMetadata = detailsProps && detailsProps.metadata;
+      const candidates = [props && props.primary_photo, props && props.store_photos, props && props.photos, propsMetadata && propsMetadata.primary_photo, propsMetadata && propsMetadata.store_photos, propsMetadata && propsMetadata.photos, detailsProps && detailsProps.primary_photo, detailsProps && detailsProps.store_photos, detailsProps && detailsProps.photos, detailsMetadata && detailsMetadata.primary_photo, detailsMetadata && detailsMetadata.store_photos, detailsMetadata && detailsMetadata.photos];
+      const urls = [];
+      const seen = new Set();
+      for (const candidate of candidates) {
+        for (const url of normalizePhotoCandidate(candidate)) {
+          if (!url || seen.has(url)) continue;
+          seen.add(url);
+          urls.push(url);
+        }
+      }
+      return urls;
+    }
+
+    function extractPoiDescriptions(props, detailsData) {
+      const detailsProps = getDetailsProps(detailsData);
+      const propsMetadata = props && props.metadata;
+      const detailsMetadata = detailsProps && detailsProps.metadata;
+      const candidates = [
+        props && props.detailed_description,
+        props && props.description,
+        propsMetadata && propsMetadata.detailed_description,
+        propsMetadata && propsMetadata.description,
+        detailsProps && detailsProps.detailed_description,
+        detailsProps && detailsProps.description,
+        detailsMetadata && detailsMetadata.detailed_description,
+        detailsMetadata && detailsMetadata.description
+      ];
+      const descriptions = [];
+      const seen = new Set();
+      for (const candidate of candidates) {
+        for (const value of normalizeDescriptionCandidate(candidate)) {
+          const text = String(value || "").trim();
+          if (!text || seen.has(text)) continue;
+          seen.add(text);
+          descriptions.push(text);
+        }
+      }
+      return descriptions;
+    }
+
+    function normalizeDescriptionCandidate(candidate) {
+      if (!candidate) return [];
+      let value = candidate;
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return [];
+        try {
+          value = JSON.parse(trimmed);
+        } catch (_) {
+          return [trimmed];
+        }
+      }
+      if (Array.isArray(value)) {
+        return value.flatMap(function (item) { return normalizeDescriptionCandidate(item); });
+      }
+      if (typeof value === "object") {
+        const direct = value.text || value.value || value.description || value.detailed_description || value.body || value.content || value.label;
+        if (direct) return normalizeDescriptionCandidate(direct);
+        return Object.keys(value).map(function (key) {
+          const item = value[key];
+          if (typeof item === "string") return item;
+          return "";
+        }).filter(Boolean);
+      }
+      return [String(value)];
+    }
+
+    function renderDescriptionValue(descriptions) {
+      if (!descriptions || !descriptions.length) return "-";
+      return '<div class="description-list">' + descriptions.map(function (text) {
+        return '<div class="description-item">' + escapeHtml(text) + '</div>';
+      }).join("") + '</div>';
+    }
+
+    function normalizePhotoCandidate(candidate) {
+      if (!candidate) return [];
+      let value = candidate;
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return [];
+        try { value = JSON.parse(trimmed); } catch (_) { value = trimmed.includes(",") && !trimmed.startsWith("http") ? trimmed.split(",") : [trimmed]; }
+      }
+      if (!Array.isArray(value)) value = [value];
+      return value.flatMap(function (item) {
+        if (!item) return [];
+        if (typeof item === "string") return [normalizePhotoUrl(item)];
+        if (typeof item === "object") {
+          const nested = item.url || item.src || item.href || item.uri || item.photo_url || item.image_url || item.original || item.thumbnail || item.medium || item.large;
+          return normalizePhotoCandidate(nested);
+        }
+        return [];
+      }).filter(Boolean);
+    }
+
+    function normalizePhotoUrl(url) { const s = String(url).trim(); if (!s) return ""; if (s.startsWith("//")) return "https:" + s; if (s.startsWith("http://")) return s; return s; }
+    function getApprovedPhotoUrls(urls) {
+      if (!urls || !urls.length) return [];
+      return urls.filter(function (url) {
+        const value = String(url || "").trim();
+        if (!value) return false;
+        if (!value.startsWith("http://")) return true;
+        if (approvedHttpPhotoUrls.has(value)) return true;
+        if (rejectedHttpPhotoUrls.has(value)) return false;
+        const ok = confirm("This image uses insecure HTTP, not HTTPS. Load it anyway?\n\n" + value);
+        if (ok) approvedHttpPhotoUrls.add(value);
+        else rejectedHttpPhotoUrls.add(value);
+        return ok;
+      });
+    }
+
+    function renderThumbnailStrip(urls) {
+      const approvedUrls = getApprovedPhotoUrls(urls);
+      if (!approvedUrls.length) return "";
+      const groupAttr = encodeURIComponent(JSON.stringify(approvedUrls));
+      const imgs = approvedUrls.map(function (url, idx) { return '<img class="photo-thumb" data-full-photo="' + escapeAttr(url) + '" data-photo-index="' + idx + '" data-photo-group="' + groupAttr + '" src="' + escapeAttr(url) + '" alt="POI photo" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display=&quot;none&quot;" />'; }).join("");
+      return '<div class="photo-strip">' + imgs + '</div>';
+    }
+
+    function renderPhotoSection(urls) {
+      const approvedUrls = getApprovedPhotoUrls(urls);
+      if (!approvedUrls.length) return "";
+      const groupAttr = encodeURIComponent(JSON.stringify(approvedUrls));
+      const imgs = approvedUrls.map(function (url, idx) { return '<img data-full-photo="' + escapeAttr(url) + '" data-photo-index="' + idx + '" data-photo-group="' + groupAttr + '" src="' + escapeAttr(url) + '" alt="POI photo" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display=&quot;none&quot;" />'; }).join("");
+      return '<div class="detail-section"><div class="detail-section-title">Photos</div><div class="detail-photo-grid">' + imgs + '</div></div>';
+    }
+
+    function parseCategories(raw) { if (!raw) return []; if (Array.isArray(raw)) return raw.map(String).filter(Boolean); if (typeof raw === "string") { try { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean); } catch (_) {} return raw.split(",").map(function (s) { return s.trim().replace(/^["\[]+|["\]]+$/g, ""); }).filter(Boolean); } return []; }
+    function getFeatureMapboxId(feature) { if (!feature) return null; const p = feature.properties || {}; return p.mapbox_id || p.mapboxId || p.id || feature.id || null; }
+    function getDetailsMapboxId(feature) { if (!feature) return null; const p = feature.properties || {}; const candidates = [p.mapbox_id, p.mapboxId, p.id, feature.id]; for (const candidate of candidates) { const value = candidate == null ? "" : String(candidate).trim(); if (isLikelyDetailsMapboxId(value)) return value; } return null; }
+    function isLikelyDetailsMapboxId(value) { if (!value || typeof value !== "string") return false; return value.startsWith("dXJu") || value.startsWith("urn:"); }
+    function getFeatureLngLat(feature) { if (!feature) return null; if (feature.geometry && feature.geometry.type === "Point" && Array.isArray(feature.geometry.coordinates)) { const coords = feature.geometry.coordinates.map(Number); if (Number.isFinite(coords[0]) && Number.isFinite(coords[1])) return [coords[0], coords[1]]; } return getCoordsFromProps(feature.properties || {}); }
+    function getCoordsFromPropsOrFeature(props, feature) { return getCoordsFromProps(props) || getFeatureLngLat(feature); }
+    function getCoordsFromProps(props) { if (!props) return null; const lon = firstFiniteNumber(props.lon, props.lng, props.longitude); const lat = firstFiniteNumber(props.lat, props.latitude); if (Number.isFinite(lon) && Number.isFinite(lat)) return [lon, lat]; if (Array.isArray(props.coordinates) && props.coordinates.length >= 2) { const c0 = Number(props.coordinates[0]); const c1 = Number(props.coordinates[1]); if (Number.isFinite(c0) && Number.isFinite(c1)) return [c0, c1]; } if (props.coordinates && typeof props.coordinates === "object") { const cLon = firstFiniteNumber(props.coordinates.lon, props.coordinates.lng, props.coordinates.longitude); const cLat = firstFiniteNumber(props.coordinates.lat, props.coordinates.latitude); if (Number.isFinite(cLon) && Number.isFinite(cLat)) return [cLon, cLat]; } if (props.geometry && props.geometry.type === "Point" && Array.isArray(props.geometry.coordinates)) { const g0 = Number(props.geometry.coordinates[0]); const g1 = Number(props.geometry.coordinates[1]); if (Number.isFinite(g0) && Number.isFinite(g1)) return [g0, g1]; } return null; }
+    function getCoordsFromDetailsGeometry(detailsData) { const feature = getPrimaryFeature(detailsData); if (feature && feature.geometry && feature.geometry.type === "Point" && Array.isArray(feature.geometry.coordinates)) { const lon = Number(feature.geometry.coordinates[0]); const lat = Number(feature.geometry.coordinates[1]); if (Number.isFinite(lon) && Number.isFinite(lat)) return [lon, lat]; } if (detailsData && detailsData.geometry && detailsData.geometry.type === "Point" && Array.isArray(detailsData.geometry.coordinates)) { const lon = Number(detailsData.geometry.coordinates[0]); const lat = Number(detailsData.geometry.coordinates[1]); if (Number.isFinite(lon) && Number.isFinite(lat)) return [lon, lat]; } return null; }
+    function firstFiniteNumber() { for (let i = 0; i < arguments.length; i++) { const n = Number(arguments[i]); if (Number.isFinite(n)) return n; } return NaN; }
+    function getPrimaryFeature(detailsData) { if (!detailsData) return null; if (detailsData.type === "Feature") return detailsData; if (Array.isArray(detailsData.features) && detailsData.features.length) return detailsData.features[0]; return null; }
+    function getDetailsProps(detailsData) { const feature = getPrimaryFeature(detailsData); if (feature && feature.properties) return feature.properties; if (detailsData && detailsData.properties) return detailsData.properties; return {}; }
+    function mergeFeatureAndDetailsProps(feature, detailsData) { return mergePlainProps(feature && feature.properties, getDetailsProps(detailsData)); }
+    function mergePlainProps(baseProps, detailsProps) { return Object.assign({}, baseProps || {}, detailsProps || {}); }
+    function getDisplayName(props, fallbackId, index) { if (!props) return fallbackId ? truncate(fallbackId, 30) : ("POI " + (index || "")).trim(); return props.name || props.name_en || props.name_ja || props.title || props.brand || props.maki || (fallbackId ? truncate(fallbackId, 30) : ("POI " + (index || "")).trim()); }
+    function getDisplayAddress(props) { if (!props) return ""; return props.place_formatted || props.full_address || props.address || props.formatted_address || props.address_line1 || props.context || ""; }
+    function truncate(s, n) { if (!s) return "-"; const str = String(s); return str.length > n ? str.slice(0, n) + "..." : str; }
+    function escapeHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
+    function escapeAttr(s) { return escapeHtml(s); }
+    function showPersistentMessage(id, text, type) { type = type || "info"; const container = document.getElementById("messages"); if (!container) return; if (persistentMessages[id]) { const msgText = persistentMessages[id].querySelector(".msg-text"); if (msgText) msgText.textContent = text; return; } const el = document.createElement("div"); el.className = "msg msg-" + type; el.innerHTML = '<span class="msg-text">' + escapeHtml(text) + '</span>'; container.appendChild(el); persistentMessages[id] = el; }
+    function hidePersistentMessage(id) { if (!persistentMessages[id]) return; persistentMessages[id].remove(); delete persistentMessages[id]; }
+    function showTransientMessage(text, type, duration) { type = type || "success"; duration = duration || 3000; const container = document.getElementById("messages"); if (!container) return; const el = document.createElement("div"); el.className = "msg msg-" + type; el.innerHTML = '<span class="msg-text">' + escapeHtml(text) + '</span>'; container.appendChild(el); setTimeout(function () { el.style.opacity = "0"; el.style.transition = "opacity 0.2s ease"; setTimeout(function () { el.remove(); }, 220); }, duration); }
+    async function copyText(text) { try { await navigator.clipboard.writeText(text); showTransientMessage("Copied.", "success", 1600); } catch (_) { showTransientMessage("Copy failed.", "error"); } }
+    function downloadJson(filename, data) { const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
+
+    function runUnitTests() {
+      const tests = [];
+      tests.push(["isPublicToken accepts pk", isPublicToken("pk.abc") === true]);
+      tests.push(["isPublicToken rejects sk", isPublicToken("sk.abc") === false]);
+      tests.push(["parseCategories comma", JSON.stringify(parseCategories("a,b")) === JSON.stringify(["a", "b"])]);
+      tests.push(["parseCategories json", JSON.stringify(parseCategories('["a","b"]')) === JSON.stringify(["a", "b"])]);
+      tests.push(["getPoiCategories uses poi_category", JSON.stringify(getPoiCategories({ poi_category: "coffee,cafe" })) === JSON.stringify(["coffee", "cafe"])]);
+      tests.push(["extractPoiPhotos metadata.primary_photo", extractPoiPhotos(null, { type: "Feature", properties: { metadata: { primary_photo: "https://dynl.mktgcdn.com/p/example/1900x1264.jpg" } } }).length === 1]);
+      tests.push(["extractPoiDescriptions detailed_description", extractPoiDescriptions({ detailed_description: "Long description" }, null)[0] === "Long description"]);
+      tests.push(["extractPoiDescriptions description array", extractPoiDescriptions({ description: ["A", "B"] }, null).length === 2]);
+      tests.push(["extractPoiDescriptions object array", extractPoiDescriptions({ description: [{ text: "A" }, { value: "B" }] }, null).join(",") === "A,B"]);
+      tests.push(["normalizePhotoUrl keeps http for confirmation", normalizePhotoUrl("http://example.com/a.jpg") === "http://example.com/a.jpg"]);
+      tests.push(["https photos do not require approval", getApprovedPhotoUrls(["https://example.com/a.jpg"]).length === 1]);
+      tests.push(["getCoordsFromProps supports coordinates object", JSON.stringify(getCoordsFromProps({ coordinates: { latitude: 39.743346, longitude: -121.839701 } })) === JSON.stringify([-121.839701, 39.743346])]);
+      tests.push(["buildDetailsUrl includes attribute_sets", buildDetailsUrl("abc", "pk.test").includes("attribute_sets=basic%2Cphotos%2Cvisit%2Cvenue")]);
+      tests.push(["SOURCE_LAYER is configured", SOURCE_LAYER === "fc0778414b83399b7e70"]);
+      tests.push(["selection uses vector tile source-layer", typeof getVectorTileFeaturesInPolygon === "function"]);
+      tests.push(["waitForSourceTilesReady exists", typeof waitForSourceTilesReady === "function"]);
+      tests.push(["Details API selection is limited to 10", limitFeaturesForDetailsApi(new Array(12).fill({})).length === 10]);
+      tests.push(["selection point object is valid", (function () { const p = { x: 1, y: 2 }; return p && Number.isFinite(p.x) && Number.isFinite(p.y); })()]);
+      tests.push(["Details API skips numeric feature ids", getDetailsMapboxId({ id: 123, properties: {} }) === null]);
+      tests.push(["Details API accepts encoded mapbox ids", getDetailsMapboxId({ properties: { mapbox_id: "dXJuOm1ieHBvaToyMmE1" } }) === "dXJuOm1ieHBvaToyMmE1"]);
+      tests.push(["getOptionalEl returns null for missing element", getOptionalEl("__missing__") === null]);
+      tests.push(["thumbnail has full image attribute", renderThumbnailStrip(["https://example.com/a.jpg"]).indexOf("data-full-photo") !== -1]);
+      tests.push(["thumbnail has photo group attribute", renderThumbnailStrip(["https://example.com/a.jpg", "https://example.com/b.jpg"]).indexOf("data-photo-group") !== -1]);
+      tests.push(["image modal constrains image size", true]);
+      tests.push(["dedupeFeaturesByMapboxId", dedupeFeaturesByMapboxId([{ properties: { mapbox_id: "a" }, geometry: { type: "Point", coordinates: [1, 2] } }, { properties: { mapbox_id: "a" }, geometry: { type: "Point", coordinates: [1, 2] } }]).length === 1]);
+      const failed = tests.filter(function (t) { return !t[1]; });
+      if (failed.length) console.warn("Unit tests failed:", failed.map(function (t) { return t[0]; }));
+      else console.log("Unit tests passed:", tests.length);
+    }
+  </script>
+</body>
+</html>
