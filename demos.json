@@ -13,5 +13,10 @@
     "title": "poi_factory_coverage_map",
     "description": "POIs updated from 15th May onward",
     "path": "./poi_factory_heatmap/"
+  },
+  {
+    "title": "routable_point_demo",
+    "description": "routable_point",
+    "path": "./routable_point/"
   }
 ]
