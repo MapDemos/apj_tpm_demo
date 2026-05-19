@@ -58,6 +58,40 @@
   #ctxMenu div:hover { background:#f0f0f0; }
   #ctxMenu div.disabled { color:#aaa; cursor:not-allowed; }
   #ctxMenu div.disabled:hover { background:#fff; }
+  
+  #routePanel {
+  position:absolute; top:60px; right:10px; z-index:5;
+  background:rgba(255,255,255,0.97); border-radius:8px;
+  box-shadow:0 2px 12px rgba(0,0,0,0.2); display:none;
+  width:320px; max-height:70vh; overflow-y:auto; font-size:13px;
+}
+.panel-title { position: relative; }
+.panel-close {
+  position: absolute;
+  right: 10px; top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  color: #888;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.panel-close:hover { color: #000; background: #eee; }
+.route-item { padding:10px 14px; border-bottom:1px solid #eee; cursor:pointer; border-left:4px solid transparent; transition:background .2s; }
+.route-item:hover { background:#f5f7fb; }
+.route-item.selected { border-left-color:#4264fb; background:#eef2ff; }
+.route-header { display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; }
+.route-title { font-weight:bold; flex:1; }
+.route-time, .route-dist { color:#555; font-size:12px; }
+.route-badges { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:4px; }
+.badge { font-size:11px; padding:2px 8px; border-radius:12px; background:#f0f0f0; }
+.badge.hwy { background:#d4f7e0; color:#0a7d3e; }
+.badge.local { background:#e6e9f0; color:#5567a0; }
+.badge.toll { background:#fff4d4; color:#806c20; }
+.badge.nottoll { background:#ffe4e4; color:#a02020; }
+.ic-list { font-size:11px; color:#444; margin-top:4px; padding-left:8px; border-left:2px solid #ddd; line-height:1.5; }
+
 </style>
 </head>
 <body>
@@ -65,7 +99,7 @@
 <div id="tokenModal">
   <div class="box">
     <h3 data-i18n="tokenTitle">Mapbox Access Token</h3>
-    <input id="tokenInput" type="text" value="pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw" />
+    <input id="tokenInput" type="text" value="pk.eyJ1Ijoia2Vuamktc2hpbWEiLCJhIjoiY21mbTJkcDZhMDl3OTJpczdtbHFvN3p1YiJ9.nET28crg2gfNWR5swRDqig" />
     <button id="tokenBtn" data-i18n="start">Start</button>
     <span style="margin-left:10px;">
       <label><input type="radio" name="initLang" value="ja" checked> 日本語</label>
@@ -88,6 +122,8 @@
 
 <div id="coordDisplay">-</div>
 
+<div id="routePanel"></div>
+
 <div id="ctxMenu">
   <div id="ctxRoute" data-i18n="route">現在地からのルーティング</div>
   <div id="ctxRouteRP" data-i18n="routeRP">現在地からのルーティング（Routable Point）</div>
@@ -98,12 +134,13 @@ const i18n = {
   ja: {
     tokenTitle: "Mapbox アクセストークン",
     start: "開始",
-    searchPh: "場所を検索...",
-    getLoc: "現在地取得",
-    dummyLoc: "ダミー現在地モード",
+    searchPh: "Mapbox Search BOX APIで場所を検索...",
+    getLoc: "📍現在地取得",
+    dummyLoc: "🚕ダミー現在地モード",
     route: "現在地からこの地点までのルーティング",
     routeRP: "現在地からこの地点までのルーティング（Routable Point）",
-    needCurrent: "先に現在地を設定してください"
+    needCurrent: "先に現在地を設定してください",
+    tollTitle: "🛣 高速料金", noToll: "料金情報なし" 
   },
   en: {
     tokenTitle: "Mapbox Access Token",
@@ -113,7 +150,8 @@ const i18n = {
     dummyLoc: "Dummy Location Mode",
     route: "Route from current location to here",
     routeRP: "Route from current location to here (Routable Point)",
-    needCurrent: "Please set the current location first."
+    needCurrent: "Please set the current location first.",
+    tollTitle: "🛣 Toll", noToll: "No toll info"
   }
 };
 
@@ -313,37 +351,368 @@ async function getRoutablePoint(lng, lat) {
   return [lng, lat];
 }
 
-// --- Directions API ---
+//新規追加　ルート複数表示
+const MAX_ROUTES = 4;
+const BEFORE_LAYER_ID = "road-label"; // フォールバックは後段で処理
+let currentRoutes = [];
+let selectedRouteIdx = 0;
+let routeLayersInited = false;
+let beforeLayer = undefined;
+
+function getBeforeLayer() {
+  if (beforeLayer !== undefined) return beforeLayer;
+  if (map.getLayer(BEFORE_LAYER_ID)) {
+    beforeLayer = BEFORE_LAYER_ID;
+  } else {
+    const labels = map.getStyle().layers.filter(l => /label/.test(l.id));
+    beforeLayer = labels.length ? labels[0].id : undefined;
+  }
+  return beforeLayer;
+}
+
+function initRouteLayers() {
+  if (routeLayersInited) return;
+  const bid = getBeforeLayer();
+
+  for (let i = 0; i < MAX_ROUTES; i++) {
+    map.addSource(`route-${i}`, { type:"geojson", data:{ type:"FeatureCollection", features:[] }});
+    map.addLayer({
+      id:`route-${i}`, type:"line", source:`route-${i}`,
+      layout:{ "line-join":"round", "line-cap":"round" },
+      paint:{ "line-color":"#9aa3b8", "line-width":5, "line-opacity":0.5 }
+    }, bid);
+
+    map.on("click", `route-${i}`, () => { if (i < currentRoutes.length) selectRoute(i); });
+    map.on("mouseenter", `route-${i}`, () => { map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", `route-${i}`, () => { map.getCanvas().style.cursor = ""; });
+  }
+
+  map.addSource("highway-selected", { type:"geojson", data:{ type:"FeatureCollection", features:[] }});
+  const glow = [
+    { id:"highway-aura",  color:"#00ff66", widths:[8,16,12,28,16,48], blur:20, opacity:0.55 },
+    { id:"highway-outer", color:"#00ff88", widths:[8,10,12,18,16,30], blur:8,  opacity:0.85 },
+    { id:"highway-mid",   color:"#66ffaa", widths:[8,6, 12,12,16,20], blur:2,  opacity:1 },
+    { id:"highway-core",  color:"#ffffff", widths:[8,2, 12,4, 16,8 ], blur:0,  opacity:1 }
+  ];
+  glow.forEach(g => {
+    map.addLayer({
+      id:g.id, type:"line", source:"highway-selected",
+      layout:{ "line-join":"round", "line-cap":"round" },
+      paint:{
+        "line-color":g.color,
+        "line-width":["interpolate",["linear"],["zoom"], g.widths[0],g.widths[1], g.widths[2],g.widths[3], g.widths[4],g.widths[5]],
+        "line-blur":g.blur,
+        "line-opacity":g.opacity
+      }
+    }, bid);
+  });
+
+  routeLayersInited = true;
+}
+
+function ensureDimLayer() {
+  if (map.getLayer("dim-overlay")) return;
+  const beforeId = map.getLayer("route-0") ? "route-0" : getBeforeLayer();
+  map.addLayer({
+    id: "dim-overlay",
+    type: "background",
+    layout: { visibility: "none" },
+    paint: {
+      "background-color": "#000",
+      "background-opacity": 0.5
+    }
+  }, beforeId);
+}
+
+function setDim(on) {
+  ensureDimLayer();
+  map.setLayoutProperty("dim-overlay", "visibility", on ? "visible" : "none");
+}
+
+function clearRoutes() {
+  currentRoutes = [];
+  selectedRouteIdx = 0;
+  document.getElementById("routePanel").style.display = "none";
+
+  for (let i = 0; i < MAX_ROUTES; i++) {
+    const src = map.getSource(`route-${i}`);
+    if (src) src.setData({ type:"FeatureCollection", features:[] });
+  }
+  const hwy = map.getSource("highway-selected");
+  if (hwy) hwy.setData({ type:"FeatureCollection", features:[] });
+
+  if (destMarker) { destMarker.remove(); destMarker = null; }
+  setDim(false);
+}
+
 async function drawRoute(from, to) {
-  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?steps=true&geometries=geojson&overview=full&language=${lang}&access_token=${token}`;
+  initRouteLayers();
+  const common = `steps=true&compute_toll_cost=true&geometries=geojson&overview=full&language=${lang}&access_token=${token}`;
+  const coords = `${from[0]},${from[1]};${to[0]},${to[1]}`;
+  const urlAlt    = `https://api.mapbox.com/directions/v5/mapbox.tmp.valhalla-zenrin-premium/driving/${coords}?alternatives=true&${common}`;
+  const urlNoToll = `https://api.mapbox.com/directions/v5/mapbox.tmp.valhalla-zenrin-premium/driving/${coords}?exclude=toll&${common}`;
+
   try {
-    const res = await fetch(url);
-    const data = await res.json();
-    if (!data.routes || !data.routes.length) { alert("No route"); return; }
-    const geom = data.routes[0].geometry;
+    const [d1, d2] = await Promise.all([
+      fetch(urlAlt).then(r => r.json()).catch(() => ({routes:[]})),
+      fetch(urlNoToll).then(r => r.json()).catch(() => ({routes:[]}))
+    ]);
 
-    if (destMarker) destMarker.remove();
-    destMarker = new mapboxgl.Marker({ color: "#e74c3c" }).setLngLat(to).addTo(map);
+    let routes = [...(d1.routes || [])];
 
-    if (map.getSource("route")) {
-      map.getSource("route").setData({ type:"Feature", geometry: geom });
-    } else {
-      map.addSource("route", { type:"geojson", data: { type:"Feature", geometry: geom } });
-      map.addLayer({
-        id:"route", type:"line", source:"route",
-        layout:{ "line-join":"round", "line-cap":"round" },
-        paint:{ "line-color":"#4264fb", "line-width":5, "line-opacity":0.8 }
-      });
+    // 有料回避ルートを追加（重複チェック）
+    if (d2.routes?.length) {
+      const noToll = { ...d2.routes[0], _noToll: true };
+      const dup = routes.some(r =>
+        Math.abs(r.duration - noToll.duration) < 30 &&
+        Math.abs(r.distance - noToll.distance) < 100
+      );
+      if (!dup) routes.push(noToll);
     }
 
-    // fit
-    const coords = geom.coordinates;
-    const bounds = coords.reduce((b,c)=>b.extend(c), new mapboxgl.LngLatBounds(coords[0], coords[0]));
-    map.fitBounds(bounds, { padding: 80 });
+    if (!routes.length) { alert("No route"); return; }
+
+    currentRoutes = routes.slice(0, MAX_ROUTES);
+    selectedRouteIdx = 0;
+
+    if (destMarker) destMarker.remove();
+    destMarker = new mapboxgl.Marker({ color:"#e74c3c" }).setLngLat(to).addTo(map);
+
+    for (let i = 0; i < MAX_ROUTES; i++) {
+      const src = map.getSource(`route-${i}`);
+      if (i < currentRoutes.length) {
+        src.setData({ type:"Feature", geometry: currentRoutes[i].geometry, properties:{ idx:i }});
+      } else {
+        src.setData({ type:"FeatureCollection", features:[] });
+      }
+    }
+
+    renderSelection();
+    renderRoutePanel();
+    setDim(true);
+
+    const all = currentRoutes.flatMap(r => r.geometry.coordinates);
+    const bounds = all.reduce((b,c)=>b.extend(c), new mapboxgl.LngLatBounds(all[0], all[0]));
+    map.fitBounds(bounds, { padding:100 });
   } catch (err) {
     console.error(err); alert("Directions error");
   }
 }
+
+function selectRoute(idx) {
+  selectedRouteIdx = idx;
+  renderSelection();
+  renderRoutePanel();
+}
+
+function renderSelection() {
+  const bid = getBeforeLayer();
+  for (let i = 0; i < MAX_ROUTES; i++) {
+    if (!map.getLayer(`route-${i}`)) continue;
+    if (i === selectedRouteIdx) {
+      map.setPaintProperty(`route-${i}`, "line-color", "#4264fb");
+      map.setPaintProperty(`route-${i}`, "line-width", 5);
+      map.setPaintProperty(`route-${i}`, "line-opacity", 0.9);
+    } else {
+      map.setPaintProperty(`route-${i}`, "line-color", "#8a92a5");
+      map.setPaintProperty(`route-${i}`, "line-width", 4);
+      map.setPaintProperty(`route-${i}`, "line-opacity", 0.35);
+    }
+  }
+  // 非選択を先に動かして選択を最後に動かす → 選択が一番上（road-label の直下）
+  for (let i = 0; i < MAX_ROUTES; i++) {
+    if (i !== selectedRouteIdx && map.getLayer(`route-${i}`)) map.moveLayer(`route-${i}`, bid);
+  }
+  if (map.getLayer(`route-${selectedRouteIdx}`)) map.moveLayer(`route-${selectedRouteIdx}`, bid);
+  ["highway-aura","highway-outer","highway-mid","highway-core"].forEach(id => {
+    if (map.getLayer(id)) map.moveLayer(id, bid);
+  });
+
+  const route = currentRoutes[selectedRouteIdx];
+  if (route) {
+    const segments = extractHighwaySegments(route);
+    map.getSource("highway-selected").setData(
+      segments.length
+        ? { type:"Feature", geometry:{ type:"MultiLineString", coordinates: segments }}
+        : { type:"FeatureCollection", features:[] }
+    );
+  }
+}
+
+function extractRouteInfo(route) {
+  const ics = [], jcts = [];
+  let isHighway = false;
+  let entryName = null, exitName = null;
+  let entryDone = false;
+
+  route.legs.forEach(leg => {
+    leg.steps.forEach(step => {
+      const mtype = step.maneuver?.type;
+      (step.intersections || []).forEach(int => {
+        const cls = int.classes || [];
+        if (cls.includes("motorway") || cls.includes("toll")) isHighway = true;
+        if (int.ic?.name && !ics.includes(int.ic.name)) ics.push(int.ic.name);
+        if (int.jct?.name && !jcts.includes(int.jct.name)) jcts.push(int.jct.name);
+      });
+      if (mtype === "on ramp" && !entryDone) {
+        // 料金所名 or 命令文から取得
+        const tc = step.intersections?.find(x => x.toll_collection?.name)?.toll_collection?.name;
+        if (tc) { entryName = tc.replace(/Tollgate|料金所/i, "").trim(); entryDone = true; }
+        else {
+          const m = step.maneuver.instruction?.match(/(?:Take the |)([^ ]+)(?: ramp| 入口)/);
+          if (m) { entryName = m[1]; entryDone = true; }
+        }
+      }
+      if (mtype === "off ramp") {
+        exitName = step.intersections?.[0]?.ic?.name
+                 || step.maneuver.instruction?.match(/Take the ([^ ]+) exit/)?.[1]
+                 || exitName;
+      }
+    });
+  });
+  return { ics, jcts, isHighway, entryName, exitName };
+}
+
+function formatDuration(sec) {
+  const m = Math.round(sec / 60);
+  if (m < 60) return lang === "ja" ? `${m}分` : `${m} min`;
+  const h = Math.floor(m/60), mm = m%60;
+  return lang === "ja" ? `${h}時間${mm}分` : `${h}h ${mm}m`;
+}
+function formatDistance(m) {
+  if (m < 1000) return `${Math.round(m)} m`;
+  return `${(m/1000).toFixed(1)} km`;
+}
+function formatTollShort(tollCosts) {
+  if (!Array.isArray(tollCosts) || !tollCosts.length) return "";
+  const out = [];
+  for (const tc of tollCosts) {
+    const cur = tc.currency || "";
+    if (!tc.payment_methods) continue;
+    for (const [method, prices] of Object.entries(tc.payment_methods)) {
+      if (prices && typeof prices === "object") {
+        for (const [vehicle, price] of Object.entries(prices)) {
+          out.push(`${method.toUpperCase()} ¥${Number(price).toLocaleString()}`);
+        }
+      } else if (typeof prices === "number") {
+        out.push(`${method.toUpperCase()} ${cur} ${prices.toLocaleString()}`);
+      }
+    }
+  }
+  return out.join(" / ");
+}
+
+function renderRoutePanel() {
+  const panel = document.getElementById("routePanel");
+  if (!currentRoutes.length) { panel.style.display = "none"; return; }
+
+  const title = lang === "ja" ? "ルート候補" : "Route Candidates";
+  const items = currentRoutes.map((r, i) => {
+    const info = extractRouteInfo(r);
+    const selected = (i === selectedRouteIdx) ? "selected" : "";
+    const dur = formatDuration(r.duration);
+    const dist = formatDistance(r.distance);
+    const tollLabel = formatTollShort(r.toll_costs);
+
+    let badges = "";
+    if (r._noToll) {
+      badges += `<span class="badge nottoll">🚫💰 ${lang==="ja"?"有料回避":"Avoid tolls"}</span>`;
+    }
+    if (info.isHighway) {
+      badges += `<span class="badge hwy">🛣 ${lang==="ja"?"高速利用":"Highway"}</span>`;
+      if (tollLabel) badges += `<span class="badge toll">💰 ${tollLabel}</span>`;
+    } else {
+      badges += `<span class="badge local">🚗 ${lang==="ja"?"一般道のみ":"Local roads only"}</span>`;
+    }
+    // 高速利用なのに toll_costs が来てない場合のフォールバック
+    if (info.isHighway && !tollLabel && !r._noToll) {
+      badges += `<span class="badge toll" style="opacity:0.6">💰 ${lang==="ja"?"料金情報なし":"No toll info"}</span>`;
+    }
+
+    let icHtml = "";
+    if (info.isHighway) {
+      const lines = [];
+      if (info.entryName) lines.push(`${lang==="ja"?"入口IC":"Entry"}: <b>${info.entryName}</b>`);
+      if (info.jcts.length) lines.push(`JCT: ${info.jcts.join(" → ")}`);
+      if (info.ics.length) lines.push(`${lang==="ja"?"通過IC":"ICs"}: ${info.ics.join(" / ")}`);
+      if (info.exitName) lines.push(`${lang==="ja"?"出口IC":"Exit"}: <b>${info.exitName}</b>`);
+      if (lines.length) icHtml = `<div class="ic-list">${lines.join("<br>")}</div>`;
+    }
+
+    return `
+      <div class="route-item ${selected}" data-idx="${i}">
+        <div class="route-header">
+          <span class="route-title">${lang==="ja"?"ルート":"Route"} ${i+1}</span>
+          <span class="route-time">⏱ ${dur}</span>
+          <span class="route-dist">📏 ${dist}</span>
+        </div>
+        <div class="route-badges">${badges}</div>
+        ${icHtml}
+      </div>`;
+  }).join("");
+
+  panel.innerHTML = `
+    <div class="panel-title">
+      ${title}
+      <span class="panel-close" id="panelClose" title="${lang==='ja'?'閉じる':'Close'}">×</span>
+    </div>
+    ${items}
+  `;
+
+  panel.querySelector("#panelClose").addEventListener("click", (e) => {
+    e.stopPropagation();
+    clearRoutes();
+  });
+
+  panel.querySelectorAll(".route-item").forEach(el => {
+    el.addEventListener("click", () => selectRoute(parseInt(el.dataset.idx)));
+  });
+  panel.style.display = "block";
+  panel.querySelectorAll(".route-item").forEach(el => {
+    el.addEventListener("click", () => selectRoute(parseInt(el.dataset.idx)));
+  });
+}
+
+// 高速道路（motorway / toll クラス）の連続セグメントを抽出
+function extractHighwaySegments(route) {
+  const coords = route.geometry.coordinates;
+  const segments = [];
+  let cur = null;
+
+  route.legs.forEach(leg => {
+    leg.steps.forEach(step => {
+      const ints = step.intersections || [];
+      for (let i = 0; i < ints.length; i++) {
+        const cls = ints[i].classes || [];
+        const isHwy = cls.includes("motorway") || cls.includes("toll");
+        const startIdx = ints[i].geometry_index;
+        const endIdx = (i + 1 < ints.length)
+          ? ints[i + 1].geometry_index
+          : (step.intersections.length ? startIdx + 1 : startIdx + 1);
+
+        if (isHwy && startIdx != null) {
+          const slice = coords.slice(startIdx, Math.min(endIdx + 1, coords.length));
+          if (slice.length < 2) continue;
+          if (cur && pointsEqual(cur[cur.length - 1], slice[0])) {
+            cur.push(...slice.slice(1));
+          } else {
+            if (cur) segments.push(cur);
+            cur = slice.slice();
+          }
+        } else {
+          if (cur) { segments.push(cur); cur = null; }
+        }
+      }
+    });
+  });
+  if (cur) segments.push(cur);
+  return segments;
+}
+
+function pointsEqual(a, b) {
+  return a[0] === b[0] && a[1] === b[1];
+}
+
 </script>
 </body>
 </html>
