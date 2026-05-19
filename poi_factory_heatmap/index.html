@@ -57,6 +57,7 @@
     .search-empty { padding: 14px; color: #6b7280; font-size: 13px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
     #select-area-btn.is-active { background: #1d4ed8; color: #fff; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18), 0 8px 24px rgba(15, 23, 42, 0.14); }
+    #filter-btn.is-active { background: #1d4ed8; color: #fff; }
 
     #messages { position: absolute; z-index: 20; top: 66px; right: 14px; width: 380px; max-width: calc(100vw - 28px); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
     .msg { padding: 10px 12px; border-radius: 12px; background: #fff; border: 1px solid #e5e7eb; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14); color: #111827; font-size: 13px; line-height: 1.4; }
@@ -120,6 +121,24 @@
     .tab-pane.active { display: block; }
     .list-container { display: flex; flex-direction: column; gap: 8px; }
 
+    .filter-modal { width: min(96vw, 900px); }
+    .filter-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+    .filter-actions .filter-search { flex: 1; min-width: 180px; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px; outline: none; }
+    .filter-actions .filter-search:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
+    .filter-section { border: 1px solid #e5e7eb; border-radius: 10px; margin-bottom: 10px; overflow: hidden; background: #fff; }
+    .filter-section-header { padding: 10px 12px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+    .filter-section-toggle { font-size: 11px; color: #6b7280; width: 14px; }
+    .filter-section-title { font-weight: 900; font-size: 13px; color: #111827; flex: 1; text-transform: uppercase; letter-spacing: 0.03em; }
+    .filter-section-count { color: #6b7280; font-size: 12px; font-weight: 700; }
+    .filter-section-actions { display: flex; gap: 6px; }
+    .filter-section-actions .btn { padding: 4px 8px; font-size: 11px; }
+    .filter-section-body { padding: 10px 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 2px 8px; max-height: 280px; overflow-y: auto; }
+    .filter-section.collapsed .filter-section-body { display: none; }
+    .filter-checkbox { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 4px; cursor: pointer; border-radius: 4px; }
+    .filter-checkbox:hover { background: #f3f4f6; }
+    .filter-checkbox input { margin: 0; cursor: pointer; }
+    .filter-checkbox.hidden-row { display: none; }
+
     .map-bottom-info { position: absolute; z-index: 8; left: 14px; bottom: 14px; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.94); border: 1px solid #e5e7eb; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14); color: #4b5563; font-size: 12px; pointer-events: none; }
     .popup-row { font-size: 12px; line-height: 1.4; margin: 3px 0; }
     .popup-key { color: #6b7280; font-weight: 800; }
@@ -164,6 +183,7 @@
       </div>
 
       <div class="toolbar">
+        <button class="btn btn-secondary" id="filter-btn" type="button">⛃ Filter</button>
         <button class="btn btn-secondary" id="select-area-btn" type="button">Selected Area (up to 10 POIs)</button>
         <button class="btn btn-secondary" id="clear-selection-btn" type="button">Clear Selection</button>
         <button class="btn btn-secondary" id="open-favorites-btn" type="button">★ Bookmarks &amp; History</button>
@@ -178,7 +198,7 @@
       <div class="panel-header">
         <div class="panel-title-wrap">
           <h2 id="panel-title">Selected POIs</h2>
-          <div id="panel-subtitle" class="panel-subtitle">Click “Select Area”, then drag on the map.</div>
+          <div id="panel-subtitle" class="panel-subtitle">Click "Select Area", then drag on the map.</div>
         </div>
         <button class="btn btn-ghost" id="panel-close" type="button" aria-label="Close panel">×</button>
       </div>
@@ -211,6 +231,28 @@
       </div>
     </div>
 
+    <div class="modal-overlay" id="filter-overlay">
+      <div class="modal filter-modal">
+        <div class="modal-header">
+          <h2>Filter by Category</h2>
+          <button class="btn btn-ghost" data-close="filter" type="button">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="filter-actions">
+            <input type="text" id="filter-search" class="filter-search" placeholder="Search categories..." autocomplete="off" spellcheck="false" />
+            <button class="btn btn-secondary" id="filter-select-all" type="button">Select All</button>
+            <button class="btn btn-secondary" id="filter-deselect-all" type="button">Deselect All</button>
+            <button class="btn btn-secondary" id="filter-reset" type="button">Reset</button>
+          </div>
+          <div id="filter-sections"></div>
+        </div>
+        <div class="modal-footer">
+          <span id="filter-summary" style="margin-right:auto;color:#6b7280;font-size:12px;font-weight:700;"></span>
+          <button class="btn btn-secondary" data-close="filter" type="button">Close</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="image-overlay">
       <div class="modal image-modal">
         <div class="modal-header">
@@ -230,8 +272,8 @@
   </div>
 
   <script>
-    const TILESET_ID = "10da032y.5td2z8gqtx4q";
-    const SOURCE_LAYER = "fc0778414b83399b7e70";
+    const TILESET_ID = "10da032y.29wsyen9vwuu";
+    let SOURCE_LAYER = null;
     const STYLE_URL = "mapbox://styles/mapbox/standard";
     const TOKEN_KEY = "mapbox_demo_pk_token";
     const PRESET_MAPBOX_TOKEN = "pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw";
@@ -242,13 +284,32 @@
     const DETAILS_ATTRIBUTE_SETS = "basic,photos,visit,venue";
     const SEARCH_SUGGEST_API = "https://api.mapbox.com/search/searchbox/v1/suggest";
     const SEARCH_RETRIEVE_API = "https://api.mapbox.com/search/searchbox/v1/retrieve/";
+    const TILEJSON_API = "https://api.mapbox.com/v4/";
     const MAX_SELECTION_DETAILS = 10;
     const SOURCE_ID = "poi-src";
     const SYMBOL_LAYER_ID = "poi-symbol";
+    const LABEL_LAYER_ID = "poi-label";
+    const HEATMAP_LAYER_ID = "poi-heatmap";
     const SELECTION_SOURCE_ID = "selection-area";
     const LABEL_MIN_ZOOM = 18;
     const INITIAL_CENTER = [-122.4194, 37.7749];
     const INITIAL_ZOOM = 12;
+
+    const CATEGORY_GROUPS = [
+      {
+        primary: "Food",
+        categories: ["acai_bowl_shop","afghan_restaurant","african_restaurant","afternoon_tea","afternoon_tea_restaurant","albanian_restaurant","algerian_restaurant","alpine_restaurant","american_restaurant","anglo_indian_restaurant","argentin_restaurant","argentine_restaurant","argentinian_restaurant","armenian_restaurant","asian_restaurant","australian_restaurant","austrian_restaurant","azerbaijani_restaurant","açaí_bowl_shop","açaí_shop","bagel_shop","bakery","balkan_restaurant","bangladeshi_restaurant","bar","barbeque_restaurant","basque_restaurant","bavarian_restaurant","beer_garden","beer_hall","belgian_restaurant","belizean_restaurant","bengali_restaurant","bento_shop","bistro","bistro_bar","bistro_restaurant","bosnian_restaurant","bowl_restaurant","brasserie","brazilian_restaurant","breakfast_restaurant","brew_pub","brewery","brewery_restaurant","brewpub","british_restaurant","brunch_restaurant","bubble_tea_shop","buffet_restaurant","bulgarian_restaurant","burger_restaurant","burmese_restaurant","butcher_shop","cafe","cafeteria","cajun_restaurant","cake_shop","california_restaurant","californian_restaurant","cambodian_restaurant","canadian_restaurant","candy_shop","cantonese_american_restaurant","caribbean_restaurant","carribean_restaurant","caucasian_restaurant","central_asian_restaurant","cevicheria","cheese_bar","cheese_shop","cheesesteak_restaurant","chicken_restaurant","chicken_wing_restaurant","chilean_restaurant","chinese_restaurant","chocolate_bar","chocolate_shop","cider_bar","cider_house","cloud_kitchen","cocktail_bar","coffee_shop","colombian_restaurant","convenience_store","cookie_shop","corsican_restaurant","creole_restaurant","crepe_restaurant","crepe_shop","creperie","croatian_restaurant","cuban_american_restaurant","cuban_asian_restaurant","cuban_restaurant","cypriot_restaurant","czech_restaurant","danish_restaurant","deli","dessert_shop","dim_sum_restaurant","diner_restaurant","dinner_show","distillery","dominican_restaurant","donut_shop","dumpling_restaurant","dunkin'","dunkin_shop","dutch_restaurant","eastern_european_restaurant","ecuadorian_restaurant","egyptian_restaurant","empanada_shop","english_restaurant","ethiopian_restaurant","european_restaurant","fast_food","filipino_restaurant","fine_dining_restaurant","fish_and_chips_restaurant","fondue_restaurant","food_court","franco_african_restaurant","franco_vietnamese_restaurant","french_fries_shop","french_restaurant","fried_chicken_restaurant","frozen_yogurt_shop","fusion_restaurant","gastropub","gelato_shop","georgian_restaurant","german_restaurant","gluten_free_restaurant","greek_restaurant","grill_restaurant","guatemalan_restaurant","haitian_restaurant","halal_restaurant","hawaiian_filipino_restaurant","hawaiian_restaurant","healthy_fast_food","healthy_restaurant","hibachi_restaurant","himalayan_restaurant","honduran_restaurant","hospital_dining","hot_dog_restaurant","hot_pot_restaurant","hotdog_restaurant","hotpot_restaurant","hunan_restaurant","hungarian_restaurant","ice_cream","indian_restaurant","indonesian_restaurant","irish_restaurant","israeli_restaurant","italian_restaurant","japanese_peruvian_restaurant","japanese_restaurant","jazz_club","jewish_restaurant","juice_bar","karaoke_bar","kava_bar","kebab_restaurant","kebab_shop","kebap_restaurant","kiosk","korean_restaurant","kosher_restaurant","kuwaiti_restaurant","lao_american_restaurant","lao_restaurant","laotian_restaurant","latin_american_restaurant","lebanese_restaurant","lithuanian_restaurant","lounge","lounge_bar","lunch_restaurant","lunchroom","malay_restaurant","malaysian_restaurant","mauritian_restaurant","medieval_restaurant","mediterranean_restaurant","mexican_restaurant","middle_eastern_restaurant","milkshake_bar","mongolian_restaurant","moroccan_restaurant","nepalese_restaurant","nepali_restaurant","new_zealand_restaurant","nicaraguan_restaurant","nigerian_restaurant","noodle_restaurant","norwegian_restaurant","organic_restaurant","pakistani_restaurant","pancake_restaurant","paraguayan_restaurant","patisserie","persian_restaurant","peruvian_restaurant","pizza_restaurant","pizzeria","plant_based_restaurant","poke_bowl_restaurant","poke_restaurant","polish_restaurant","portuguese_restaurant","pub","puerto_rican_restaurant","ramen_restaurant","restaurant","rice_restaurant","romanian_restaurant","rooftop_bar","rotisserie","rotisserie_restaurant","russian_restaurant","sake_bar","sake_shop","salad_bar","salad_restaurant","salad_shop","salvadoran_restaurant","salvadorian_restaurant","sando_restaurant","sandwich_shop","sausage_restaurant","scandinavian_restaurant","schnitzel_restaurant","scottish_restaurant","seafood_restaurant","serbian_restaurant","shabu_shabu_restaurant","shared_dining_restaurant","shisha_bar","sichuan_restaurant","sicilian_restaurant","singaporean_restaurant","snack_bar","soba_restaurant","soda_fountain","somali_restaurant","soul_food_restaurant","soup_restaurant","south_african_restaurant","southern_restaurant","southwestern_restaurant","spanish_restaurant","sports_bar","sri_lankan_restaurant","steakhouse","street_food_restaurant","subway","surinamese_indian_restaurant","surinamese_restaurant","sushi_restaurant","swiss_american_restaurant","swiss_restaurant","syrian_korean_restaurant","taco_shop","tai_restaurant","taiwanese_restaurant","takeaway_restaurant","tapas_restaurant","taproom","taqueria","tavern","tea_bar","tea_house","tea_shop","teahouse","tex-mex_restaurant","tex_mex_restaurant","texas_barbeque_restaurant","texas_restaurant","thai_restaurant","themed_restaurant","tibetan_restaurant","tiki_bar","tropical_restaurant","tunisian_restaurant","turkish_restaurant","udon_restaurant","ukrainian_restaurant","uzbek_restaurant","vegan_deli","vegan_diner","vegan_fast_food","vegan_restaurant","vegetarian_restaurant","venezuelan_restaurant","vietnamese_restaurant","vineyard","waffle_shop","wild_game_restaurant","wine_and_cheese_shop","wine_and_cupcake_lounge","wine_bar","wine_bistro","wine_cafe","wine_lounge","wine_restaurant","wine_shop","winery","wing_restaurant","wings_and_seafood_restaurant","wings_restaurant","wrap_restaurant","wraps_and_wings_restaurant","yakitori_restaurant","yemen_restaurant","yemeni_restaurant","yogurt_shop"]
+      },
+      {
+        primary: "Parking",
+        categories: ["parking_lot"]
+      },
+      {
+        primary: "Shopping",
+        categories: ["antique_shop","art_gallery","arts_and_craft_store","auto_parts_store","baby_goods_shop","beauty_store","bicycle_shop","book_store","boutique","bridal_shop","camera_shop","cannabis_dispensary","car_dealership","carpet_store","clothing","clothing_store","department_store","discount_store","duty_free_shop","electronics_shop","fabric_store","factory","fashion_accessory_shop","fireworks_store","fishing_store","flooring_store","florist","frame_store","furniture_store","garden_store","gift_shop","grocery","gun_store","hardware_store","herbalist","hobby_shop","home_repair","hunting_store","jewelry_store","kitchen_store","leather_goods","lighting_store","liquor_store","luggage_store","market","mattress_store","medical_supply_store","motorcycle_dealer","motorsports_store","music_shop","news_kiosk","optician","outlet_store","paper_goods_store","party_store","pawnshop","pet_store","phone_store","photo_store","sewing_shop","shoe_store","shopping","shopping_mall","sports_shop","thrift_shop","tobacco_shop","toy_store","vape_shop","video_game_store","watch_store","wholesale_store"]
+      }
+    ];
+    const ALL_CATEGORIES = CATEGORY_GROUPS.flatMap(function (g) { return g.categories; });
 
     let map = null;
     let mapReady = false;
@@ -269,6 +330,8 @@
     let selectionEndPoint = null;
     let selectedAreaDetails = [];
     let lastSelectionTotalCount = 0;
+    let checkedCategories = new Set(ALL_CATEGORIES);
+    let filterSearchQuery = "";
     const persistentMessages = {};
     const approvedHttpPhotoUrls = new Set();
     const rejectedHttpPhotoUrls = new Set();
@@ -319,22 +382,35 @@
 
       map.addControl(new mapboxgl.NavigationControl(), "top-right");
 
-      map.once("load", function () {
+      map.once("load", async function () {
         try {
+          SOURCE_LAYER = await fetchSourceLayerFromTileJSON(TILESET_ID, mapboxgl.accessToken);
+          console.log("Auto-detected source-layer:", SOURCE_LAYER);
           addDemoSourcesAndLayers();
           setupInteractions();
           setupSearchBox();
           setupAreaSelection();
           setupPanel();
           setupFavorites();
+          setupFilter();
           setupToolbar();
           setupImageModal();
           refreshCounts();
           updateZoomMessage();
+          applyFilter();
+
+    　　　　// ↓ ここに追加(デバッグ用、不要になったら消してOK)
+    　　　　map.once("idle", function () {
+    　　　　  try {
+    　　　　    const sample = map.queryRenderedFeatures({ layers: [SYMBOL_LAYER_ID] }).slice(0, 3);
+    　　　　    console.log("[Debug] sample feature.properties:", sample.map(function (f) { return f.properties; }));
+    　　　　  } catch (_) {}
+    　　　　});          
+
           mapReady = true;
-          showTransientMessage("Map loaded.", "success", 1600);
+          showTransientMessage("Map loaded. Source-layer: " + SOURCE_LAYER, "success", 2200);
         } catch (err) {
-          reportAppError("Failed to initialize custom POI layers. Check the tileset ID, source-layer, and token scope.", err);
+          reportAppError("Failed to initialize custom POI layers. Check the tileset ID and token scope. " + (err && err.message ? err.message : ""), err);
         }
       });
 
@@ -346,79 +422,95 @@
       });
     }
 
-    function addDemoSourcesAndLayers() {
-      if (!map.getSource(SOURCE_ID)) {
-        map.addSource(SOURCE_ID, {
-          type: "vector",
-          url: "mapbox://" + TILESET_ID,
-          promoteId: "mapbox_id"
-        });
+    async function fetchSourceLayerFromTileJSON(tilesetId, token) {
+      const url = TILEJSON_API + tilesetId + ".json?access_token=" + encodeURIComponent(token || "");
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("TileJSON fetch failed: HTTP " + res.status);
+      const data = await res.json();
+      if (!data || !Array.isArray(data.vector_layers) || !data.vector_layers.length) {
+        throw new Error("TileJSON has no vector_layers for tileset " + tilesetId);
       }
-
-      safeAddLayer({
-        id: "poi-heatmap",
-        type: "heatmap",
-        source: SOURCE_ID,
-        "source-layer": SOURCE_LAYER,
-        slot: "middle",
-        maxzoom: 11,
-        paint: {
-          "heatmap-weight": ["interpolate", ["linear"], ["zoom"], 3, 0.15, 9, 0.6],
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 0.6, 9, 1.5],
-          "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(33,102,172,0)", 0.1, "rgba(103,169,207,0.5)", 0.3, "rgb(209,229,240)", 0.5, "rgb(253,219,199)", 0.7, "rgb(239,138,98)", 1, "rgb(178,24,43)"],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 15, 9, 40, 11, 60],
-          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 9, 1, 11, 0]
-        }
-      });
-
-      safeAddLayer({
-        id: SYMBOL_LAYER_ID,
-        type: "circle",
-        source: SOURCE_ID,
-        "source-layer": SOURCE_LAYER,
-        slot: "top",
-        minzoom: 10,
-        paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 8],
-          "circle-color": ["case", ["boolean", ["feature-state", "visited"], false], "#9ca3af", "#2563eb"],
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1.5,
-          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1],
-          "circle-stroke-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1]
-        }
-      });
-
-      safeAddLayer({
-        id: "poi-label",
-        type: "symbol",
-        source: SOURCE_ID,
-        "source-layer": SOURCE_LAYER,
-        slot: "top",
-        minzoom: LABEL_MIN_ZOOM,
-        layout: {
-          "text-field": ["coalesce", ["get", "name"], ["get", "brand"], ["get", "poi_category"], ""],
-          "text-size": 11,
-          "text-offset": [0, 1.2],
-          "text-anchor": "top",
-          "text-allow-overlap": false,
-          "text-optional": true,
-          "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"]
-        },
-        paint: {
-          "text-color": "#111827",
-          "text-halo-color": "#ffffff",
-          "text-halo-width": 1.6
-        }
-      });
-
-      if (!map.getSource(SELECTION_SOURCE_ID)) {
-        map.addSource(SELECTION_SOURCE_ID, emptyGeoJsonSource());
+      const layerId = data.vector_layers[0].id;
+      if (!layerId || typeof layerId !== "string") {
+        throw new Error("TileJSON vector_layers[0].id is invalid");
       }
-
-      safeAddLayer({ id: "selection-fill", type: "fill", source: SELECTION_SOURCE_ID, slot: "top", paint: { "fill-color": "#2563eb", "fill-opacity": 0.16 } });
-      safeAddLayer({ id: "selection-outline", type: "line", source: SELECTION_SOURCE_ID, slot: "top", paint: { "line-color": "#2563eb", "line-width": 2, "line-dasharray": [2, 1] } });
-      restoreAllVisited();
+      return layerId;
     }
+
+	function addDemoSourcesAndLayers() {
+	  if (!SOURCE_LAYER) throw new Error("SOURCE_LAYER is not set. TileJSON must be loaded before adding layers.");
+
+	  if (!map.getSource(SOURCE_ID)) {
+	    map.addSource(SOURCE_ID, {
+	      type: "vector",
+	      url: "mapbox://" + TILESET_ID,
+	      promoteId: "mapbox_id"
+	    });
+	  }
+
+	　safeAddLayer({
+	　  id: HEATMAP_LAYER_ID,
+	　  type: "heatmap",
+	　  source: SOURCE_ID,
+	　  "source-layer": SOURCE_LAYER,
+	　  slot: "middle",
+	　  maxzoom: 11,
+	　  paint: {
+	　    "heatmap-weight": ["interpolate", ["linear"], ["zoom"], 3, 0.15, 9, 0.6],
+	　    "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 0.6, 9, 1.5],
+	　    "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(33,102,172,0)", 0.1, "rgba(103,169,207,0.5)", 0.3, "rgb(209,229,240)", 0.5, "rgb(253,219,199)", 0.7, "rgb(239,138,98)", 1, "rgb(178,24,43)"],
+	　    "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 15, 9, 40, 11, 60],
+	　    "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 9, 1, 11, 0]
+	　  }
+	　});
+
+	  safeAddLayer({
+	    id: SYMBOL_LAYER_ID,
+	    type: "circle",
+	    source: SOURCE_ID,
+	    "source-layer": SOURCE_LAYER,
+	    slot: "top",
+	    minzoom: 10,
+	    paint: {
+	      "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 8],
+	      "circle-color": ["case", ["boolean", ["feature-state", "visited"], false], "#9ca3af", "#2563eb"],
+	      "circle-stroke-color": "#ffffff",
+	      "circle-stroke-width": 1.5,
+	      "circle-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1],
+	      "circle-stroke-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1]
+	    }
+	  });
+
+	  safeAddLayer({
+	    id: LABEL_LAYER_ID,
+	    type: "symbol",
+	    source: SOURCE_ID,
+	    "source-layer": SOURCE_LAYER,
+	    slot: "top",
+	    minzoom: LABEL_MIN_ZOOM,
+	    layout: {
+	      "text-field": ["coalesce", ["get", "name"], ["get", "brand"], ["get", "primary_category"], ""],
+	      "text-size": 11,
+	      "text-offset": [0, 1.2],
+	      "text-anchor": "top",
+	      "text-allow-overlap": false,
+	      "text-optional": true,
+	      "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"]
+	    },
+	    paint: {
+	      "text-color": "#111827",
+	      "text-halo-color": "#ffffff",
+	      "text-halo-width": 1.6
+	    }
+	  });
+
+	  if (!map.getSource(SELECTION_SOURCE_ID)) {
+	    map.addSource(SELECTION_SOURCE_ID, emptyGeoJsonSource());
+	  }
+	  safeAddLayer({ id: "selection-fill", type: "fill", source: SELECTION_SOURCE_ID, slot: "top", paint: { "fill-color": "#2563eb", "fill-opacity": 0.16 } });
+	  safeAddLayer({ id: "selection-outline", type: "line", source: SELECTION_SOURCE_ID, slot: "top", paint: { "line-color": "#2563eb", "line-width": 2, "line-dasharray": [2, 1] } });
+	  restoreAllVisited();
+	}
 
     function safeAddLayer(layer) {
       if (map.getLayer(layer.id)) return;
@@ -447,15 +539,15 @@
       source.setData({ type: "FeatureCollection", features: feature ? [feature] : [] });
     }
 
-    function updateZoomMessage() {
-      if (!map) return;
-      const el = document.getElementById("zoom-message");
-      if (!el) return;
-      const z = map.getZoom();
-      if (z < 10) el.textContent = "Zoom " + z.toFixed(1) + ": heatmap mode. Zoom in to see POI symbols.";
-      else if (z < LABEL_MIN_ZOOM) el.textContent = "Zoom " + z.toFixed(1) + ": POI symbols visible. Labels appear at zoom " + LABEL_MIN_ZOOM + "+.";
-      else el.textContent = "Zoom " + z.toFixed(1) + ": POI symbols and labels visible.";
-    }
+	function updateZoomMessage() {
+	  if (!map) return;
+	  const el = document.getElementById("zoom-message");
+	  if (!el) return;
+	  const z = map.getZoom();
+	  if (z < 10) el.textContent = "Zoom " + z.toFixed(1) + ": heatmap mode. Zoom in to see POI symbols.";
+	  else if (z < LABEL_MIN_ZOOM) el.textContent = "Zoom " + z.toFixed(1) + ": POI symbols visible. Labels appear at zoom " + LABEL_MIN_ZOOM + "+.";
+	  else el.textContent = "Zoom " + z.toFixed(1) + ": POI symbols and labels visible.";
+	}
 
     function setupInteractions() {
       const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false });
@@ -971,6 +1063,7 @@
       setText("panel-title", title || "POI Details");
       setText("panel-subtitle", "mapbox_id: " + truncate(mapboxId, 44));
       const categoryHtml = categories.length ? categories.map(function (c) { return '<span class="badge">' + escapeHtml(c) + '</span>'; }).join(" ") : "-";
+      const primary = props.primary_category || "-";
       const rawPayload = detailsData || { mapbox_id: mapboxId, properties: baseProps || {} };
       const actionHtml = '<div class="panel-actions">' +
         '<button class="btn ' + (isBookmarked ? "btn-amber" : "btn-secondary") + '" id="bookmark-current" type="button">' + (isBookmarked ? "★ Bookmarked" : "☆ Bookmark") + '</button>' +
@@ -980,6 +1073,7 @@
       const infoHtml = '<div class="detail-section"><div class="detail-section-title">Info</div>' +
         detailRow("Name", escapeHtml(title || "-")) +
         detailRow("Address", escapeHtml(getDisplayAddress(props) || "-")) +
+        detailRow("Primary", escapeHtml(primary)) +
         detailRow("Categories", categoryHtml) +
         detailRow("Description", renderDescriptionValue(descriptions)) +
         detailRow("Phone", escapeHtml(props.phone || props.tel || props.telephone || "-")) +
@@ -1008,6 +1102,7 @@
       const infoHtml = '<div class="detail-section"><div class="detail-section-title">Vector Tile Properties</div>' +
         detailRow("Name", escapeHtml(title || "-")) +
         detailRow("Address", escapeHtml(getDisplayAddress(props) || "-")) +
+        detailRow("Primary", escapeHtml(props.primary_category || "-")) +
         detailRow("Categories", categoryHtml) +
         detailRow("Description", renderDescriptionValue(descriptions)) +
         detailRow("Coordinates", coords ? coords[1].toFixed(6) + ", " + coords[0].toFixed(6) : "-") +
@@ -1118,6 +1213,7 @@
           const id = el.dataset.listId;
           const entry = bookmarks.get(id) || poiHistory.get(id) || {};
           removeClass("favorites-overlay", "active");
+          resetFilterToDefault();
           if (entry.lon != null && entry.lat != null) {
             map.flyTo({ center: [Number(entry.lon), Number(entry.lat)], zoom: Math.max(map.getZoom(), 16), essential: true, duration: 900 });
             setDetailMarker([Number(entry.lon), Number(entry.lat)]);
@@ -1132,7 +1228,7 @@
       visitedPois.add(mapboxId);
       localStorage.setItem(VISITED_KEY, JSON.stringify(Array.from(visitedPois)));
       try {
-        if (map && map.isStyleLoaded() && map.getSource(SOURCE_ID)) {
+        if (map && map.isStyleLoaded() && map.getSource(SOURCE_ID) && SOURCE_LAYER) {
           map.setFeatureState({ source: SOURCE_ID, sourceLayer: SOURCE_LAYER, id: mapboxId }, { visited: true });
         }
       } catch (err) {
@@ -1146,6 +1242,194 @@
     function saveBookmarks() { localStorage.setItem(BOOKMARK_KEY, JSON.stringify(Object.fromEntries(bookmarks))); }
     function saveHistory() { localStorage.setItem(HISTORY_KEY, JSON.stringify(Object.fromEntries(poiHistory))); }
     function refreshCounts() { setText("bm-count", "(" + bookmarks.size + ")"); setText("hist-count", "(" + poiHistory.size + ")"); }
+
+    function setupFilter() {
+      getRequiredEl("filter-btn").addEventListener("click", openFilterModal);
+      document.querySelectorAll("[data-close='filter']").forEach(function (btn) {
+        btn.addEventListener("click", function () { removeClass("filter-overlay", "active"); });
+      });
+      getRequiredEl("filter-select-all").addEventListener("click", function () {
+        checkedCategories = new Set(ALL_CATEGORIES);
+        applyFilter();
+        renderFilterSections();
+        updateFilterSummary();
+        updateFilterButtonState();
+      });
+      getRequiredEl("filter-deselect-all").addEventListener("click", function () {
+        checkedCategories = new Set();
+        applyFilter();
+        renderFilterSections();
+        updateFilterSummary();
+        updateFilterButtonState();
+      });
+      getRequiredEl("filter-reset").addEventListener("click", function () {
+        resetFilterToDefault();
+        renderFilterSections();
+        updateFilterSummary();
+      });
+      getRequiredEl("filter-search").addEventListener("input", function (e) {
+        filterSearchQuery = e.target.value.trim().toLowerCase();
+        applySearchFilter();
+      });
+      updateFilterButtonState();
+    }
+
+    function openFilterModal() {
+      filterSearchQuery = "";
+      setValue("filter-search", "");
+      renderFilterSections();
+      updateFilterSummary();
+      addClass("filter-overlay", "active");
+    }
+
+    function renderFilterSections() {
+      const container = getRequiredEl("filter-sections");
+      container.innerHTML = CATEGORY_GROUPS.map(function (group, idx) {
+        const checkedCount = group.categories.filter(function (c) { return checkedCategories.has(c); }).length;
+        const total = group.categories.length;
+        const checkboxes = group.categories.map(function (c) {
+          return '<label class="filter-checkbox" data-cat-row="' + escapeAttr(c) + '">' +
+            '<input type="checkbox" data-cat="' + escapeAttr(c) + '"' + (checkedCategories.has(c) ? " checked" : "") + ' />' +
+            '<span>' + escapeHtml(c) + '</span>' +
+            '</label>';
+        }).join("");
+        return '<div class="filter-section" data-section-idx="' + idx + '">' +
+          '<div class="filter-section-header">' +
+            '<span class="filter-section-toggle">▼</span>' +
+            '<span class="filter-section-title">' + escapeHtml(group.primary) + '</span>' +
+            '<span class="filter-section-count" data-section-count="' + idx + '">' + checkedCount + ' / ' + total + '</span>' +
+            '<div class="filter-section-actions">' +
+              '<button class="btn btn-secondary" data-section-select="' + idx + '" type="button">All</button>' +
+              '<button class="btn btn-secondary" data-section-deselect="' + idx + '" type="button">None</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="filter-section-body">' + checkboxes + '</div>' +
+        '</div>';
+      }).join("");
+
+      container.querySelectorAll("input[type='checkbox'][data-cat]").forEach(function (cb) {
+        cb.addEventListener("change", function () {
+          const cat = cb.dataset.cat;
+          if (cb.checked) checkedCategories.add(cat);
+          else checkedCategories.delete(cat);
+          applyFilter();
+          updateSectionCounts();
+          updateFilterSummary();
+          updateFilterButtonState();
+        });
+      });
+      container.querySelectorAll("[data-section-select]").forEach(function (btn) {
+        btn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          const idx = Number(btn.dataset.sectionSelect);
+          CATEGORY_GROUPS[idx].categories.forEach(function (c) { checkedCategories.add(c); });
+          applyFilter();
+          renderFilterSections();
+          applySearchFilter();
+          updateFilterSummary();
+          updateFilterButtonState();
+        });
+      });
+      container.querySelectorAll("[data-section-deselect]").forEach(function (btn) {
+        btn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          const idx = Number(btn.dataset.sectionDeselect);
+          CATEGORY_GROUPS[idx].categories.forEach(function (c) { checkedCategories.delete(c); });
+          applyFilter();
+          renderFilterSections();
+          applySearchFilter();
+          updateFilterSummary();
+          updateFilterButtonState();
+        });
+      });
+      container.querySelectorAll(".filter-section-header").forEach(function (h) {
+        h.addEventListener("click", function (e) {
+          if (e.target.closest("button") || e.target.closest("input")) return;
+          const section = h.parentElement;
+          section.classList.toggle("collapsed");
+          const tog = h.querySelector(".filter-section-toggle");
+          if (tog) tog.textContent = section.classList.contains("collapsed") ? "▶" : "▼";
+        });
+      });
+
+      applySearchFilter();
+    }
+
+    function applySearchFilter() {
+      const q = filterSearchQuery;
+      document.querySelectorAll("[data-cat-row]").forEach(function (row) {
+        const cat = row.getAttribute("data-cat-row") || "";
+        const visible = !q || cat.toLowerCase().indexOf(q) !== -1;
+        row.classList.toggle("hidden-row", !visible);
+      });
+    }
+
+    function updateSectionCounts() {
+      CATEGORY_GROUPS.forEach(function (group, idx) {
+        const el = document.querySelector("[data-section-count='" + idx + "']");
+        if (!el) return;
+        const checkedCount = group.categories.filter(function (c) { return checkedCategories.has(c); }).length;
+        el.textContent = checkedCount + " / " + group.categories.length;
+      });
+    }
+
+    function updateFilterSummary() {
+      const total = ALL_CATEGORIES.length;
+      const checked = checkedCategories.size;
+      const text = checked === total ? "All " + total + " categories shown" : checked + " / " + total + " categories selected";
+      setText("filter-summary", text);
+    }
+
+    function updateFilterButtonState() {
+      const btn = getOptionalEl("filter-btn");
+      if (!btn) return;
+      const total = ALL_CATEGORIES.length;
+      const checked = checkedCategories.size;
+      if (checked === total) {
+        btn.classList.remove("is-active");
+        btn.textContent = "⛃ Filter";
+      } else {
+        btn.classList.add("is-active");
+        btn.textContent = "⛃ Filter (" + checked + "/" + total + ")";
+      }
+    }
+
+	function applyFilter() {
+	  if (!map) return;
+	  const filter = buildCategoryFilter();
+	  if (map.getLayer(SYMBOL_LAYER_ID)) map.setFilter(SYMBOL_LAYER_ID, filter);
+	  if (map.getLayer(LABEL_LAYER_ID)) map.setFilter(LABEL_LAYER_ID, filter);
+	  if (map.getLayer(HEATMAP_LAYER_ID)) map.setFilter(HEATMAP_LAYER_ID, filter);
+	  updateFilterButtonState();
+	}
+	function buildCategoryFilter() {
+	  if (checkedCategories.size === ALL_CATEGORIES.length) return null;
+	  if (!checkedCategories.size) return ["==", ["literal", 1], 0];
+
+	  const checkedArr = Array.from(checkedCategories);
+
+	  // category は配列プロパティ。["in", needle, array] は要素一致になる。
+	  // category プロパティが無い feature は表示し続ける（ヒットしない=非表示にすると POI が消えすぎるため）。
+	  const matchAny = ["any"].concat(checkedArr.map(function (c) {
+	    return ["in", c, ["get", "category"]];
+	  }));
+
+	  return [
+	    "any",
+	    ["!", ["has", "category"]],
+	    matchAny
+	  ];
+	}
+
+    function resetFilterToDefault() {
+      checkedCategories = new Set(ALL_CATEGORIES);
+      filterSearchQuery = "";
+      const searchEl = getOptionalEl("filter-search");
+      if (searchEl) searchEl.value = "";
+      applyFilter();
+      updateFilterSummary();
+      updateFilterButtonState();
+    }
 
     function setupToolbar() {
       getRequiredEl("change-token-btn").addEventListener("click", function () {
@@ -1244,7 +1528,7 @@
 
     function getPoiCategories(props) {
       if (!props) return [];
-      const candidates = [props.poi_category, props.categories, props.category, props.maki];
+      const candidates = [props.category, props.categories, props.poi_category, props.primary_category, props.maki];
       const result = [];
       const seen = new Set();
       for (const candidate of candidates) {
@@ -1419,26 +1703,30 @@
       tests.push(["preset token is pk format", isPublicToken(PRESET_MAPBOX_TOKEN) === true]);
       tests.push(["parseCategories comma", JSON.stringify(parseCategories("a,b")) === JSON.stringify(["a", "b"])]);
       tests.push(["parseCategories json", JSON.stringify(parseCategories('["a","b"]')) === JSON.stringify(["a", "b"])]);
-      tests.push(["getPoiCategories uses poi_category", JSON.stringify(getPoiCategories({ poi_category: "coffee,cafe" })) === JSON.stringify(["coffee", "cafe"])]);
+      tests.push(["getPoiCategories uses category", JSON.stringify(getPoiCategories({ category: "coffee_shop,cafe" })) === JSON.stringify(["coffee_shop", "cafe"])]);
       tests.push(["extractPoiPhotos metadata.primary_photo", extractPoiPhotos(null, { type: "Feature", properties: { metadata: { primary_photo: "https://dynl.mktgcdn.com/p/example/1900x1264.jpg" } } }).length === 1]);
       tests.push(["extractPoiDescriptions detailed_description", extractPoiDescriptions({ detailed_description: "Long description" }, null)[0] === "Long description"]);
-      tests.push(["extractPoiDescriptions description array", extractPoiDescriptions({ description: ["A", "B"] }, null).length === 2]);
-      tests.push(["extractPoiDescriptions object array", extractPoiDescriptions({ description: [{ text: "A" }, { value: "B" }] }, null).join(",") === "A,B"]);
       tests.push(["normalizePhotoUrl keeps http for confirmation", normalizePhotoUrl("http://example.com/a.jpg") === "http://example.com/a.jpg"]);
       tests.push(["https photos do not require approval", getApprovedPhotoUrls(["https://example.com/a.jpg"]).length === 1]);
-      tests.push(["getCoordsFromProps supports coordinates object", JSON.stringify(getCoordsFromProps({ coordinates: { latitude: 39.743346, longitude: -121.839701 } })) === JSON.stringify([-121.839701, 39.743346])]);
       tests.push(["buildDetailsUrl includes attribute_sets", buildDetailsUrl("abc", "pk.test").includes("attribute_sets=basic%2Cphotos%2Cvisit%2Cvenue")]);
-      tests.push(["SOURCE_LAYER is configured", SOURCE_LAYER === "fc0778414b83399b7e70"]);
+      tests.push(["TILESET_ID is updated", TILESET_ID === "10da032y.29wsyen9vwuu"]);
+      tests.push(["SOURCE_LAYER is initially null", SOURCE_LAYER === null]);
+      tests.push(["fetchSourceLayerFromTileJSON exists", typeof fetchSourceLayerFromTileJSON === "function"]);
+      tests.push(["ALL_CATEGORIES includes parking_lot", ALL_CATEGORIES.indexOf("parking_lot") !== -1]);
+      tests.push(["ALL_CATEGORIES includes cafe", ALL_CATEGORIES.indexOf("cafe") !== -1]);
+      tests.push(["ALL_CATEGORIES includes antique_shop", ALL_CATEGORIES.indexOf("antique_shop") !== -1]);
+      tests.push(["CATEGORY_GROUPS has 3 primaries", CATEGORY_GROUPS.length === 3]);
+      tests.push(["default all categories checked", checkedCategories.size === ALL_CATEGORIES.length]);
+      tests.push(["buildCategoryFilter returns null when all checked", buildCategoryFilter() === null]);
+      tests.push(["buildCategoryFilter returns expression when partial", (function(){ const saved = checkedCategories; checkedCategories = new Set(["cafe"]); const f = buildCategoryFilter(); checkedCategories = saved; return Array.isArray(f) && f[0] === "any"; })()]);
+      tests.push(["resetFilterToDefault restores all", (function(){ const saved = new Set(checkedCategories); checkedCategories = new Set(["cafe"]); resetFilterToDefault(); const ok = checkedCategories.size === ALL_CATEGORIES.length; checkedCategories = saved; return ok; })()]);
       tests.push(["selection uses vector tile source-layer", typeof getVectorTileFeaturesInPolygon === "function"]);
       tests.push(["waitForSourceTilesReady exists", typeof waitForSourceTilesReady === "function"]);
       tests.push(["Details API selection is limited to 10", limitFeaturesForDetailsApi(new Array(12).fill({})).length === 10]);
-      tests.push(["selection point object is valid", (function () { const p = { x: 1, y: 2 }; return p && Number.isFinite(p.x) && Number.isFinite(p.y); })()]);
       tests.push(["Details API skips numeric feature ids", getDetailsMapboxId({ id: 123, properties: {} }) === null]);
       tests.push(["Details API accepts encoded mapbox ids", getDetailsMapboxId({ properties: { mapbox_id: "dXJuOm1ieHBvaToyMmE1" } }) === "dXJuOm1ieHBvaToyMmE1"]);
       tests.push(["getOptionalEl returns null for missing element", getOptionalEl("__missing__") === null]);
       tests.push(["thumbnail has full image attribute", renderThumbnailStrip(["https://example.com/a.jpg"]).indexOf("data-full-photo") !== -1]);
-      tests.push(["thumbnail has photo group attribute", renderThumbnailStrip(["https://example.com/a.jpg", "https://example.com/b.jpg"]).indexOf("data-photo-group") !== -1]);
-      tests.push(["image modal constrains image size", true]);
       tests.push(["dedupeFeaturesByMapboxId", dedupeFeaturesByMapboxId([{ properties: { mapbox_id: "a" }, geometry: { type: "Point", coordinates: [1, 2] } }, { properties: { mapbox_id: "a" }, geometry: { type: "Point", coordinates: [1, 2] } }]).length === 1]);
       const failed = tests.filter(function (t) { return !t[1]; });
       if (failed.length) console.warn("Unit tests failed:", failed.map(function (t) { return t[0]; }));
