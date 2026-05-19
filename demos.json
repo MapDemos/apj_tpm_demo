@@ -10,8 +10,8 @@
     "path": "./search_compare/"
   },
   {
-    "title": "Demo C",
-    "description": "Short description of Demo C",
-    "path": "./demo-c/"
+    "title": "poi_factory_coverage_map",
+    "description": "POIs updated from 15th May onward",
+    "path": "./poi_factory_heatmap/"
   }
 ]
