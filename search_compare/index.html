@@ -345,6 +345,7 @@ let MAPBOX_TOKEN   = '';
 const LS_GKEY      = 'apc_google_api_key';
 const LS_MBTOKEN   = 'apc_mapbox_token';
 const MAPBOX_STYLE = 'mapbox://styles/10da032y/cmnqqyl6e001901re8rf02za5';
+const PRESET_MAPBOX_TOKEN = "pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw";
 
 // ============================================================
 // SETUP MODAL
@@ -361,8 +362,16 @@ function initSetup() {
   const startBtn = document.getElementById('setup-start');
   const clearBtn = document.getElementById('setup-clear');
 
-  gInput.value = localStorage.getItem(LS_GKEY)    ?? '';
-  mInput.value = localStorage.getItem(LS_MBTOKEN) ?? '';
+  // Google は従来通り localStorage から復元（プリセットなし）
+  gInput.value = localStorage.getItem(LS_GKEY) ?? '';
+
+  // ▼ Mapbox は「プリセット優先」「なければ localStorage」
+  const isPk = (t) => typeof t === 'string' && t.trim().startsWith('pk.');
+  if (isPk(PRESET_MAPBOX_TOKEN)) {
+    mInput.value = PRESET_MAPBOX_TOKEN;
+  } else {
+    mInput.value = localStorage.getItem(LS_MBTOKEN) ?? '';
+  }
 
   const validate = () => { startBtn.disabled = !(gInput.value.trim() && mInput.value.trim()); };
   gInput.addEventListener('input', validate);
@@ -381,7 +390,9 @@ function initSetup() {
   clearBtn.addEventListener('click', () => {
     localStorage.removeItem(LS_GKEY);
     localStorage.removeItem(LS_MBTOKEN);
-    gInput.value = ''; mInput.value = '';
+    gInput.value = '';
+    // ▼ プリセットがある場合は Mapbox 欄はクリアせず再投入
+    mInput.value = isPk(PRESET_MAPBOX_TOKEN) ? PRESET_MAPBOX_TOKEN : '';
     validate();
     clearBtn.textContent = '✅ 削除しました';
     setTimeout(() => clearBtn.textContent = '保存済みトークンを削除', 2000);
