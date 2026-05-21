@@ -194,7 +194,7 @@
     <h1>DEMO</h1>
     <p>Enter your Mapbox public token (pk.*).</p>
     <label for="token-input">Access Token</label>
-    <input id="token-input" type="text" placeholder="pk.eyJ1Ijoia2Vuamktc2hpbWEiLCJhIjoiY21mbTJkcDZhMDl3OTJpczdtbHFvN3p1YiJ9.nET28crg2gfNWR5swRDqig" />
+    <input id="token-input" type="text" placeholder="pk.eyJ1.." />
     <div id="token-err" class="err" style="display:none;">Token must start with "pk."</div>
     <button id="start-btn">Show Map</button>
   </div>
@@ -326,6 +326,7 @@ const TILESET_ID    = "10da032y.ta_headmap_0511";
 const SOURCE_LAYER  = "photos";
 const STYLE_URL     = "mapbox://styles/mapbox/standard";
 const TOKEN_KEY      = "mapbox_demo_pk_token";
+const PRESET_MAPBOX_TOKEN = "pk.eyJ1Ijoia2Vuamktc2hpbWEiLCJhIjoiY21mbTJkcDZhMDl3OTJpczdtbHFvN3p1YiJ9.nET28crg2gfNWR5swRDqig";
 const VISITED_KEY    = "mapbox_demo_visited_pois";
 const HISTORY_KEY    = "mapbox_demo_history";
 const BOOKMARK_KEY   = "mapbox_demo_bookmarks";
@@ -550,7 +551,13 @@ const tokenInput = document.getElementById("token-input");
 const tokenErr   = document.getElementById("token-err");
 const startBtn   = document.getElementById("start-btn");
 const savedToken = localStorage.getItem(TOKEN_KEY);
-if (savedToken) tokenInput.value = savedToken;
+const isPk = (t) => typeof t === "string" && t.trim().startsWith("pk.");
+
+// プリセット優先、なければ保存済み、なければ空欄
+const initialToken = isPk(PRESET_MAPBOX_TOKEN) ? PRESET_MAPBOX_TOKEN
+                   : (isPk(savedToken) ? savedToken : "");
+tokenInput.value = initialToken;
+ 
 startBtn.addEventListener("click", () => {
   const t = tokenInput.value.trim();
   if (!t.startsWith("pk.")) { tokenErr.style.display = "block"; return; }
