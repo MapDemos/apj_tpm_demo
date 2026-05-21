@@ -646,43 +646,72 @@ function plotGoogleMarkers(results) {
   });
 }
 
+// ★ 置き換え
 async function searchGoogleLegacy(query) {
   if (!googleServiceReady) await initGoogleMap();
-  const p = state.googleParams;
+
+  const request = { query };
+  for (const [k, v] of Object.entries(state.googleParams)) {
+    if (v == null || v === '') continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+
+    if (k === 'location' && v?.lat != null && v?.lng != null) {
+      request.location = new google.maps.LatLng(v.lat, v.lng);
+    } else if (k === 'types' && Array.isArray(v)) {
+      request.type = v[0]; // Legacyは1つのみ
+    } else {
+      request[k] = v;
+    }
+  }
+
   return new Promise((resolve) => {
-    placesService.textSearch({
-      query, language: p.language, region: p.region,
-      location: new google.maps.LatLng(p.location.lat, p.location.lng),
-      radius: p.radius, ...(p.types?.length > 0 && { type: p.types[0] }),
-    }, (results, status) => {
+    placesService.textSearch(request, (results, status) => {
       if (status === google.maps.places.PlacesServiceStatus.OK && results) {
         resolve(results.map(r => ({
-          place_id: r.place_id ?? '', name: r.name ?? '', formatted_address: r.formatted_address ?? '',
+          place_id: r.place_id ?? '',
+          name: r.name ?? '',
+          formatted_address: r.formatted_address ?? '',
           geometry: { location: { lat: r.geometry?.location?.lat() ?? 0, lng: r.geometry?.location?.lng() ?? 0 } },
           types: r.types ?? [],
         })));
-      } else { resolve({ error: `Places API error: ${status}` }); }
+      } else {
+        resolve({ error: `Places API error: ${status}` });
+      }
     });
   });
 }
 
+// ★ 追加: New API のリクエストボディを構築
+function buildGoogleNewBody(query) {
+  const body = {};
+  for (const [k, v] of Object.entries(state.googleParams)) {
+    if (v == null || v === '') continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    body[k] = v;
+  }
+  body.textQuery = query;
+  return body;
+}
+
+// ★ 置き換え
 async function searchGoogleNew(query) {
-  const p = state.googleParams, rect = p.locationRestriction?.rectangle;
-  const body = {
-    textQuery: query, languageCode: p.languageCode, regionCode: p.regionCode,
-    maxResultCount: p.maxResultCount ?? 10, rankPreference: p.rankPreference ?? 'RELEVANCE',
-    ...(rect && { locationRestriction: { rectangle: { low: rect.low, high: rect.high } } }),
-    ...(p.includedType && { includedType: p.includedType }),
-  };
+  const body = buildGoogleNewBody(query);
   const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GOOGLE_API_KEY, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.types' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': GOOGLE_API_KEY,
+      'X-Goog-FieldMask':
+        'places.id,places.displayName,places.formattedAddress,places.location,places.types',
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Places API (New) error: ${res.status} ${await res.text()}`);
   const data = await res.json();
   return (data.places ?? []).map(p => ({
-    place_id: p.id ?? '', name: p.displayName?.text ?? '', formatted_address: p.formattedAddress ?? '',
+    place_id: p.id ?? '',
+    name: p.displayName?.text ?? '',
+    formatted_address: p.formattedAddress ?? '',
     geometry: { location: { lat: p.location?.latitude ?? 0, lng: p.location?.longitude ?? 0 } },
     types: p.types ?? [],
   }));
@@ -728,16 +757,43 @@ function plotMapboxMarkers(results) {
   });
 }
 
+// ★ 追加: Mapbox パラメータをクエリ文字列にシリアライズ
+function serializeMapboxParam(value) {
+  if (value == null || value === '') return null;
+  if (Array.isArray(value)) {
+    return value.length === 0 ? null : value.join(',');
+  }
+  if (typeof value === 'object') {
+    // proximity / origin: {lng, lat} → "lng,lat"
+    if (value.lng != null && value.lat != null) return `${value.lng},${value.lat}`;
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function buildMapboxParams(query, includeToken) {
+  const params = new URLSearchParams({ q: query });
+  for (const [k, v] of Object.entries(state.mapboxParams)) {
+    const s = serializeMapboxParam(v);
+    if (s !== null) params.set(k, s);
+  }
+  params.set('access_token', includeToken ? MAPBOX_TOKEN : '****');
+  return params;
+}
+
+// ★ 置き換え
 async function searchMapbox(query) {
-  const p = state.mapboxParams;
-  const params = new URLSearchParams({ q: query, language: p.language, country: p.country, limit: String(p.limit), access_token: MAPBOX_TOKEN });
-  if (p.proximity) params.set('proximity', `${p.proximity.lng},${p.proximity.lat}`);
-  if (p.types?.length > 0) params.set('types', p.types.join(','));
-  if (Array.isArray(p.bbox) && p.bbox.length === 4) params.set('bbox', p.bbox.join(','));
+  const params = buildMapboxParams(query, true);
   const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/forward?${params}`);
   if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
   const data = await res.json();
-  return (data.features ?? []).map(f => ({ ...f.properties, coordinates: { longitude: f.geometry?.coordinates?.[0] ?? 0, latitude: f.geometry?.coordinates?.[1] ?? 0 } }));
+  return (data.features ?? []).map(f => ({
+    ...f.properties,
+    coordinates: {
+      longitude: f.geometry?.coordinates?.[0] ?? 0,
+      latitude:  f.geometry?.coordinates?.[1] ?? 0,
+    },
+  }));
 }
 
 // ============================================================
@@ -806,21 +862,32 @@ function setLoading(side) {
 // ============================================================
 function buildGoogleQueryDisplay(query) {
   if (googleApiMode === 'new') {
-    const p = state.googleParams;
-    return `POST https://places.googleapis.com/v1/places:searchText\n\n${JSON.stringify({ textQuery: query, languageCode: p.languageCode, regionCode: p.regionCode, maxResultCount: p.maxResultCount??10, locationRestriction: p.locationRestriction, rankPreference: p.rankPreference??'RELEVANCE', ...(p.includedType && { includedType: p.includedType }) }, null, 2)}`;
-  } else {
-    const p = state.googleParams;
-    return `GET https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&language=${p.language}&region=${p.region}&location=${p.location.lat},${p.location.lng}&radius=${p.radius}${p.types?.length>0?`&type=${p.types[0]}`:''}&key=****`;
+    const body = buildGoogleNewBody(query);
+    return `POST https://places.googleapis.com/v1/places:searchText\n\n${JSON.stringify(body, null, 2)}`;
   }
+
+  // Legacy: REST 形式で表示用URLを作る
+  const params = new URLSearchParams({ query });
+  for (const [k, v] of Object.entries(state.googleParams)) {
+    if (v == null || v === '') continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+
+    if (k === 'location' && v?.lat != null && v?.lng != null) {
+      params.set('location', `${v.lat},${v.lng}`);
+    } else if (k === 'types' && Array.isArray(v)) {
+      params.set('type', v[0]);
+    } else if (typeof v === 'object') {
+      params.set(k, JSON.stringify(v));
+    } else {
+      params.set(k, String(v));
+    }
+  }
+  params.set('key', '****');
+  return `GET https://maps.googleapis.com/maps/api/place/textsearch/json?${params.toString()}`;
 }
 
 function buildMapboxQueryDisplay(query) {
-  const p = state.mapboxParams;
-  const params = new URLSearchParams({ q: query, language: p.language, country: p.country, limit: String(p.limit), access_token: '****' });
-  if (p.proximity) params.set('proximity', `${p.proximity.lng},${p.proximity.lat}`);
-  if (p.types?.length > 0) params.set('types', p.types.join(','));
-  if (Array.isArray(p.bbox) && p.bbox.length === 4) params.set('bbox', p.bbox.join(','));
-  return `GET https://api.mapbox.com/search/searchbox/v1/forward?${params.toString()}`;
+  return `GET https://api.mapbox.com/search/searchbox/v1/forward?${buildMapboxParams(query, false)}`;
 }
 
 // ============================================================
