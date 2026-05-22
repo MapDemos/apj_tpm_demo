@@ -18,5 +18,9 @@
     "title": "routable_point_demo",
     "description": "routable_point",
     "path": "./routable_point/"
-  }
+  },
+  {
+    "title": "dynamic_pricing",
+    "description": "ODL dynamic pricing by weatehr tileset",
+    "path": "./dynamic_pricing/"
 ]
