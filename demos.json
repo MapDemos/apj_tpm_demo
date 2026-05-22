@@ -23,5 +23,10 @@
     "title": "dynamic_pricing",
     "description": "ODL dynamic pricing by weatehr tileset",
     "path": "./dynamic_pricing/"
+  },
+  {
+    "title": "rain_radar",
+    "description": "simple rain radar by weatehr tileset",
+    "path": "./rain_radar/"
   }
 ]
