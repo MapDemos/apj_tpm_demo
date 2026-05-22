@@ -1,0 +1,1423 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rain Radar - 雨雲レーダー</title>
+    
+    <!-- Mapbox GL JS -->
+    <script src='https://api.mapbox.com/mapbox-gl-js/v3.23.1/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v3.23.1/mapbox-gl.css' rel='stylesheet' />
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        /* Time Dialogue - Top Left */
+        #time-dialogue {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: linear-gradient(135deg, rgba(27, 0, 52, 0.95), rgba(50, 0, 80, 0.95));
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transform: scale(0.8);
+            transform-origin: top left;
+        }
+
+        #time-display {
+            color: #fff;
+            font-size: 24px;
+            font-weight: 600;
+            text-shadow: 0 0 10px rgba(230, 0, 126, 0.5);
+        }
+
+        /* Popup toggle button */
+        #popup-toggle {
+            position: absolute;
+            top: 90px;
+            left: 20px;
+            background: linear-gradient(135deg, rgba(27, 0, 52, 0.95), rgba(50, 0, 80, 0.95));
+            color: #fff;
+            border: 1px solid rgba(230, 0, 126, 0.3);
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+            z-index: 1002;
+            transform: scale(0.8);
+            transform-origin: top left;
+        }
+
+        #popup-toggle.enabled {
+            border-color: rgba(0, 212, 170, 0.6);
+            box-shadow: 0 0 10px rgba(0, 212, 170, 0.3);
+        }
+
+        #popup-toggle.enabled:hover {
+            background: linear-gradient(135deg, rgba(50, 0, 80, 0.95), rgba(80, 0, 120, 0.95));
+            box-shadow: 0 4px 15px rgba(0, 212, 170, 0.5);
+            border-color: rgba(0, 212, 170, 0.8);
+        }
+
+        #popup-toggle.disabled:hover {
+            background: linear-gradient(135deg, rgba(50, 0, 80, 0.95), rgba(80, 0, 120, 0.95));
+            box-shadow: 0 4px 15px rgba(230, 0, 126, 0.4);
+            border-color: rgba(230, 0, 126, 0.6);
+        }
+
+        /* Scale Factor Control */
+        #scale-control {
+            position: absolute;
+            top: 140px;
+            left: 20px;
+            background: linear-gradient(135deg, rgba(27, 0, 52, 0.95), rgba(50, 0, 80, 0.95));
+            color: #fff;
+            border: 1px solid rgba(230, 0, 126, 0.3);
+            padding: 10px 16px;
+            border-radius: 8px;
+            z-index: 1002;
+            transform: scale(0.8);
+            transform-origin: top left;
+            font-size: 13px;
+            backdrop-filter: blur(10px);
+        }
+
+        #scale-control label {
+            display: block;
+            margin-bottom: 6px;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+
+        #scale-value {
+            color: #00D4AA;
+            font-weight: 600;
+        }
+
+        #scale-slider {
+            width: 160px;
+            height: 4px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: rgba(230, 0, 126, 0.3);
+            border-radius: 5px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        #scale-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #E6007E, #FF1B8D);
+            cursor: pointer;
+            box-shadow: 0 0 8px rgba(230, 0, 126, 0.6);
+        }
+
+        #scale-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #E6007E, #FF1B8D);
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 0 8px rgba(230, 0, 126, 0.6);
+        }
+
+        /* Legend */
+        #legend {
+            position: absolute;
+            bottom: 180px;
+            left: 20px;
+            background: linear-gradient(135deg, rgba(27, 0, 52, 0.95), rgba(50, 0, 80, 0.95));
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            min-width: 200px;
+            transform: scale(0.6);
+            transform-origin: bottom left;
+        }
+
+        #legend h3 {
+            color: #fff;
+            font-size: 16px;
+            margin-bottom: 15px;
+            text-align: center;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .legend-color {
+            width: 40px;
+            height: 20px;
+            margin-right: 10px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .legend-label {
+            color: #fff;
+            font-size: 13px;
+            font-weight: 400;
+        }
+
+        /* Time Slider */
+        #slider-container {
+            position: absolute;
+            bottom: 30px;
+            left: 20px;
+            width: 40%;
+            max-width: 800px;
+            background: linear-gradient(0deg, rgba(27, 0, 52, 0.98), rgba(40, 0, 70, 0.95));
+            padding: 25px 30px 10px 30px;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(230, 0, 126, 0.2);
+            border-radius: 15px;
+        }
+
+        #slider-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        #time-slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 5px;
+            background: linear-gradient(90deg, 
+                rgba(0, 212, 170, 0.3) 0%, 
+                rgba(230, 0, 126, 0.4) 50%, 
+                rgba(0, 212, 170, 0.3) 100%);
+            outline: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+            margin-bottom: 40px;
+        }
+
+        #time-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #E6007E, #FF1B8D);
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(230, 0, 126, 0.8), 0 4px 10px rgba(0, 0, 0, 0.5);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        #time-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 0 25px rgba(230, 0, 126, 1), 0 6px 15px rgba(0, 0, 0, 0.6);
+        }
+
+        #time-slider::-moz-range-thumb {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #E6007E, #FF1B8D);
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 0 15px rgba(230, 0, 126, 0.8), 0 4px 10px rgba(0, 0, 0, 0.5);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        #time-slider::-moz-range-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 0 25px rgba(230, 0, 126, 1), 0 6px 15px rgba(0, 0, 0, 0.6);
+        }
+
+        /* Time markers */
+        #time-markers {
+            position: absolute;
+            bottom: 40px;
+            left: 0;
+            right: 0;
+            height: 8px;
+            pointer-events: none;
+        }
+
+        .time-marker {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: rgba(230, 0, 126, 0.6);
+            top: 1px;
+            transform: translateX(-50%);
+            box-shadow: 0 0 4px rgba(230, 0, 126, 0.8);
+        }
+
+        .time-marker.special {
+            background: rgba(0, 212, 170, 0.8);
+            box-shadow: 0 0 6px rgba(0, 212, 170, 1);
+        }
+
+        /* Time labels */
+        #time-labels {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            pointer-events: none;
+            padding-top: 5px;
+        }
+
+        .time-label {
+            color: #fff;
+            font-size: 14px;
+            white-space: nowrap;
+            text-align: center;
+            flex-shrink: 0;
+            font-weight: 500;
+        }
+
+        .time-label.highlight {
+            color: #E6007E;
+            font-weight: 600;
+        }
+
+        .time-label.special {
+            color: #00D4AA;
+            font-weight: 600;
+        }
+
+        .time-label:first-child {
+            transform: translateX(0);
+            text-align: left;
+        }
+
+        .time-label:last-child {
+            transform: translateX(-100%);
+            text-align: right;
+        }
+
+        /* Popup Styling */
+        .mapboxgl-popup {
+            pointer-events: none;
+        }
+
+        .mapboxgl-popup-content {
+            background: linear-gradient(135deg, rgba(27, 0, 52, 0.98), rgba(50, 0, 80, 0.98));
+            padding: 15px 20px;
+            border-radius: 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(230, 0, 126, 0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        .mapboxgl-popup-content strong {
+            color: #00D4AA;
+            font-size: 16px;
+        }
+
+        .mapboxgl-popup-content div {
+            color: #fff;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+
+        .popup-location {
+            color: #00D4AA !important;
+            font-weight: 600;
+            margin-bottom: 10px;
+            font-size: 15px;
+        }
+
+        .popup-temperature {
+            color: #FF8C00 !important;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .popup-temperature-time {
+            color: #aaa !important;
+            font-size: 11px;
+            font-style: italic;
+            margin-left: 5px;
+        }
+
+        .popup-description {
+            color: #E6007E !important;
+            font-style: italic;
+            margin-top: 8px;
+            font-size: 13px;
+        }
+
+        .popup-forecast {
+            color: #00D4AA !important;
+            font-weight: 600;
+            margin-top: 10px;
+            font-size: 14px;
+            border-top: 1px solid rgba(0, 212, 170, 0.3);
+            padding-top: 8px;
+        }
+
+        .mapboxgl-popup-tip {
+            border-top-color: rgba(27, 0, 52, 0.98) !important;
+        }
+
+        /* Loading Indicator */
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-size: 18px;
+            z-index: 2000;
+            background: rgba(27, 0, 52, 0.95);
+            padding: 30px 50px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            display: none;
+            border: 1px solid rgba(230, 0, 126, 0.3);
+        }
+
+        .spinner {
+            border: 4px solid rgba(230, 0, 126, 0.2);
+            border-top: 4px solid #E6007E;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            #time-dialogue {
+                top: 10px;
+                left: 10px;
+                padding: 10px 16px;
+                transform: scale(0.75);
+            }
+
+            #time-display {
+                font-size: 16px;
+            }
+
+            #popup-toggle {
+                top: 60px;
+                left: 10px;
+                padding: 8px 16px;
+                font-size: 13px;
+                min-height: 44px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transform: scale(0.85);
+            }
+
+            #scale-control {
+                top: 105px;
+                left: 10px;
+                transform: scale(0.75);
+            }
+    
+            #legend {
+                bottom: 200px;
+                left: 10px;
+                padding: 15px;
+                min-width: 150px;
+                transform: scale(0.55);
+            }
+
+            #slider-container {
+                width: calc(100% - 20px);
+                left: 10px;
+                bottom: 34px;
+                padding: 20px 25px 10px 25px;
+            }
+
+            .time-label {
+                font-size: 11px;
+            }
+
+            #time-slider::-webkit-slider-thumb {
+                width: 28px;
+                height: 28px;
+            }
+
+            #time-slider::-moz-range-thumb {
+                width: 28px;
+                height: 28px;
+            }
+        }
+
+        @media (max-width: 576px) {
+            #time-dialogue {
+                transform: scale(0.7);
+            }
+
+            #popup-toggle {
+                top: 55px;
+                transform: scale(0.8);
+            }
+
+            #scale-control {
+                top: 95px;
+                transform: scale(0.7);
+            }
+
+            #legend {
+                transform: scale(0.5);
+                bottom: 190px;
+            }
+
+            #slider-container {
+                padding: 15px 18px 10px 18px;
+            }
+
+            .time-label {
+                font-size: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <!-- Popup Toggle Button -->
+    <button id="popup-toggle" class="disabled">Popup: OFF</button>
+
+    <!-- Scale Factor Control -->
+    <div id="scale-control">
+        <label for="scale-slider">Label Scale: <span id="scale-value">1.0</span></label>
+        <input type="range" id="scale-slider" min="0.5" max="2" step="0.1" value="1">
+    </div>
+        
+    <!-- Time Dialogue -->
+    <div id="time-dialogue">
+        <div id="time-display">読み込み中...</div>
+    </div>
+
+    <!-- Legend -->
+    <div id="legend">
+        <h3>降水強度</h3>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(242, 242, 255, 0.9);"></div>
+            <div class="legend-label">0.05-1 mm/h</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(160, 210, 255, 0.9);"></div>
+            <div class="legend-label">1-5 mm/h</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(33, 140, 255, 0.9);"></div>
+            <div class="legend-label">5-10 mm/h</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(0, 65, 255, 0.9);"></div>
+            <div class="legend-label">10-20 mm/h</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(250, 245, 0, 0.9);"></div>
+            <div class="legend-label">20-30 mm/h</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(255, 153, 0, 0.9);"></div>
+            <div class="legend-label">30-50 mm/h</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(255, 40, 0, 0.9);"></div>
+            <div class="legend-label">50-80 mm/h</div>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: rgba(180, 0, 104, 0.9);"></div>
+            <div class="legend-label">80+ mm/h</div>
+        </div>
+    </div>
+
+    <!-- Time Slider -->
+    <div id="slider-container">
+        <div id="slider-wrapper">
+            <input type="range" id="time-slider" min="0" max="100" value="0" step="1">
+            <div id="time-markers"></div>
+            <div id="time-labels"></div>
+        </div>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>データを読み込んでいます...</div>
+    </div>
+
+<script>
+    // ========================================
+    // MAPBOX ACCESS TOKEN
+    // ========================================
+    mapboxgl.accessToken = 'pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw';
+
+    // ========================================
+    // CONFIGURATION
+    // ========================================
+    
+    // Precipitation color scale
+    const rasterColorExpression = [
+        'step',
+        ['raster-value'],
+        'rgba(0, 0, 0, 0)',
+        0.2, "rgba(160, 210, 255, 0.9)", // light blue 0.25
+        0.98, "rgba(100, 181, 252, 0.9)", // light blue 1
+        4.98, "rgba(33, 140, 255, 0.9)", // mid blue 5
+        9.98, "rgba(0, 65, 255, 0.9)", // blue 10
+        19.98, "rgba(250, 245, 0, 0.9)", // yellow 20
+        29.98, "rgba(255, 153, 0, 0.9)", // orange 30
+        49.98, "rgba(255, 40, 0, 0.9)", // red 50
+        79.98, "rgba(180, 0, 104, 0.9)" // purple 80
+        //'raster-resampling': 'nearest',
+        //'raster-color-range': [0, 80.0]
+    ];
+    
+    // Tileset configurations
+    const tilesets = [
+        {
+            id: 'mapbox.weather-jp-nowcast-last-60m',
+            name: 'Past 60min',
+            order: 1
+        },
+        {
+            id: 'mapbox.weather-jp-nowcast',
+            name: 'Nowcast',
+            order: 2
+        },
+        {
+            id: 'mapbox.weather-jp-rain-1-6',
+            name: '1-6 Hour',
+            order: 3
+        },
+        {
+            id: 'mapbox.weather-jp-rain-7-15',
+            name: '7-15 Hour',
+            order: 4
+        }
+    ];
+
+    const TEMPERATURE_TILESET_ID = 'mapbox.weather-jp-temperature-0-39';
+
+    // API thresholds
+    const GEOCODING_THRESHOLD = 0.01;
+    const TEMPERATURE_THRESHOLD = 0.03;
+    const FUTURE_FORECAST_THRESHOLD = 0.01;
+
+    // ========================================
+    // GLOBAL STATE
+    // ========================================
+    let map;
+    let allBands = [];
+    let currentBandIndex = 0;
+    let nowcastStartIndex = -1;
+    let popup = null;
+    let isPopupEnabled = false;
+    let temperatureBands = [];
+    
+    // Timers
+    let temperatureDebounceTimer = null;
+    let futureForecastDebounceTimer = null;
+    
+    // Cache
+    let geocodingCache = new Map();
+    let temperatureCache = new Map();
+    
+    // Last positions for threshold checks
+    let lastGeocodingLng = null;
+    let lastGeocodingLat = null;
+    let lastTemperatureLng = null;
+    let lastTemperatureLat = null;
+    let lastFutureForecastLng = null;
+    let lastFutureForecastLat = null;
+    let lastCityName = null;
+    
+    //Added 
+    let currentActiveLayerId = null;
+
+    // ========================================
+    // MAP INITIALIZATION
+    // ========================================
+    map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/10da032y/cmnqxtyne001701rbfilj9iiz',
+        center: [139.7, 35.7],
+        zoom: 5.5,
+        projection: 'mercator',
+        language: 'ja',
+     // maxBounds: [
+     //     [118.0, 20.0],
+     //     [160.0, 50.0]
+     // ],
+        minZoom: 4.5,
+        maxZoom: 15,
+        hash: true
+    });
+
+    // ========================================
+    // UTILITY FUNCTIONS
+    // ========================================
+    
+    // Cache JST offset calculation
+    const JST_OFFSET_MS = 9 * 60 * 60 * 1000;  // 9 hours in milliseconds
+
+    function unixToJST(unixTimestamp) {
+        const jstDate = new Date((unixTimestamp * 1000) + JST_OFFSET_MS);
+        
+        const year = jstDate.getUTCFullYear();
+        const month = String(jstDate.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(jstDate.getUTCDate()).padStart(2, '0');
+        const hours = String(jstDate.getUTCHours()).padStart(2, '0');
+        const minutes = String(jstDate.getUTCMinutes()).padStart(2, '0');
+        
+        return `${year}年${month}月${day}日 ${hours}:${minutes}`;
+    }
+
+    function unixToShortJST(unixTimestamp) {
+        const jstDate = new Date((unixTimestamp * 1000) + JST_OFFSET_MS);
+        
+        const hours = String(jstDate.getUTCHours()).padStart(2, '0');
+        const minutes = String(jstDate.getUTCMinutes()).padStart(2, '0');
+        
+        return `${hours}:${minutes}`;
+    }
+
+    function calculateDistance(lng1, lat1, lng2, lat2) {
+        const lngDiff = lng1 - lng2;
+        const latDiff = lat1 - lat2;
+        return Math.sqrt(lngDiff * lngDiff + latDiff * latDiff);
+    }
+
+    function hasMovedBeyondGeocodingThreshold(lng, lat) {
+        if (lastGeocodingLng === null || lastGeocodingLat === null) return true;
+        return calculateDistance(lng, lat, lastGeocodingLng, lastGeocodingLat) >= GEOCODING_THRESHOLD;
+    }
+
+    function hasMovedBeyondTemperatureThreshold(lng, lat) {
+        if (lastTemperatureLng === null || lastTemperatureLat === null) return true;
+        return calculateDistance(lng, lat, lastTemperatureLng, lastTemperatureLat) >= TEMPERATURE_THRESHOLD;
+    }
+
+    function hasMovedBeyondFutureForecastThreshold(lng, lat) {
+        if (lastFutureForecastLng === null || lastFutureForecastLat === null) return true;
+        return calculateDistance(lng, lat, lastFutureForecastLng, lastFutureForecastLat) >= FUTURE_FORECAST_THRESHOLD;
+    }
+
+    function getJapaneseDescription(value) {
+        if (value === 0) return "雨なし";
+        if (value < 2) return "しとしとした雨";
+        if (value < 10) return "ポツポツ";
+        if (value < 20) return "ざーざーの雨";
+        if (value < 30) return "どしゃ降り";
+        if (value < 50) return "バケツをひっくり返したような雨";
+        if (value < 80) return "滝のような雨";
+        return "息苦しい、恐怖を感じる雨";
+    }
+
+    function getTimeCategory(index) {
+        if (index < 0 || index >= allBands.length || nowcastStartIndex === -1) return '';
+        
+        const relativePosition = index - nowcastStartIndex;
+        
+        if (relativePosition === 0) return '（現在）';
+        if (relativePosition < 0) return '（過去）';
+        return '（予想）';
+    }
+
+    // ========================================
+    // API FUNCTIONS
+    // ========================================
+    
+    async function getCityName(lng, lat) {
+        const cacheKey = `${lng.toFixed(2)},${lat.toFixed(2)}`;
+        
+        if (geocodingCache.has(cacheKey)) {
+            return geocodingCache.get(cacheKey);
+        }
+        
+        try {
+            const url = `https://api.mapbox.com/search/geocode/v6/reverse?longitude=${lng}&latitude=${lat}&language=ja&country=JP&types=place&access_token=${mapboxgl.accessToken}`;
+            const response = await fetch(url);
+            const data = await response.json();
+            
+            if (data.features && data.features.length > 0) {
+                const cityName = data.features[0].properties.name || data.features[0].properties.place_formatted || '不明';
+                geocodingCache.set(cacheKey, cityName);
+                return cityName;
+            }
+            return '不明';
+        } catch (error) {
+            console.error('Geocoding error:', error);
+            return '不明';
+        }
+    }
+
+    async function loadTemperatureBands() {
+        try {
+            const url = `https://api.mapbox.com/v4/${TEMPERATURE_TILESET_ID}.json?secure&access_token=${mapboxgl.accessToken}`;
+            const response = await fetch(url);
+            const metadata = await response.json();
+            
+            if (metadata.raster_layers && metadata.raster_layers.length > 0) {
+                const layer = metadata.raster_layers[0];
+                let bands = layer.bands || layer.fields?.bands || [];
+                
+                temperatureBands = bands
+                    .map(b => {
+                        if (typeof b === 'object' && b.band_id) return parseInt(b.band_id);
+                        if (typeof b === 'string' || typeof b === 'number') return parseInt(b);
+                        return NaN;
+                    })
+                    .filter(b => !isNaN(b))
+                    .sort((a, b) => a - b);
+            }
+        } catch (error) {
+            console.error('Error loading temperature TileJSON:', error);
+        }
+    }
+
+    function findClosestTemperatureBand(targetBandId) {
+        if (temperatureBands.length === 0) return targetBandId;
+        
+        let closest = temperatureBands[0];
+        let minDiff = Math.abs(targetBandId - closest);
+        
+        for (const band of temperatureBands) {
+            const diff = Math.abs(targetBandId - band);
+            if (diff < minDiff) {
+                minDiff = diff;
+                closest = band;
+            }
+            if (diff === 0) break;
+        }
+        
+        return closest;
+    }
+
+    async function getTemperature(lng, lat, targetBandId) {
+        const closestBandId = findClosestTemperatureBand(targetBandId);
+        const cacheKey = `${lng.toFixed(3)},${lat.toFixed(3)},${closestBandId}`;
+        
+        if (temperatureCache.has(cacheKey)) {
+            return temperatureCache.get(cacheKey);
+        }
+        
+        try {
+            const url = `https://api.mapbox.com/v4/${TEMPERATURE_TILESET_ID}/tilequery/${lng},${lat}.json?layers=temperature&bands=${closestBandId}&access_token=${mapboxgl.accessToken}`;
+            const response = await fetch(url);
+            const data = await response.json();
+            
+            if (data.features && data.features.length > 0) {
+                const feature = data.features[0];
+                
+                if (feature.properties?.tilequery?.band) {
+                    const bandId = parseInt(feature.properties.tilequery.band);
+                    const tempValue = feature.properties.val?.[0];
+                    
+                    if (tempValue !== null && tempValue !== undefined) {
+                        const result = {
+                            value: tempValue,
+                            bandId: bandId,
+                            time: unixToShortJST(bandId)
+                        };
+                        temperatureCache.set(cacheKey, result);
+                        return result;
+                    }
+                }
+            }
+            return null;
+        } catch (error) {
+            console.error('Temperature query error:', error);
+            return null;
+        }
+    }
+
+    async function queryFutureForecast(lng, lat, currentIndex) {
+        const futureBands = allBands.filter((band, index) => 
+            index >= currentIndex && 
+            band.tilesetId !== 'mapbox.weather-jp-nowcast-last-60m'
+        );
+        
+        const bandsByTileset = {};
+        futureBands.forEach(band => {
+            if (!bandsByTileset[band.tilesetId]) {
+                bandsByTileset[band.tilesetId] = [];
+            }
+            bandsByTileset[band.tilesetId].push(band);
+        });
+        
+        let totalPrecipitation = 0;
+        
+        for (const [tilesetId, bands] of Object.entries(bandsByTileset)) {
+            const sourceId = `rain-source-${tilesetId}`;
+            
+            for (const band of bands) {
+                try {
+                    const rasterResult = await map.queryRasterValue(
+                        sourceId,
+                        { lng, lat },
+                        {
+                            layerName: band.layerName,
+                            bands: [band.bandId.toString()]
+                        }
+                    );
+                    
+                    const bandData = rasterResult?.[band.layerName]?.[band.bandId.toString()];
+                    if (bandData?.[0] !== null && bandData?.[0] !== undefined) {
+                        totalPrecipitation += bandData[0];
+                    }
+                } catch (error) {
+                    // Silent fail
+                }
+            }
+        }
+        
+        return totalPrecipitation;
+    }
+
+    async function checkRainStopsWithin3Bands(lng, lat, currentIndex) {
+        const next3Bands = [];
+        for (let i = 1; i <= 3; i++) {
+            const nextIndex = currentIndex + i;
+            if (nextIndex < allBands.length) {
+                next3Bands.push(allBands[nextIndex]);
+            }
+        }
+        
+        if (next3Bands.length === 0) return false;
+        
+        const tilesetGroups = {};
+        next3Bands.forEach(band => {
+            if (!tilesetGroups[band.tilesetId]) {
+                tilesetGroups[band.tilesetId] = [];
+            }
+            tilesetGroups[band.tilesetId].push(band);
+        });
+        
+        for (const [tilesetId, bands] of Object.entries(tilesetGroups)) {
+            const sourceId = `rain-source-${tilesetId}`;
+            
+            for (const band of bands) {
+                try {
+                    const rasterResult = await map.queryRasterValue(
+                        sourceId,
+                        { lng, lat },
+                        {
+                            layerName: band.layerName,
+                            bands: [band.bandId.toString()]
+                        }
+                    );
+                    
+                    const bandData = rasterResult?.precipitation?.[band.bandId.toString()];
+                    const value = bandData?.[0];
+                    
+                    if (value !== null && value !== undefined && value !== 0) {
+                        return false;
+                    }
+                } catch (error) {
+                    // Continue checking
+                }
+            }
+        }
+        
+        return true;
+    }
+
+    // ========================================
+    // UI FUNCTIONS
+    // ========================================
+    
+    function updateTimeDisplay() {
+        if (allBands.length > 0 && currentBandIndex < allBands.length) {
+            const band = allBands[currentBandIndex];
+            const timeStr = unixToJST(band.bandId);
+            const category = getTimeCategory(currentBandIndex);
+            document.getElementById('time-display').textContent = `${timeStr} ${category}`;
+        }
+    }
+
+        function createTimeLabels() {
+            const labelsContainer = document.getElementById('time-labels');
+            const markersContainer = document.getElementById('time-markers');
+            
+            if (allBands.length === 0 || nowcastStartIndex === -1) return;
+            
+            const totalBands = allBands.length;
+            const maxIndex = totalBands - 1;
+            
+            // Use DocumentFragment to batch DOM operations
+            const markersFragment = document.createDocumentFragment();
+            const labelsFragment = document.createDocumentFragment();
+            
+            // Only create markers for key positions (reduce from 50-100 to ~10-15)
+            const markerStep = Math.max(1, Math.floor(totalBands / 20));
+            
+            for (let index = 0; index < totalBands; index += markerStep) {
+                const marker = document.createElement('div');
+                marker.className = 'time-marker';
+                
+                if (index === 0 || index === nowcastStartIndex || index === maxIndex) {
+                    marker.classList.add('special');
+                }
+                
+                marker.style.left = `${(index / maxIndex) * 100}%`;
+                markersFragment.appendChild(marker);  // ← No reflow yet
+            }
+            
+            // Add special markers if they weren't included
+            if (nowcastStartIndex % markerStep !== 0) {
+                const marker = document.createElement('div');
+                marker.className = 'time-marker special';
+                marker.style.left = `${(nowcastStartIndex / maxIndex) * 100}%`;
+                markersFragment.appendChild(marker);
+            }
+            
+            // Create labels (only 4-5 labels)
+            const labelPositions = [
+                { index: 0, text: unixToShortJST(allBands[0].bandId), type: 'past' }
+            ];
+            
+            if (nowcastStartIndex >= 0) {
+                labelPositions.push({
+                    index: nowcastStartIndex,
+                    text: '現在',
+                    type: 'present'
+                });
+            }
+            
+            const oneToSixHourIndex = allBands.findIndex(b => b.tilesetId === 'mapbox.weather-jp-rain-1-6');
+            if (oneToSixHourIndex >= 0) {
+                labelPositions.push({
+                    index: oneToSixHourIndex,
+                    text: unixToShortJST(allBands[oneToSixHourIndex].bandId),
+                    type: 'future'
+                });
+            }
+            
+            if (totalBands > 0) {
+                labelPositions.push({
+                    index: maxIndex,
+                    text: unixToShortJST(allBands[maxIndex].bandId),
+                    type: 'future'
+                });
+            }
+            
+            labelPositions.forEach(pos => {
+                const label = document.createElement('div');
+                label.className = 'time-label';
+                
+                if (pos.type === 'present') {
+                    label.classList.add('special');
+                } else if (pos.type === 'past') {
+                    label.classList.add('highlight');
+                }
+                
+                label.textContent = pos.text;
+                label.style.left = `${(pos.index / maxIndex) * 100}%`;
+                labelsFragment.appendChild(label);  // ← No reflow yet
+            });
+            
+            // Single reflow for all changes
+            labelsContainer.innerHTML = '';
+            markersContainer.innerHTML = '';
+            markersContainer.appendChild(markersFragment);  // ← Single reflow
+            labelsContainer.appendChild(labelsFragment);     // ← Single reflow
+        }
+
+        function updateRasterBand(index) {
+            if (allBands.length === 0 || index >= allBands.length) return;
+            
+            currentBandIndex = index;
+            const band = allBands[index];
+            const targetLayerId = `rain-layer-${band.tilesetId}`;
+            
+            // Hide previous layer (if different)
+            if (currentActiveLayerId && currentActiveLayerId !== targetLayerId) {
+                if (map.getLayer(currentActiveLayerId)) {
+                    map.setPaintProperty(currentActiveLayerId, 'raster-opacity', 0);
+                }
+            }
+            
+            // Show and update target layer
+            if (map.getLayer(targetLayerId)) {
+                map.setPaintProperty(targetLayerId, 'raster-opacity', 0.85);
+                map.setPaintProperty(targetLayerId, 'raster-array-band', band.bandId.toString());
+            }
+            
+            currentActiveLayerId = targetLayerId;
+            updateTimeDisplay();
+        }
+
+    // ========================================
+    // TILESET LOADING
+    // ========================================
+    
+    async function loadAllTilesets() {
+        document.getElementById('loading').style.display = 'block';
+        
+        // Load temperature data asynchronously (non-blocking)
+        loadTemperatureBands().catch(err => console.error('Temperature load failed:', err));
+        
+        // Parallel API calls for all tilesets
+        const metadataPromises = tilesets.map(tileset => 
+            fetch(`https://api.mapbox.com/v4/${tileset.id}.json?secure&access_token=${mapboxgl.accessToken}`)
+                .then(response => response.json())
+                .then(metadata => ({ tileset, metadata }))
+                .catch(error => {
+                    console.error(`Error loading ${tileset.id}:`, error);
+                    return null;
+                })
+        );
+        
+        // Wait for all metadata to load in parallel
+        const results = await Promise.all(metadataPromises);
+        
+        // Sort tilesets once by order
+        const sortedTilesets = [...tilesets].sort((a, b) => a.order - b.order);
+        
+        // Build unified bands array directly (no intermediate storage)
+        allBands = [];
+        let lastNowcastBandId = null;
+        
+        for (const tileset of sortedTilesets) {
+            const result = results.find(r => r?.tileset.id === tileset.id);
+            if (!result || !result.metadata) continue;
+            
+            const metadata = result.metadata;
+            
+            if (metadata.raster_layers && metadata.raster_layers.length > 0) {
+                const layer = metadata.raster_layers[0];
+                const layerName = layer.name || 'precipitation';
+                const rawBands = layer.bands || layer.fields?.bands || [];
+                
+                // Parse and sort bands once
+                let bandIds = rawBands
+                    .map(b => {
+                        if (typeof b === 'object' && b.band_id) return parseInt(b.band_id);
+                        if (typeof b === 'string' || typeof b === 'number') return parseInt(b);
+                        return NaN;
+                    })
+                    .filter(b => !isNaN(b))
+                    .sort((a, b) => a - b);  // ← Single sort per tileset
+                
+                // Apply filters based on tileset type
+                if (tileset.id === 'mapbox.weather-jp-nowcast-last-60m') {
+                    // Remove last band (overlaps with nowcast)
+                    if (bandIds.length > 0) {
+                        bandIds = bandIds.slice(0, -1);
+                    }
+                } else if (tileset.id === 'mapbox.weather-jp-rain-1-6') {
+                    // Only keep bands after last nowcast band
+                    if (lastNowcastBandId !== null) {
+                        bandIds = bandIds.filter(b => b > lastNowcastBandId);
+                    }
+                }
+                
+                // Track last nowcast band for filtering next tileset
+                if (tileset.id === 'mapbox.weather-jp-nowcast' && bandIds.length > 0) {
+                    lastNowcastBandId = bandIds[bandIds.length - 1];
+                }
+                
+                // Create band objects and add directly to allBands (already sorted)
+                for (const bandId of bandIds) {
+                    allBands.push({
+                        tilesetId: tileset.id,
+                        tilesetName: tileset.name,
+                        layerName: layerName,
+                        bandId: bandId,
+                        order: tileset.order
+                    });
+                }
+            }
+        }
+        
+        // Find nowcast start index
+        const nowcastIndex = allBands.findIndex(b => b.tilesetId === 'mapbox.weather-jp-nowcast');
+        nowcastStartIndex = nowcastIndex >= 0 ? nowcastIndex : 0;
+        currentBandIndex = nowcastStartIndex;
+        
+        // Setup slider
+        const slider = document.getElementById('time-slider');
+        slider.min = 0;
+        slider.max = allBands.length - 1;
+        slider.value = currentBandIndex;
+        
+        // Set initial bands efficiently
+        const firstBandCache = {};
+        for (const band of allBands) {
+            if (!firstBandCache[band.tilesetId]) {
+                firstBandCache[band.tilesetId] = band.bandId.toString();
+                
+                // Set immediately when we find first band
+                const layerId = `rain-layer-${band.tilesetId}`;
+                if (map.getLayer(layerId)) {
+                    map.setPaintProperty(layerId, 'raster-array-band', band.bandId.toString());
+                }
+            }
+        }
+        
+        createTimeLabels();
+        updateRasterBand(currentBandIndex);
+        
+        document.getElementById('loading').style.display = 'none';
+    }
+
+
+    // ========================================
+    // EVENT HANDLERS
+    // ========================================
+    
+    document.getElementById('popup-toggle').addEventListener('click', () => {
+        isPopupEnabled = !isPopupEnabled;
+        const btn = document.getElementById('popup-toggle');
+        
+        if (isPopupEnabled) {
+            btn.textContent = 'Popup: ✓ ON';
+            btn.classList.remove('disabled');
+            btn.classList.add('enabled');
+        } else {
+            btn.textContent = 'Popup: OFF';
+            btn.classList.remove('enabled');
+            btn.classList.add('disabled');
+            
+            if (popup) popup.remove();
+            if (temperatureDebounceTimer) clearTimeout(temperatureDebounceTimer);
+            if (futureForecastDebounceTimer) clearTimeout(futureForecastDebounceTimer);
+        }
+    });
+
+    document.getElementById('scale-slider').addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        document.getElementById('scale-value').textContent = value.toFixed(1);
+        map.setScaleFactor(value);
+    });
+    
+    const slider = document.getElementById('time-slider');
+
+    slider.addEventListener('input', (e) => {
+        // Slider value is already numeric, just need to ensure it's an integer
+        const index = e.target.value | 0;  // Bitwise OR is faster than parseInt
+        updateRasterBand(index);
+    });
+
+    map.on('style.load', async () => {
+        const layers = map.getStyle().layers;
+        const firstSymbolLayerId = layers.find(layer => layer.type === 'symbol')?.id;
+        
+        for (const tileset of tilesets) {
+            map.addSource(`rain-source-${tileset.id}`, {
+                type: 'raster-array',
+                url: `mapbox://${tileset.id}`,
+                tileSize: 512
+            });
+            
+            const layerConfig = {
+                id: `rain-layer-${tileset.id}`,
+                type: 'raster',
+                source: `rain-source-${tileset.id}`,
+                paint: {
+                    'raster-array-band': '',
+                    'raster-color': rasterColorExpression,
+                    'raster-color-range': [0, 100],
+                    'raster-opacity': 0,
+                    'raster-resampling': 'nearest',
+                    'raster-color-range-transition': { duration: 0 }
+                }
+            };
+            
+            if (firstSymbolLayerId) {
+                map.addLayer(layerConfig, firstSymbolLayerId);
+            } else {
+                map.addLayer(layerConfig);
+            }
+        }
+        
+        await loadAllTilesets();
+    });
+
+    popup = new mapboxgl.Popup({
+        closeButton: false,
+        closeOnClick: false
+    });
+
+    map.on('click', async (e) => {
+        if (!isPopupEnabled) return;
+        
+        if (allBands.length === 0 || currentBandIndex >= allBands.length) return;
+        
+        const band = allBands[currentBandIndex];
+        const sourceId = `rain-source-${band.tilesetId}`;
+        
+        const shouldFetchGeocoding = hasMovedBeyondGeocodingThreshold(e.lngLat.lng, e.lngLat.lat);
+        const shouldFetchTemperature = hasMovedBeyondTemperatureThreshold(e.lngLat.lng, e.lngLat.lat);
+        const shouldFetchFutureForecast = hasMovedBeyondFutureForecastThreshold(e.lngLat.lng, e.lngLat.lat);
+        
+        if (shouldFetchGeocoding) {
+            lastGeocodingLng = e.lngLat.lng;
+            lastGeocodingLat = e.lngLat.lat;
+        }
+        
+        if (shouldFetchTemperature) {
+            lastTemperatureLng = e.lngLat.lng;
+            lastTemperatureLat = e.lngLat.lat;
+            if (temperatureDebounceTimer) clearTimeout(temperatureDebounceTimer);
+        }
+        
+        if (shouldFetchFutureForecast) {
+            lastFutureForecastLng = e.lngLat.lng;
+            lastFutureForecastLat = e.lngLat.lat;
+            if (futureForecastDebounceTimer) clearTimeout(futureForecastDebounceTimer);
+        }
+        
+        try {
+            const rasterResult = await map.queryRasterValue(
+                sourceId, 
+                e.lngLat, 
+                {
+                    layerName: band.layerName,
+                    bands: [band.bandId.toString()]
+                }
+            );
+            
+            const bandData = rasterResult?.[band.layerName]?.[band.bandId.toString()];
+            
+            if (bandData && bandData.length > 0) {
+                const value = bandData[0];
+                
+                if (value !== null && value !== undefined) {
+                    const description = getJapaneseDescription(value);
+                    
+                    let cityName = lastCityName || '取得中...';
+                    if (shouldFetchGeocoding) {
+                        cityName = await getCityName(e.lngLat.lng, e.lngLat.lat);
+                        lastCityName = cityName;
+                    }
+                    
+                    let popupHTML = `<div class="popup-location">${cityName}</div>`;
+                    popupHTML += `<div><strong>降水強度:</strong> ${value.toFixed(2)} mm/h</div>`;
+                    popupHTML += `<div class="popup-description">${description}</div>`;
+                    
+                    popup.setLngLat(e.lngLat).setHTML(popupHTML).addTo(map);
+                    
+                    if (shouldFetchTemperature) {
+                        temperatureDebounceTimer = setTimeout(async () => {
+                            const tempData = await getTemperature(e.lngLat.lng, e.lngLat.lat, band.bandId);
+                            
+                            if (tempData && tempData.value !== null) {
+                                let updatedHTML = `<div class="popup-location">${cityName}</div>`;
+                                updatedHTML += `<div class="popup-temperature">気温: ${tempData.value.toFixed(1)}°C <span class="popup-temperature-time">(${tempData.time})</span></div>`;
+                                updatedHTML += `<div><strong>降水強度:</strong> ${value.toFixed(2)} mm/h</div>`;
+                                updatedHTML += `<div class="popup-description">${description}</div>`;
+                                popup.setHTML(updatedHTML);
+                            }
+                        }, 500);
+                    }
+                    
+                    if (shouldFetchFutureForecast && currentBandIndex >= nowcastStartIndex) {
+                        futureForecastDebounceTimer = setTimeout(async () => {
+                            const totalFuture = await queryFutureForecast(e.lngLat.lng, e.lngLat.lat, currentBandIndex);
+                            const rainStopsSoon = value > 0 ? await checkRainStopsWithin3Bands(e.lngLat.lng, e.lngLat.lat, currentBandIndex) : false;
+                            
+                            let forecastMessage = '';
+                            if (value === 0 && totalFuture === 0) {
+                                forecastMessage = 'しばらく雨は降りません';
+                            } else if (value > 0 && rainStopsSoon) {
+                                forecastMessage = 'もうすぐ雨が止みます';
+                            }
+                            
+                            if (forecastMessage) {
+                                let currentHTML = popup.getElement().querySelector('.mapboxgl-popup-content').innerHTML;
+                                const tempDiv = document.createElement('div');
+                                tempDiv.innerHTML = currentHTML;
+                                const existing = tempDiv.querySelector('.popup-forecast');
+                                if (existing) existing.remove();
+                                
+                                currentHTML = tempDiv.innerHTML;
+                                currentHTML += `<div class="popup-forecast">${forecastMessage}</div>`;
+                                popup.setHTML(currentHTML);
+                            }
+                        }, 1000);
+                    }
+                    
+                    return;
+                }
+            }
+            
+            popup.remove();
+        } catch (error) {
+            console.error('Popup error:', error);
+            popup.remove();
+        }
+    });
+
+    map.on('mouseout', () => {
+        if (!isPopupEnabled) return;
+        if (temperatureDebounceTimer) clearTimeout(temperatureDebounceTimer);
+        if (futureForecastDebounceTimer) clearTimeout(futureForecastDebounceTimer);
+    });
+
+    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+
+    // Geolocate Control (現在地表示)
+    const geolocate = new mapboxgl.GeolocateControl({
+        positionOptions: {
+            enableHighAccuracy: true
+        },
+        trackUserLocation: true,      // 移動に追従
+        showUserHeading: true,        // 向きも表示（矢印付き）
+        showAccuracyCircle: true      // 精度円を表示
+    });
+
+    map.addControl(geolocate, 'top-right');
+
+    // 地図ロード後に自動で現在地取得（任意）
+    map.on('load', () => {
+        geolocate.trigger();
+    });
+
+</script>
+</body>
+</html>
