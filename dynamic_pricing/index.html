@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RainRide Console</title>
+
+    <script src='https://api.mapbox.com/mapbox-gl-js/v3.18.1/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v3.18.1/mapbox-gl.css' rel='stylesheet' />
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            font-family: 'Segoe UI', sans-serif;
+            background: #0a0a0a;
+        }
+
+        #map {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+        }
+
+        /* ===== HEADER ===== */
+        #header {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: 54px;
+            background: linear-gradient(90deg, #0d0d1a 0%, #1a0030 50%, #0d0d1a 100%);
+            border-bottom: 1px solid rgba(230,0,126,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 3000;
+            box-shadow: 0 2px 20px rgba(0,0,0,0.6);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-text {
+            color: #fff;
+            font-size: 19px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+
+        .logo-text span { color: #E6007E; }
+
+        .header-center {
+            display: flex;
+            gap: 28px;
+            align-items: center;
+        }
+
+        .hstat { text-align: center; }
+        .hstat-val { color: #fff; font-size: 17px; font-weight: 700; }
+        .hstat-val.rain { color: #4fc3f7; }
+        .hstat-label { color: rgba(255,255,255,0.45); font-size: 10px; }
+
+        .header-right {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 2px;
+        }
+
+        .header-time {
+            color: rgba(255,255,255,0.6);
+            font-size: 12px;
+        }
+
+        /* データソース切替 */
+        .source-toggle {
+            display: flex;
+            background: rgba(255,255,255,0.07);
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.12);
+        }
+
+        .source-btn {
+            padding: 3px 10px;
+            font-size: 10px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.4);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            letter-spacing: 0.3px;
+        }
+
+        .source-btn.active {
+            background: rgba(230,0,126,0.6);
+            color: #fff;
+        }
+
+        /* ===== SIDE PANEL ===== */
+        #side-panel {
+            position: fixed;
+            top: 54px; right: 0;
+            width: 300px;
+            height: calc(100% - 54px);
+            background: linear-gradient(180deg, rgba(10,10,20,0.97) 0%, rgba(20,0,38,0.97) 100%);
+            border-left: 1px solid rgba(230,0,126,0.25);
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-block {
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            flex-shrink: 0;
+        }
+
+        .panel-block.scrollable {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .panel-block.scrollable::-webkit-scrollbar { width: 3px; }
+        .panel-block.scrollable::-webkit-scrollbar-thumb {
+            background: rgba(230,0,126,0.3);
+            border-radius: 2px;
+        }
+
+        .block-header {
+            padding: 10px 14px 6px;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        .block-header h3 {
+            color: rgba(255,255,255,0.8);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1.3px;
+            text-transform: uppercase;
+        }
+
+        .block-header .badge {
+            margin-left: auto;
+            font-size: 10px;
+            padding: 1px 7px;
+            border-radius: 9px;
+            font-weight: 700;
+        }
+
+        .badge-pink {
+            background: rgba(230,0,126,0.2);
+            color: #E6007E;
+            border: 1px solid rgba(230,0,126,0.35);
+        }
+
+        .badge-blue {
+            background: rgba(79,195,247,0.12);
+            color: #4fc3f7;
+            border: 1px solid rgba(79,195,247,0.3);
+        }
+
+        /* Controls */
+        .controls-wrap {
+            padding: 10px 14px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+        }
+
+        .ctrl-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .ctrl-label {
+            color: rgba(255,255,255,0.55);
+            font-size: 12px;
+        }
+
+        .toggle-btn {
+            width: 40px; height: 20px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.1);
+            border: none;
+            cursor: pointer;
+            position: relative;
+            transition: background 0.25s;
+            flex-shrink: 0;
+        }
+
+        .toggle-btn.on { background: #E6007E; }
+
+        .toggle-btn::after {
+            content: '';
+            position: absolute;
+            top: 2px; left: 2px;
+            width: 16px; height: 16px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.25s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+
+        .toggle-btn.on::after { transform: translateX(20px); }
+
+        .poll-btn {
+            background: linear-gradient(135deg, #E6007E, #aa005c);
+            color: #fff;
+            border: none;
+            padding: 8px;
+            border-radius: 7px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s;
+            letter-spacing: 0.3px;
+        }
+
+        .poll-btn:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 14px rgba(230,0,126,0.45);
+        }
+
+        .poll-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+        .poll-status {
+            text-align: center;
+            font-size: 10px;
+            color: rgba(255,255,255,0.3);
+            min-height: 14px;
+        }
+
+        .poll-status.active { color: #4fc3f7; }
+        .poll-status.done { color: #4caf50; }
+
+        /* Surge rules */
+        .surge-box {
+            margin: 0 12px 10px;
+            padding: 9px 12px;
+            background: rgba(230,0,126,0.06);
+            border: 1px solid rgba(230,0,126,0.2);
+            border-radius: 8px;
+        }
+
+        .surge-title {
+            color: #E6007E;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .surge-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+        }
+
+        .surge-row-label { color: rgba(255,255,255,0.45); font-size: 10px; }
+        .surge-row-val { color: #fff; font-size: 10px; font-weight: 600; }
+        .surge-row-val.pink { color: #E6007E; }
+
+        /* Customer cards */
+        .customer-list {
+            padding: 4px 10px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .c-card {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 9px;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.025);
+            border: 1px solid rgba(255,255,255,0.05);
+            cursor: pointer;
+            transition: all 0.25s;
+        }
+
+        .c-card:hover {
+            background: rgba(255,255,255,0.06);
+            border-color: rgba(255,255,255,0.12);
+        }
+
+        .c-card.rainy {
+            background: rgba(79,195,247,0.05);
+            border-color: rgba(79,195,247,0.2);
+        }
+
+        .c-card.rainy:hover {
+            background: rgba(79,195,247,0.1);
+        }
+
+        .c-avatar {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+            position: relative;
+            background: rgba(79,195,247,0.12);
+            border: 1px solid rgba(79,195,247,0.35);
+        }
+
+        .rain-dot {
+            position: absolute;
+            top: -3px; right: -3px;
+            font-size: 9px;
+            line-height: 1;
+        }
+
+        .c-info { flex: 1; min-width: 0; }
+
+        .c-name {
+            color: #fff;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .c-loc {
+            color: rgba(255,255,255,0.35);
+            font-size: 10px;
+        }
+
+        .c-fee { text-align: right; flex-shrink: 0; }
+
+        .c-rain-val {
+            font-size: 10px;
+            font-weight: 700;
+            color: #4fc3f7;
+        }
+
+        .c-rain-val.dry { color: rgba(255,255,255,0.2); }
+
+        .c-fee-num { font-size: 11px; }
+        .c-fee-base { color: rgba(255,255,255,0.3); }
+        .c-fee-plus { color: #E6007E; font-weight: 700; }
+
+        /* ===== LEGEND ===== */
+        #legend {
+            position: fixed;
+            bottom: 20px; left: 20px;
+            background: rgba(10,10,20,0.88);
+            padding: 10px 14px;
+            border-radius: 9px;
+            border: 1px solid rgba(255,255,255,0.09);
+            z-index: 2000;
+            backdrop-filter: blur(6px);
+        }
+
+        #legend h4 {
+            color: rgba(255,255,255,0.55);
+            font-size: 9px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .leg-item {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-bottom: 3px;
+        }
+
+        .leg-color {
+            width: 24px; height: 8px;
+            border-radius: 2px;
+        }
+
+        .leg-label {
+            color: rgba(255,255,255,0.5);
+            font-size: 10px;
+        }
+
+        /* ===== POPUP ===== */
+        .mapboxgl-popup-content {
+            background: rgba(10,10,20,0.97) !important;
+            border: 1px solid rgba(230,0,126,0.35) !important;
+            border-radius: 10px !important;
+            padding: 12px 14px !important;
+            min-width: 190px;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.5) !important;
+        }
+
+        .mapboxgl-popup-close-button {
+            color: rgba(255,255,255,0.4) !important;
+            font-size: 16px !important;
+            padding: 4px 7px !important;
+        }
+
+        .mapboxgl-popup-close-button:hover { color: #fff !important; }
+
+        .mapboxgl-popup-tip {
+            border-top-color: rgba(10,10,20,0.97) !important;
+        }
+
+        .pu-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .pu-emoji { font-size: 22px; }
+
+        .pu-name { color: #fff; font-size: 13px; font-weight: 700; }
+
+        .pu-type {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 7px;
+            font-weight: 600;
+            margin-top: 2px;
+            display: inline-block;
+        }
+
+        .pu-type.driver {
+            background: rgba(230,0,126,0.2);
+            color: #E6007E;
+            border: 1px solid rgba(230,0,126,0.4);
+        }
+
+        .pu-type.customer {
+            background: rgba(79,195,247,0.12);
+            color: #4fc3f7;
+            border: 1px solid rgba(79,195,247,0.3);
+        }
+
+        .pu-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .pu-row-label { color: rgba(255,255,255,0.4); font-size: 11px; }
+        .pu-row-val { color: #fff; font-size: 11px; font-weight: 600; }
+        .pu-row-val.blue { color: #4fc3f7; }
+        .pu-row-val.pink { color: #E6007E; }
+        .pu-row-val.muted { color: rgba(255,255,255,0.25); }
+
+        .pu-fee-box {
+            margin-top: 8px;
+            padding: 8px;
+            border-radius: 7px;
+            text-align: center;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.07);
+        }
+
+        .pu-fee-box.rainy {
+            background: rgba(230,0,126,0.08);
+            border-color: rgba(230,0,126,0.25);
+        }
+
+        .pu-fee-total { color: #fff; font-size: 20px; font-weight: 800; }
+        .pu-fee-note { color: rgba(255,255,255,0.35); font-size: 10px; margin-top: 2px; }
+
+        /* ===== LOADING ===== */
+        #loading {
+            position: fixed;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(10,10,20,0.96);
+            border: 1px solid rgba(230,0,126,0.3);
+            padding: 28px 48px;
+            border-radius: 14px;
+            color: #fff;
+            font-size: 13px;
+            text-align: center;
+            z-index: 9999;
+        }
+
+        .spinner {
+            width: 34px; height: 34px;
+            border: 3px solid rgba(230,0,126,0.2);
+            border-top-color: #E6007E;
+            border-radius: 50%;
+            animation: spin 0.85s linear infinite;
+            margin: 0 auto 12px;
+        }
+
+        .spinner-sm {
+            width: 12px; height: 12px;
+            border: 2px solid rgba(255,255,255,0.25);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            display: inline-block;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- Header -->
+<div id="header">
+    <div class="logo">
+        <span style="font-size:22px">🛵</span>
+        <span class="logo-text">Rain<span>Ride</span> Console</span>
+    </div>
+    <div class="header-center">
+        <div class="hstat">
+            <div class="hstat-val" id="stat-drivers">0</div>
+            <div class="hstat-label">ドライバー</div>
+        </div>
+        <div class="hstat">
+            <div class="hstat-val" id="stat-customers">0</div>
+            <div class="hstat-label">注文者</div>
+        </div>
+        <div class="hstat">
+            <div class="hstat-val rain" id="stat-rainy">—</div>
+            <div class="hstat-label">雨天注文者</div>
+        </div>
+    </div>
+    <div class="header-right">
+        <div class="header-time" id="header-time">読み込み中...</div>
+        <div class="source-toggle">
+            <button class="source-btn active" id="src-live">LIVE</button>
+            <button class="source-btn" id="src-sample">SAMPLE</button>
+        </div>
+    </div>
+</div>
+
+<!-- Side Panel -->
+<div id="side-panel">
+
+    <!-- Controls -->
+    <div class="panel-block">
+        <div class="controls-wrap">
+            <div class="ctrl-row">
+                <span class="ctrl-label">☁️ 雨雲レーダー</span>
+                <button class="toggle-btn on" id="rain-toggle"></button>
+            </div>
+            <button class="poll-btn" id="poll-btn">
+                🔄 降水量を一括取得
+            </button>
+            <div class="poll-status" id="poll-status">ボタンを押してデータ取得</div>
+        </div>
+    </div>
+
+    <!-- Surge rules -->
+    <div class="panel-block">
+        <div class="block-header">
+            <span>💰</span>
+            <h3>雨天割増ルール</h3>
+        </div>
+        <div class="surge-box">
+            <div class="surge-title">SURGE PRICING</div>
+            <div class="surge-row">
+                <span class="surge-row-label">基本配送料</span>
+                <span class="surge-row-val">¥300</span>
+            </div>
+            <div class="surge-row">
+                <span class="surge-row-label">☔ 小〜中雨（〜10 mm/h）</span>
+                <span class="surge-row-val pink">+¥200</span>
+            </div>
+            <div class="surge-row">
+                <span class="surge-row-label">⛈️ 大雨（10mm/h 超）</span>
+                <span class="surge-row-val pink">+¥500</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Customer list -->
+    <div class="panel-block">
+        <div class="block-header">
+            <span>📦</span>
+            <h3>注文者</h3>
+            <span class="badge badge-blue" id="customer-rain-badge">—</span>
+        </div>
+    </div>
+
+    <div class="panel-block scrollable">
+        <div class="customer-list" id="customer-list"></div>
+    </div>
+
+</div>
+
+<!-- Legend -->
+<div id="legend">
+    <h4>降水強度</h4>
+    <div class="leg-item">
+        <div class="leg-color" style="background:rgba(160,210,255,0.9)"></div>
+        <div class="leg-label">0.2–5 mm/h</div>
+    </div>
+    <div class="leg-item">
+        <div class="leg-color" style="background:rgba(33,140,255,0.9)"></div>
+        <div class="leg-label">5–10 mm/h</div>
+    </div>
+    <div class="leg-item">
+        <div class="leg-color" style="background:rgba(0,65,255,0.9)"></div>
+        <div class="leg-label">10–20 mm/h</div>
+    </div>
+    <div class="leg-item">
+        <div class="leg-color" style="background:rgba(250,245,0,0.9)"></div>
+        <div class="leg-label">20–30 mm/h</div>
+    </div>
+    <div class="leg-item">
+        <div class="leg-color" style="background:rgba(255,153,0,0.9)"></div>
+        <div class="leg-label">30–50 mm/h</div>
+    </div>
+    <div class="leg-item">
+        <div class="leg-color" style="background:rgba(255,40,0,0.9)"></div>
+        <div class="leg-label">50mm/h〜</div>
+    </div>
+</div>
+
+<!-- Loading -->
+<div id="loading">
+    <div class="spinner"></div>
+    雨雲データ読み込み中...
+</div>
+
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+mapboxgl.accessToken = 'pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw';
+
+const TILESETS = {
+    live:   'mapbox.weather-jp-nowcast',
+    sample: 'mapbox.weather-jp-nowcast-sample'
+};
+
+const BASE_FEE = 300;
+
+// 日本の陸地ざっくりBounding Box（海を大きく除外するため複数ゾーン）
+// 配置試行時の候補範囲
+const JAPAN_ZONES = [
+    { name: '北海道',  lngMin: 141.0, lngMax: 145.0, latMin: 43.0, latMax: 45.5 },
+    { name: '東北',    lngMin: 140.0, lngMax: 141.8, latMin: 38.0, latMax: 41.5 },
+    { name: '関東',    lngMin: 139.0, lngMax: 140.9, latMin: 35.2, latMax: 36.8 },
+    { name: '中部',    lngMin: 136.5, lngMax: 138.5, latMin: 35.0, latMax: 36.8 },
+    { name: '近畿',    lngMin: 134.8, lngMax: 136.0, latMin: 34.2, latMax: 35.4 },
+    { name: '中国',    lngMin: 131.5, lngMax: 134.5, latMin: 34.0, latMax: 35.0 },
+    { name: '四国',    lngMin: 132.5, lngMax: 134.5, latMin: 33.2, latMax: 34.2 },
+    { name: '九州北',  lngMin: 130.0, lngMax: 131.5, latMin: 33.0, latMax: 34.0 },
+    { name: '九州南',  lngMin: 130.5, lngMax: 131.5, latMin: 31.5, latMax: 33.0 },
+    { name: '沖縄',    lngMin: 127.6, lngMax: 128.3, latMin: 26.1, latMax: 26.8 },
+];
+
+const PERSON_NAMES_DRIVER = [
+    '田中 健','鈴木 翔','佐藤 大','高橋 亮','伊藤 純',
+    '渡辺 海','山本 蓮','中村 颯','小林 悠','加藤 凌'
+];
+
+const PERSON_NAMES_CUSTOMER = [
+    '山田 花','佐々木 葵','松本 陽菜','井上 結','木村 咲',
+    '林 美桜','清水 彩','山口 千夏','森 莉子','池田 優花'
+];
+
+const RASTER_COLOR = [
+    'step', ['raster-value'],
+    'rgba(0,0,0,0)',
+    0.2,   'rgba(160,210,255,0.9)',
+    0.98,  'rgba(100,181,252,0.9)',
+    4.98,  'rgba(33,140,255,0.9)',
+    9.98,  'rgba(0,65,255,0.9)',
+    19.98, 'rgba(250,245,0,0.9)',
+    29.98, 'rgba(255,153,0,0.9)',
+    49.98, 'rgba(255,40,0,0.9)',
+    79.98, 'rgba(180,0,104,0.9)'
+];
+
+// ============================================================
+// STATE
+// ============================================================
+let map;
+let currentSource = 'live';   // 'live' | 'sample'
+let currentBandId = null;
+let rainLayerOn = true;
+let isPolling = false;
+let openPopup = null;
+
+let drivers   = [];   // { id, name, emoji, lng, lat, rainMM, marker, popup, el }
+let customers = [];
+
+// ============================================================
+// HELPERS
+// ============================================================
+const JST_OFFSET = 9 * 3600 * 1000;
+
+function toJST(unix) {
+    const d = new Date(unix * 1000 + JST_OFFSET);
+    const p = n => String(n).padStart(2,'0');
+    return `${d.getUTCFullYear()}/${p(d.getUTCMonth()+1)}/${p(d.getUTCDate())} `
+         + `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
+function calcFee(mm) {
+    if (mm === null || mm <= 0) return { surcharge: 0, total: BASE_FEE, label: '雨なし' };
+    if (mm <= 10) return { surcharge: 200, total: BASE_FEE + 200, label: '小〜中雨' };
+    return              { surcharge: 500, total: BASE_FEE + 500, label: '大雨' };
+}
+
+function randInRange(min, max) {
+    return Math.random() * (max - min) + min;
+}
+
+function pickZone() {
+    return JAPAN_ZONES[Math.floor(Math.random() * JAPAN_ZONES.length)];
+}
+
+// ============================================================
+// LAND CHECK via queryRenderedFeatures
+// ============================================================
+function isOnLand(lng, lat) {
+    // スクリーン座標に変換
+    const point = map.project([lng, lat]);
+
+    // dark-v11 の水域レイヤーを確認
+    const waterLayers = ['water', 'water-shadow', 'waterway'];
+    const existing = waterLayers.filter(l => {
+        try { return !!map.getLayer(l); } catch(e) { return false; }
+    });
+
+    if (existing.length === 0) return true; // レイヤーなければ通す
+
+    const features = map.queryRenderedFeatures(point, { layers: existing });
+    return features.length === 0; // 水域フィーチャーがなければ陸地
+}
+
+async function findLandPoint(maxTries = 30) {
+    for (let i = 0; i < maxTries; i++) {
+        const zone = pickZone();
+        const lng = randInRange(zone.lngMin, zone.lngMax);
+        const lat = randInRange(zone.latMin, zone.latMax);
+
+        if (isOnLand(lng, lat)) return { lng, lat, zoneName: zone.name };
+
+        // 少し待って再試行（非同期にしないとスタックする）
+        await new Promise(r => setTimeout(r, 0));
+    }
+    // fallback: 諦めて最後の座標を返す
+    const zone = pickZone();
+    return {
+        lng: randInRange(zone.lngMin, zone.lngMax),
+        lat: randInRange(zone.latMin, zone.latMax),
+        zoneName: zone.name
+    };
+}
+
+// ============================================================
+// TILEQUERY
+// ============================================================
+async function queryRainAt(lng, lat, bandId, tileset) {
+    try {
+        const url = `https://api.mapbox.com/v4/${tileset}/tilequery/${lng},${lat}.json`
+                  + `?layers=precipitation&bands=${bandId}`
+                  + `&access_token=${mapboxgl.accessToken}`;
+        const res = await fetch(url);
+        if (!res.ok) return 0;
+        const data = await res.json();
+
+        if (data.features?.length > 0) {
+            const props = data.features[0].properties;
+            // valキー、もしくはbandIdキー、もしくはvalueキーを試みる
+            const val = props?.val?.[0] ?? props?.[String(bandId)] ?? props?.value ?? null;
+            return val !== null ? Math.max(0, parseFloat(val)) : 0;
+        }
+        return 0;
+    } catch (e) {
+        console.warn('tilequery error', e);
+        return 0;
+    }
+}
+
+// ============================================================
+// LOAD NOWCAST BANDS
+// ============================================================
+async function loadLatestBandId(tileset) {
+    const url = `https://api.mapbox.com/v4/${tileset}.json?secure&access_token=${mapboxgl.accessToken}`;
+    const res = await fetch(url);
+    const meta = await res.json();
+
+    if (!meta.raster_layers?.length) return null;
+
+    const layer = meta.raster_layers[0];
+    const rawBands = layer.bands || layer.fields?.bands || [];
+
+    const bandIds = rawBands
+        .map(b => typeof b === 'object' ? parseInt(b.band_id) : parseInt(b))
+        .filter(b => !isNaN(b))
+        .sort((a, b) => a - b);
+
+    // 現在に最も近いband = 最後のbandを使う
+    return bandIds.length > 0 ? bandIds[bandIds.length - 1] : null;
+}
+
+// ============================================================
+// RAIN LAYER MANAGEMENT
+// ============================================================
+function getRainSourceId() { return `rain-src-${currentSource}`; }
+function getRainLayerId()  { return `rain-lyr-${currentSource}`; }
+
+async function switchSource(src) {
+    if (src === currentSource) return;
+
+    // 旧レイヤーを隠す
+    const oldLyr = getRainLayerId();
+    if (map.getLayer(oldLyr)) {
+        map.setPaintProperty(oldLyr, 'raster-opacity', 0);
+    }
+
+    currentSource = src;
+    document.getElementById('header-time').textContent = '読み込み中...';
+
+    const tileset = TILESETS[src];
+    const lyrId = getRainLayerId();
+    const srcId = getRainSourceId();
+
+    // まだソース/レイヤーが追加されていなければ追加
+    if (!map.getSource(srcId)) {
+        map.addSource(srcId, {
+            type: 'raster-array',
+            url: `mapbox://${tileset}`,
+            tileSize: 512
+        });
+    }
+
+    if (!map.getLayer(lyrId)) {
+        const symbolLayer = map.getStyle().layers.find(l => l.type === 'symbol');
+        const beforeId = symbolLayer?.id;
+
+        const cfg = {
+            id: lyrId,
+            type: 'raster',
+            source: srcId,
+            paint: {
+                'raster-array-band': '',
+                'raster-color': RASTER_COLOR,
+                'raster-color-range': [0, 100],
+                'raster-opacity': 0,
+                'raster-resampling': 'nearest'
+            }
+        };
+        beforeId ? map.addLayer(cfg, beforeId) : map.addLayer(cfg);
+    }
+
+    const bandId = await loadLatestBandId(tileset);
+    currentBandId = bandId;
+
+    if (bandId) {
+        map.setPaintProperty(lyrId, 'raster-array-band', bandId.toString());
+        if (rainLayerOn) {
+            map.setPaintProperty(lyrId, 'raster-opacity', 0.85);
+        }
+        document.getElementById('header-time').textContent = toJST(bandId);
+    }
+
+    // ★ ソース切替後に自動で降水量取得
+    await pollAll();
+}
+
+// ============================================================
+// MARKER & POPUP
+// ============================================================
+function buildPopupHTML(person, type, mm) {
+    const fee = calcFee(mm);
+    const isRainy = mm !== null && mm > 0;
+    const emoji = type === 'driver' ? '🚴' : person.emoji;
+
+    return `
+        <div class="pu-head">
+            <span class="pu-emoji">${emoji}</span>
+            <div>
+                <div class="pu-name">${person.name}</div>
+                <span class="pu-type ${type}">
+                    ${type === 'driver' ? '🚴 ドライバー' : '📦 注文者'}
+                </span>
+            </div>
+        </div>
+        <div class="pu-row">
+            <span class="pu-row-label">現在の降水量</span>
+            <span class="pu-row-val ${mm === null ? 'muted' : isRainy ? 'blue' : 'muted'}">
+                ${mm === null ? '未取得' : isRainy ? mm.toFixed(2)+' mm/h' : '0 mm/h (晴れ)'}
+            </span>
+        </div>
+        ${isRainy ? `
+        <div class="pu-row">
+            <span class="pu-row-label">区分</span>
+            <span class="pu-row-val pink">${fee.label}</span>
+        </div>
+        <div class="pu-row">
+            <span class="pu-row-label">割増料金</span>
+            <span class="pu-row-val pink">+¥${fee.surcharge}</span>
+        </div>` : ''}
+        <div class="pu-fee-box ${isRainy ? 'rainy' : ''}">
+            <div class="pu-fee-total">¥${fee.total.toLocaleString()}</div>
+            <div class="pu-fee-note">
+                ${isRainy
+                    ? `基本¥${BASE_FEE} + 雨天¥${fee.surcharge}`
+                    : `基本配送料`}
+            </div>
+        </div>
+    `;
+}
+
+function createMarkerEl(type) {
+    const el = document.createElement('div');
+    el.style.cssText = `
+        width: 34px; height: 34px;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 17px;
+        cursor: pointer;
+        user-select: none;
+        transition: box-shadow 0.35s, border-color 0.35s, background 0.35s;
+        ${type === 'driver'
+            ? 'background:rgba(230,0,126,0.2); border:2px solid rgba(230,0,126,0.75); box-shadow:0 0 10px rgba(230,0,126,0.45);'
+            : 'background:rgba(79,195,247,0.12); border:2px solid rgba(79,195,247,0.6); box-shadow:0 0 9px rgba(79,195,247,0.35);'}
+    `;
+    el.textContent = type === 'driver' ? '🚴' : '';
+    return el;
+}
+
+function updateMarkerVisual(person, type) {
+    const mm = person.rainMM;
+    const el = person.el;
+    const isRainy = mm !== null && mm > 0;
+
+    if (type === 'driver') {
+        el.style.background    = isRainy ? 'rgba(230,0,126,0.45)' : 'rgba(230,0,126,0.18)';
+        el.style.borderColor   = isRainy ? 'rgba(255,100,180,0.9)' : 'rgba(230,0,126,0.75)';
+        el.style.boxShadow     = isRainy ? '0 0 18px rgba(230,0,126,0.9)' : '0 0 10px rgba(230,0,126,0.4)';
+    } else {
+        el.style.background    = isRainy ? 'rgba(79,195,247,0.28)' : 'rgba(79,195,247,0.1)';
+        el.style.borderColor   = isRainy ? 'rgba(100,220,255,0.9)' : 'rgba(79,195,247,0.6)';
+        el.style.boxShadow     = isRainy ? '0 0 18px rgba(79,195,247,0.85)' : '0 0 9px rgba(79,195,247,0.3)';
+    }
+}
+
+function spawnMarker(person, type, emoji) {
+    person.emoji = emoji;
+
+    const el = createMarkerEl(type);
+    if (type === 'customer') el.textContent = emoji;
+
+    const popup = new mapboxgl.Popup({
+        closeButton: true,
+        closeOnClick: false,
+        offset: 20,
+        maxWidth: '260px'
+    });
+    popup.setHTML(buildPopupHTML(person, type, null));
+
+    const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([person.lng, person.lat])
+        .setPopup(popup)
+        .addTo(map);
+
+    el.addEventListener('click', e => {
+        e.stopPropagation();
+        if (openPopup && openPopup !== popup) openPopup.remove();
+        openPopup = popup;
+        marker.togglePopup();
+    });
+
+    person.el     = el;
+    person.marker = marker;
+    person.popup  = popup;
+    person.rainMM = null;
+}
+
+// ============================================================
+// GENERATE PERSONS ON LAND
+// ============================================================
+const CUSTOMER_EMOJIS = ['👩','🧕','👧','🧑‍💼','👩‍💼','🧑','👩‍🦱','👩‍🦰','🧔','👩‍🦳'];
+
+async function generatePersons() {
+    const driverCount   = 10;
+    const customerCount = 10;
+
+    // ドライバー
+    for (let i = 0; i < driverCount; i++) {
+        const pos = await findLandPoint();
+        drivers.push({
+            id: `d${i}`,
+            name: PERSON_NAMES_DRIVER[i],
+            lng: pos.lng,
+            lat: pos.lat,
+            zone: pos.zoneName
+        });
+    }
+
+    // 乗客
+    for (let i = 0; i < customerCount; i++) {
+        const pos = await findLandPoint();
+        customers.push({
+            id: `c${i}`,
+            name: PERSON_NAMES_CUSTOMER[i],
+            lng: pos.lng,
+            lat: pos.lat,
+            zone: pos.zoneName
+        });
+    }
+
+    // マーカー生成
+    drivers.forEach((d, i) => spawnMarker(d, 'driver', '🚴'));
+    customers.forEach((c, i) => spawnMarker(c, 'customer', CUSTOMER_EMOJIS[i % CUSTOMER_EMOJIS.length]));
+
+    document.getElementById('stat-drivers').textContent   = driverCount;
+    document.getElementById('stat-customers').textContent = customerCount;
+
+    renderCustomerList();
+}
+
+// ============================================================
+// CUSTOMER LIST RENDER
+// ============================================================
+function renderCustomerList() {
+    const list = document.getElementById('customer-list');
+    list.innerHTML = '';
+
+    customers.forEach(c => {
+        const fee = calcFee(c.rainMM);
+        const isRainy = c.rainMM !== null && c.rainMM > 0;
+
+        const card = document.createElement('div');
+        card.className = `c-card ${isRainy ? 'rainy' : ''}`;
+        card.innerHTML = `
+            <div class="c-avatar">
+                ${c.emoji}
+                ${isRainy ? '<span class="rain-dot">🌧</span>' : ''}
+            </div>
+            <div class="c-info">
+                <div class="c-name">${c.name}</div>
+                <div class="c-loc">📍 ${c.zone}</div>
+            </div>
+            <div class="c-fee">
+                <div class="c-rain-val ${c.rainMM === null || c.rainMM <= 0 ? 'dry' : ''}">
+                    ${c.rainMM === null ? '—' : c.rainMM > 0 ? c.rainMM.toFixed(1)+' mm/h' : '☀️'}
+                </div>
+                <div class="c-fee-num">
+                    <span class="c-fee-base">¥${BASE_FEE}</span>
+                    ${isRainy ? `<span class="c-fee-plus"> +¥${fee.surcharge}</span>` : ''}
+                </div>
+            </div>
+        `;
+
+        card.addEventListener('click', () => {
+            map.flyTo({ center: [c.lng, c.lat], zoom: 10, duration: 900 });
+            setTimeout(() => {
+                if (openPopup && openPopup !== c.popup) openPopup.remove();
+                openPopup = c.popup;
+                c.marker.togglePopup();
+            }, 700);
+        });
+
+        list.appendChild(card);
+    });
+
+    // バッジ更新
+    const rainyCount = customers.filter(c => c.rainMM !== null && c.rainMM > 0).length;
+    const totalPolled = customers.filter(c => c.rainMM !== null).length;
+    document.getElementById('customer-rain-badge').textContent =
+        totalPolled === 0 ? '未取得' : `${rainyCount} 名が雨天`;
+    document.getElementById('stat-rainy').textContent =
+        totalPolled === 0 ? '—' : `${rainyCount}名`;
+}
+
+// ============================================================
+// POLL ALL
+// ============================================================
+async function pollAll() {
+    if (!currentBandId || isPolling) return;
+    isPolling = true;
+
+    const btn    = document.getElementById('poll-btn');
+    const status = document.getElementById('poll-status');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-sm"></span> 取得中...';
+    status.className = 'poll-status active';
+
+    const tileset = TILESETS[currentSource];
+    const all = [...drivers, ...customers];
+    let done = 0;
+
+    status.textContent = `0 / ${all.length} 取得中...`;
+
+    await Promise.all(all.map(async person => {
+        const mm = await queryRainAt(person.lng, person.lat, currentBandId, tileset);
+        person.rainMM = mm;
+        done++;
+        status.textContent = `${done} / ${all.length} 取得中...`;
+
+        const type = person.id.startsWith('d') ? 'driver' : 'customer';
+        updateMarkerVisual(person, type);
+        person.popup.setHTML(buildPopupHTML(person, type, mm));
+    }));
+
+    renderCustomerList();
+
+    status.textContent = `✅ ${toJST(currentBandId)} 時点のデータ取得完了`;
+    status.className = 'poll-status done';
+
+    btn.disabled = false;
+    btn.innerHTML = '🔄 降水量を一括取得';
+    isPolling = false;
+}
+
+// ============================================================
+// MAP INIT
+// ============================================================
+map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/dark-v11',
+    center: [136.5, 36.5],
+    zoom: 5.0,
+    projection: 'mercator',
+    minZoom: 3.5,
+    maxZoom: 14
+});
+
+map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+
+map.on('style.load', async () => {
+    // 最初のソース（live）を追加・表示
+    const tileset = TILESETS['live'];
+
+    map.addSource('rain-src-live', {
+        type: 'raster-array',
+        url: `mapbox://${tileset}`,
+        tileSize: 512
+    });
+
+    const symbolLayer = map.getStyle().layers.find(l => l.type === 'symbol');
+
+    map.addLayer({
+        id: 'rain-lyr-live',
+        type: 'raster',
+        source: 'rain-src-live',
+        paint: {
+            'raster-array-band': '',
+            'raster-color': RASTER_COLOR,
+            'raster-color-range': [0, 100],
+            'raster-opacity': 0,
+            'raster-resampling': 'nearest'
+        }
+    }, symbolLayer?.id);
+
+    const bandId = await loadLatestBandId(tileset);
+    currentBandId = bandId;
+
+    if (bandId) {
+        map.setPaintProperty('rain-lyr-live', 'raster-array-band', bandId.toString());
+        map.setPaintProperty('rain-lyr-live', 'raster-opacity', 0.85);
+        document.getElementById('header-time').textContent = toJST(bandId);
+    }
+
+    document.getElementById('loading').style.display = 'none';
+
+    // マーカー生成（陸地判定をするためstyle.load後に実行）
+    await generatePersons();
+});
+
+// ============================================================
+// CONTROLS
+// ============================================================
+
+// 雨雲トグル
+document.getElementById('rain-toggle').addEventListener('click', function() {
+    rainLayerOn = !rainLayerOn;
+    this.classList.toggle('on', rainLayerOn);
+    const lyrId = getRainLayerId();
+    if (map.getLayer(lyrId)) {
+        map.setPaintProperty(lyrId, 'raster-opacity', rainLayerOn ? 0.85 : 0);
+    }
+});
+
+// Poll
+document.getElementById('poll-btn').addEventListener('click', pollAll);
+
+// ソース切替
+document.getElementById('src-live').addEventListener('click', async () => {
+    document.getElementById('src-live').classList.add('active');
+    document.getElementById('src-sample').classList.remove('active');
+    await switchSource('live');
+});
+
+document.getElementById('src-sample').addEventListener('click', async () => {
+    document.getElementById('src-sample').classList.add('active');
+    document.getElementById('src-live').classList.remove('active');
+    await switchSource('sample');
+});
+
+</script>
+</body>
+</html>
