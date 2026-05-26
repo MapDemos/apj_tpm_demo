@@ -1765,14 +1765,14 @@ function startApp() {
   if (state.query) document.getElementById('query-input').value = state.query;
   updateModeBadge();
   initCSV();
-  loadTilequerySettings(); // ← 追加
+  loadTilequerySettings();
 
   loadGoogleMaps().then(async () => {
-    await initGoogleMap();
-    initMapboxMap();
+    initMapboxMap();        // ← ★ 先に Mapbox を作る（同期）
+    await initGoogleMap();  // ← ★ そのあと Google（中で setLocationPin が mapboxMap を使う）
     initResizers();
     updateBboxBtn();
-    initContextMenu(); // ← 追加（googleMap / mapboxMap 初期化後）
+    initContextMenu();
     setTimeout(() => initEditors(), 100);
     if (state.query) doSearch();
   });
