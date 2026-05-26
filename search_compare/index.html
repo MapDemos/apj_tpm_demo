@@ -133,10 +133,34 @@
     .editors-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
     .editor-label { font-size: 11px; color: #666; margin-bottom: 6px; font-family: monospace; }
     .editor-wrap { border: 1px solid #333; border-radius: 4px; overflow: hidden; }
+
+	/* Context Menu */
+	#ctx-menu {
+	  position: fixed; display: none;
+	  background: #1e1e1e; border: 1px solid #444; border-radius: 6px;
+	  box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+	  z-index: 10000; min-width: 260px; padding: 4px 0;
+	  font-size: 12px; user-select: none;
+	}
+	.ctx-item { padding: 8px 14px; color: #ddd; cursor: pointer; white-space: nowrap; }
+	.ctx-item:hover { background: #2563eb; color: #fff; }
+	.ctx-sep { height: 1px; background: #333; margin: 4px 0; }
+	
+	/* Tilequery Settings Layer Grid */
+	#tq-layers-checkboxes {
+	  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;
+	  padding: 10px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px;
+	  max-height: 240px; overflow-y: auto;
+	}
+	#tq-layers-checkboxes label {
+	  display: flex; align-items: center; gap: 6px;
+	  font-size: 11px; color: #ccc; cursor: pointer; font-family: monospace;
+	}
+	  
   </style>
 </head>
 <body>
-
+	
 <!-- Setup Modal -->
 <div id="setup-overlay">
   <div id="setup-modal">
@@ -332,6 +356,39 @@
           <div class="editor-wrap" id="mapbox-result-editor-wrap"></div>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Context Menu -->
+<div id="ctx-menu">
+  <div class="ctx-item" data-action="tilequery">📍 Mapbox Tilequery APIで場所情報を取得</div>
+  <div class="ctx-item" data-action="tilequery-all">📋 全件表示 (Tilequery)</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" data-action="settings">⚙️ 設定変更</div>
+</div>
+
+<!-- Tilequery Settings Dialog -->
+<div class="dialog-overlay" id="tilequery-settings-dialog">
+  <div class="dialog" style="max-width:520px;">
+    <div class="dialog-header">
+      <span class="dialog-title">⚙️ Tilequery Settings</span>
+      <button class="dialog-close" data-close="tilequery-settings-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div class="setup-field" style="margin-bottom:14px;">
+        <label>Radius (m)</label>
+        <input type="number" id="tq-radius" min="0" />
+      </div>
+      <div class="setup-field" style="margin-bottom:14px;">
+        <label>Limit</label>
+        <input type="number" id="tq-limit" min="1" />
+      </div>
+      <div class="setup-field" style="margin-bottom:14px;">
+        <label>Layers (複数選択可)</label>
+        <div id="tq-layers-checkboxes"></div>
+      </div>
+      <button id="tq-save" class="btn btn-primary" style="width:100%;padding:9px;">保存</button>
     </div>
   </div>
 </div>
@@ -1502,6 +1559,192 @@ document.getElementById('radius-custom').addEventListener('change', (e) => { con
 document.getElementById('radius-custom').addEventListener('keydown', (e) => { if (e.key === 'Enter') { const v = Number(e.target.value); if (v > 0) applyRadius(v); } });
 
 // ============================================================
+// TILEQUERY (Right-click context menu)
+// ============================================================
+const LS_TILEQUERY = 'apc_tilequery_settings';
+const MAPBOX_STREETS_LAYERS = [
+  'landuse_overlay', 'landuse', 'waterway', 'water', 'aeroway',
+  'structure', 'building', 'road', 'admin',
+  'place_label', 'airport_label', 'transit_stop_label', 'poi_label',
+  'motorway_junction', 'housenum_label', 'natural_label'
+];
+const DEFAULT_TQ_SETTINGS = {
+  radius: 500,
+  limit:  50,
+  layers: ['poi_label', 'transit_stop_label', 'airport_label']
+};
+
+let tilequerySettings = structuredClone(DEFAULT_TQ_SETTINGS);
+let lastRightClick    = null; // { lat, lng, side }
+let googleInfoWindow  = null;
+let mapboxBubble      = null;
+
+function loadTilequerySettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS_TILEQUERY) || 'null');
+    if (saved && typeof saved === 'object') {
+      tilequerySettings = {
+        radius: Number.isFinite(saved.radius) ? saved.radius : DEFAULT_TQ_SETTINGS.radius,
+        limit:  Number.isFinite(saved.limit)  ? saved.limit  : DEFAULT_TQ_SETTINGS.limit,
+        layers: Array.isArray(saved.layers) && saved.layers.length > 0
+                  ? saved.layers : [...DEFAULT_TQ_SETTINGS.layers],
+      };
+    }
+  } catch {}
+}
+function saveTilequerySettings() {
+  localStorage.setItem(LS_TILEQUERY, JSON.stringify(tilequerySettings));
+}
+
+async function fetchTilequery(lat, lng, limitOverride) {
+  const layers = (tilequerySettings.layers?.length ? tilequerySettings.layers : ['poi_label']).join(',');
+  const limit  = limitOverride ?? tilequerySettings.limit;
+  const radius = tilequerySettings.radius;
+  const url = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery/${lng},${lat}.json`
+            + `?radius=${radius}&limit=${limit}&dedupe&geometry=point`
+            + `&layers=${encodeURIComponent(layers)}&access_token=${MAPBOX_TOKEN}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Tilequery error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+function buildBubbleHTML(names, header) {
+  if (!names || names.length === 0) {
+    return `<div style="font-size:11px;color:#666;padding:4px 6px;max-width:320px;">
+              <div style="font-size:10px;color:#999;margin-bottom:4px;">${header}</div>
+              該当なし
+            </div>`;
+  }
+  return `<div style="font-size:12px;color:#222;padding:4px 6px;max-width:320px;line-height:1.5;">
+            <div style="font-size:10px;color:#888;margin-bottom:4px;">${header}</div>
+            ${names.join('、')}
+          </div>`;
+}
+
+function showBubble(side, lat, lng, html) {
+  if (side === 'google') {
+    if (googleInfoWindow) googleInfoWindow.close();
+    googleInfoWindow = new google.maps.InfoWindow({ position: { lat, lng }, content: html });
+    googleInfoWindow.open(googleMap);
+  } else {
+    if (mapboxBubble) mapboxBubble.remove();
+    mapboxBubble = new mapboxgl.Popup({ closeButton: true, maxWidth: '360px', offset: 6 })
+      .setLngLat([lng, lat]).setHTML(html).addTo(mapboxMap);
+  }
+}
+
+async function runTilequery(mode) {
+  if (!lastRightClick) return;
+  const { lat, lng, side } = lastRightClick;
+  const limit = mode === 'all' ? 50 : tilequerySettings.limit;
+
+  try {
+    const data  = await fetchTilequery(lat, lng, limit);
+    const feats = data.features ?? [];
+
+    if (mode === 'all') {
+      const names = feats.map(f => f?.properties?.name_ja).filter(Boolean);
+      const header = `Tilequery 全件 (${names.length}件 / radius=${tilequerySettings.radius}m, limit=${limit})`;
+      showBubble(side, lat, lng, buildBubbleHTML(names, header));
+    } else {
+      // type=Mall OR class=landmark（フィールドが無いfeatureは自動的に除外される）
+      const filtered = feats.filter(f => {
+        const p = f?.properties || {};
+        return p.type === 'Mall' || p.class === 'landmark';
+      });
+      const names = filtered.map(f => f?.properties?.name_ja).filter(Boolean);
+      if (names.length === 0) return; // 該当なしは表示しない
+      const header = `Mall / Landmark (${names.length}件)`;
+      showBubble(side, lat, lng, buildBubbleHTML(names, header));
+    }
+  } catch (e) {
+    alert('Tilequery失敗: ' + e.message);
+  }
+}
+
+function showCtxMenu(x, y) {
+  const menu = document.getElementById('ctx-menu');
+  menu.style.display = 'block';
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = Math.min(x, window.innerWidth  - rect.width  - 4) + 'px';
+  menu.style.top  = Math.min(y, window.innerHeight - rect.height - 4) + 'px';
+}
+function hideCtxMenu() {
+  document.getElementById('ctx-menu').style.display = 'none';
+}
+
+function initContextMenu() {
+  const menu = document.getElementById('ctx-menu');
+
+  document.addEventListener('click', (e) => { if (!menu.contains(e.target)) hideCtxMenu(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCtxMenu(); });
+  window.addEventListener('blur', hideCtxMenu);
+
+  menu.querySelectorAll('.ctx-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const action = item.dataset.action;
+      hideCtxMenu();
+      if (action === 'tilequery')          runTilequery('filter');
+      else if (action === 'tilequery-all') runTilequery('all');
+      else if (action === 'settings')      openTilequerySettings();
+    });
+  });
+
+  // 既定の右クリック抑制
+  document.getElementById('google-map').addEventListener('contextmenu', (e) => e.preventDefault());
+  document.getElementById('mapbox-map').addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // Google Map 右クリック
+  googleMap.addListener('contextmenu', (e) => {
+    if (!e.latLng) return;
+    const dom = e.domEvent;
+    dom?.preventDefault?.();
+    lastRightClick = { lat: e.latLng.lat(), lng: e.latLng.lng(), side: 'google' };
+    showCtxMenu(dom?.clientX ?? 100, dom?.clientY ?? 100);
+  });
+
+  // Mapbox 右クリック
+  mapboxMap.on('contextmenu', (e) => {
+    e.originalEvent?.preventDefault?.();
+    lastRightClick = { lat: e.lngLat.lat, lng: e.lngLat.lng, side: 'mapbox' };
+    showCtxMenu(e.originalEvent.clientX, e.originalEvent.clientY);
+  });
+}
+
+// ============================================================
+// TILEQUERY SETTINGS DIALOG
+// ============================================================
+function buildLayerCheckboxes() {
+  const container = document.getElementById('tq-layers-checkboxes');
+  container.innerHTML = MAPBOX_STREETS_LAYERS.map(layer => `
+    <label>
+      <input type="checkbox" value="${layer}" ${tilequerySettings.layers.includes(layer) ? 'checked' : ''} />
+      <span>${layer}</span>
+    </label>
+  `).join('');
+}
+function openTilequerySettings() {
+  document.getElementById('tq-radius').value = tilequerySettings.radius;
+  document.getElementById('tq-limit').value  = tilequerySettings.limit;
+  buildLayerCheckboxes();
+  document.getElementById('tilequery-settings-dialog').classList.add('open');
+}
+function saveTilequerySettingsFromForm() {
+  const r = parseFloat(document.getElementById('tq-radius').value);
+  const l = parseInt(document.getElementById('tq-limit').value, 10);
+  const layers = Array.from(
+    document.querySelectorAll('#tq-layers-checkboxes input[type=checkbox]:checked')
+  ).map(c => c.value);
+  if (!Number.isFinite(r) || r < 0)  { alert('Radiusが不正です'); return; }
+  if (!Number.isInteger(l) || l < 1) { alert('Limitが不正です'); return; }
+  if (layers.length === 0)           { alert('Layersを1つ以上選択してください'); return; }
+  tilequerySettings = { radius: r, limit: l, layers };
+  saveTilequerySettings();
+  closeDialog('tilequery-settings-dialog');
+}
+document.getElementById('tq-save').addEventListener('click', saveTilequerySettingsFromForm);
+	startApp()
+// ============================================================
 // APP START
 // ============================================================
 function startApp() {
@@ -1509,12 +1752,14 @@ function startApp() {
   if (state.query) document.getElementById('query-input').value = state.query;
   updateModeBadge();
   initCSV();
+  loadTilequerySettings(); // ← 追加
 
-  loadGoogleMaps().then(() => {
-    initGoogleMap();
+  loadGoogleMaps().then(async () => {
+    await initGoogleMap();
     initMapboxMap();
     initResizers();
     updateBboxBtn();
+    initContextMenu(); // ← 追加（googleMap / mapboxMap 初期化後）
     setTimeout(() => initEditors(), 100);
     if (state.query) doSearch();
   });
