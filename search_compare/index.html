@@ -1647,14 +1647,14 @@ async function runTilequery(mode) {
       const header = `Tilequery 全件 (${names.length}件 / radius=${tilequerySettings.radius}m, limit=${limit})`;
       showBubble(side, lat, lng, buildBubbleHTML(names, header));
     } else {
-      // type=Mall OR class=landmark（フィールドが無いfeatureは自動的に除外される）
+      // type=Mall OR department store（フィールドが無いfeatureは自動的に除外される）
       const filtered = feats.filter(f => {
         const p = f?.properties || {};
-        return p.type === 'Mall' || p.class === 'landmark';
+        return p.type === 'Mall' || p.type === 'Department store';
       });
       const names = filtered.map(f => f?.properties?.name_ja).filter(Boolean);
       if (names.length === 0) return; // 該当なしは表示しない
-      const header = `Mall / Landmark (${names.length}件)`;
+      const header = `Mall / Department store (${names.length}件)`;
       showBubble(side, lat, lng, buildBubbleHTML(names, header));
     }
   } catch (e) {
