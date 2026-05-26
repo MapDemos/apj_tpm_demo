@@ -1676,7 +1676,7 @@ function hideCtxMenu() {
 function initContextMenu() {
   const menu = document.getElementById('ctx-menu');
 
-  document.addEventListener('click', (e) => { if (!menu.contains(e.target)) hideCtxMenu(); });
+  document.addEventListener('click',   (e) => { if (!menu.contains(e.target)) hideCtxMenu(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCtxMenu(); });
   window.addEventListener('blur', hideCtxMenu);
 
@@ -1691,24 +1691,37 @@ function initContextMenu() {
   });
 
   // 既定の右クリック抑制
-  document.getElementById('google-map').addEventListener('contextmenu', (e) => e.preventDefault());
-  document.getElementById('mapbox-map').addEventListener('contextmenu', (e) => e.preventDefault());
+  const gDiv = document.getElementById('google-map');
+  const mDiv = document.getElementById('mapbox-map');
+  gDiv?.addEventListener('contextmenu', (e) => e.preventDefault());
+  mDiv?.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  // Google Map 右クリック
-  googleMap.addListener('contextmenu', (e) => {
-    if (!e.latLng) return;
-    const dom = e.domEvent;
-    dom?.preventDefault?.();
-    lastRightClick = { lat: e.latLng.lat(), lng: e.latLng.lng(), side: 'google' };
-    showCtxMenu(dom?.clientX ?? 100, dom?.clientY ?? 100);
-  });
+  // ---- Google ----
+  if (googleMap) {
+    googleMap.addListener('contextmenu', (e) => {
+      if (!e.latLng) return;
+      const dom = e.domEvent;
+      dom?.preventDefault?.();
+      lastRightClick = { lat: e.latLng.lat(), lng: e.latLng.lng(), side: 'google' };
+      showCtxMenu(dom?.clientX ?? 100, dom?.clientY ?? 100);
+    });
+  }
 
-  // Mapbox 右クリック
-  mapboxMap.on('contextmenu', (e) => {
-    e.originalEvent?.preventDefault?.();
-    lastRightClick = { lat: e.lngLat.lat, lng: e.lngLat.lng, side: 'mapbox' };
-    showCtxMenu(e.originalEvent.clientX, e.originalEvent.clientY);
-  });
+  // ---- Mapbox: load 完了後に attach ----
+  const attachMapboxCtx = () => {
+    if (!mapboxMap) return;
+    try {
+      mapboxMap.on('contextmenu', (e) => {
+        e.originalEvent?.preventDefault?.();
+        lastRightClick = { lat: e.lngLat.lat, lng: e.lngLat.lng, side: 'mapbox' };
+        showCtxMenu(e.originalEvent.clientX, e.originalEvent.clientY);
+      });
+    } catch (err) {
+      console.warn('[ctxmenu] mapbox attach failed:', err);
+    }
+  };
+  if (mapboxMap?.loaded?.()) attachMapboxCtx();
+  else mapboxMap?.once('load', attachMapboxCtx);
 }
 
 // ============================================================
