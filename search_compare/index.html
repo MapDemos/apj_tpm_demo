@@ -202,6 +202,8 @@
   <button class="btn btn-secondary" id="open-query-btn">📋 QUERY</button>
   <button class="btn btn-secondary" id="open-results-btn">📋 RESULTS</button>
   <button class="btn btn-secondary" id="export-btn">📥 Export</button>
+  <button class="btn btn-secondary" id="save-query-btn">💾 保存</button>
+  <button class="btn btn-secondary" id="open-saved-list-btn">📁 保存一覧</button>
   <button class="btn btn-secondary" id="open-token-btn" style="font-size:11px;padding:5px 10px;">🔑 Token</button>
 </div>
 
@@ -360,6 +362,75 @@
   </div>
 </div>
 
+<!-- Save Query Dialog -->
+<div class="dialog-overlay" id="save-dialog">
+  <div class="dialog" style="max-width:480px;">
+    <div class="dialog-header">
+      <span class="dialog-title">💾 クエリを保存</span>
+      <button class="dialog-close" data-close="save-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div class="setup-field" style="margin-bottom:14px;">
+        <label>保存対象</label>
+        <div style="font-size:12px;color:#ccc;font-family:monospace;line-height:1.6;" id="save-target-info"></div>
+      </div>
+      <div class="setup-field" style="margin-bottom:14px;">
+        <label>保存理由</label>
+        <div style="display:flex;flex-direction:column;gap:8px;padding:4px 0;">
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#ccc;cursor:pointer;">
+            <input type="radio" name="save-reason" value="Mapbox側のPOI情報が古い" checked /> Mapbox側のPOI情報が古い
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#ccc;cursor:pointer;">
+            <input type="radio" name="save-reason" value="Mapbox側のPOIがない" /> Mapbox側のPOIがない
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#ccc;cursor:pointer;">
+            <input type="radio" name="save-reason" value="その他" /> その他
+          </label>
+        </div>
+      </div>
+      <div class="setup-field" style="margin-bottom:14px;">
+        <label>コメント</label>
+        <textarea id="save-comment" rows="3"
+          style="padding:9px 12px;background:#2a2a2a;border:1px solid #444;border-radius:4px;color:#fff;font-size:12px;font-family:monospace;outline:none;resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button id="save-confirm-btn" class="btn btn-primary" style="flex:1;padding:9px;">保存</button>
+        <button class="btn btn-secondary" style="flex:1;padding:9px;" data-close="save-dialog">キャンセル</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Saved List Dialog -->
+<div class="dialog-overlay" id="saved-list-dialog">
+  <div class="dialog" style="max-width:900px;">
+    <div class="dialog-header">
+      <span class="dialog-title">📁 保存一覧 <span id="saved-count" style="color:#666;"></span></span>
+      <button class="dialog-close" data-close="saved-list-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead>
+          <tr>
+            <th style="padding:6px 10px;background:#1a1a1a;color:#666;text-align:left;font-weight:normal;border-bottom:1px solid #2a2a2a;">query_text</th>
+            <th style="padding:6px 10px;background:#1a1a1a;color:#666;text-align:left;font-weight:normal;border-bottom:1px solid #2a2a2a;">latitude</th>
+            <th style="padding:6px 10px;background:#1a1a1a;color:#666;text-align:left;font-weight:normal;border-bottom:1px solid #2a2a2a;">longitude</th>
+            <th style="padding:6px 10px;background:#1a1a1a;color:#666;text-align:left;font-weight:normal;border-bottom:1px solid #2a2a2a;">保存理由</th>
+            <th style="padding:6px 10px;background:#1a1a1a;color:#666;text-align:left;font-weight:normal;border-bottom:1px solid #2a2a2a;">コメント</th>
+            <th style="padding:6px 10px;background:#1a1a1a;color:#666;text-align:center;font-weight:normal;border-bottom:1px solid #2a2a2a;"></th>
+          </tr>
+        </thead>
+        <tbody id="saved-tbody"></tbody>
+      </table>
+      <p id="saved-empty" style="padding:16px;font-size:12px;color:#555;display:none;">保存されたクエリはありません</p>
+    </div>
+    <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid #333;">
+      <button id="saved-export-btn" class="btn btn-primary" style="padding:8px 16px;">📥 エクスポート (CSV)</button>
+      <button class="btn btn-secondary" style="padding:8px 16px;" data-close="saved-list-dialog">キャンセル</button>
+    </div>
+  </div>
+</div>
+	
 <!-- Context Menu -->
 <div id="ctx-menu">
   <div class="ctx-item" data-action="tilequery">📍 Mapbox Tilequery APIで場所情報を取得</div>
@@ -1757,6 +1828,135 @@ function saveTilequerySettingsFromForm() {
 }
 document.getElementById('tq-save').addEventListener('click', saveTilequerySettingsFromForm);
 
+// ============================================================
+// SAVED QUERIES
+// ============================================================
+const LS_SAVED_QUERIES = 'apc_saved_queries';
+
+function loadSavedQueries() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(LS_SAVED_QUERIES) || '[]');
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+function persistSavedQueries(arr) {
+  localStorage.setItem(LS_SAVED_QUERIES, JSON.stringify(arr));
+}
+
+// 保存モーダルを開く
+function openSaveDialog() {
+  const query = document.getElementById('query-input').value.trim();
+  if (!query) { alert('クエリが空です。検索クエリを入力してください。'); return; }
+  const { lat, lng } = getCurrentLocation();
+  document.getElementById('save-target-info').innerHTML =
+    `query: ${query}<br>lat: ${lat.toFixed(6)}<br>lng: ${lng.toFixed(6)}`;
+  // 初期化
+  document.querySelector('input[name="save-reason"][value="Mapbox側のPOI情報が古い"]').checked = true;
+  document.getElementById('save-comment').value = '';
+  document.getElementById('save-dialog').classList.add('open');
+}
+
+// 保存確定
+function confirmSave() {
+  const query = document.getElementById('query-input').value.trim();
+  if (!query) { alert('クエリが空です。'); return; }
+  const { lat, lng } = getCurrentLocation();
+  const reason = document.querySelector('input[name="save-reason"]:checked')?.value || 'その他';
+  const comment = document.getElementById('save-comment').value.trim();
+
+  const arr = loadSavedQueries();
+  arr.push({
+    query_text: query,
+    latitude:   lat,
+    longitude:  lng,
+    reason,
+    comment,
+    saved_at:   new Date().toISOString(),
+  });
+  persistSavedQueries(arr);
+
+  closeDialog('save-dialog');
+  const btn = document.getElementById('save-query-btn');
+  btn.textContent = '✅ 保存しました';
+  setTimeout(() => btn.textContent = '💾 保存', 2000);
+}
+
+// 一覧描画
+function renderSavedList() {
+  const arr = loadSavedQueries();
+  const tbody = document.getElementById('saved-tbody');
+  const empty = document.getElementById('saved-empty');
+  document.getElementById('saved-count').textContent = arr.length ? `(${arr.length})` : '';
+
+  if (!arr.length) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  tbody.innerHTML = arr.map((r, i) => `
+    <tr>
+      <td style="padding:5px 10px;border-bottom:1px solid #1a1a1a;color:#ccc;">${esc(r.query_text)}</td>
+      <td style="padding:5px 10px;border-bottom:1px solid #1a1a1a;color:#aaa;">${Number(r.latitude).toFixed(6)}</td>
+      <td style="padding:5px 10px;border-bottom:1px solid #1a1a1a;color:#aaa;">${Number(r.longitude).toFixed(6)}</td>
+      <td style="padding:5px 10px;border-bottom:1px solid #1a1a1a;color:#aaa;">${esc(r.reason)}</td>
+      <td style="padding:5px 10px;border-bottom:1px solid #1a1a1a;color:#888;">${esc(r.comment)}</td>
+      <td style="padding:5px 10px;border-bottom:1px solid #1a1a1a;text-align:center;">
+        <button class="btn btn-secondary saved-del-btn" data-idx="${i}" style="font-size:10px;padding:2px 8px;">削除</button>
+      </td>
+    </tr>`).join('');
+
+  tbody.querySelectorAll('.saved-del-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      const idx = parseInt(b.dataset.idx, 10);
+      const list = loadSavedQueries();
+      list.splice(idx, 1);
+      persistSavedQueries(list);
+      renderSavedList();
+    });
+  });
+}
+
+function openSavedListDialog() {
+  renderSavedList();
+  document.getElementById('saved-list-dialog').classList.add('open');
+}
+
+// CSVエクスポート（全件 / query_text,latitude,longitude）
+function exportSavedCSV() {
+  const arr = loadSavedQueries();
+  if (!arr.length) { alert('保存されたクエリがありません。'); return; }
+
+  const escCsv = (v) => {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = 'query_text,latitude,longitude';
+  const rows = arr.map(r => [
+    escCsv(r.query_text),
+    Number(r.latitude),
+    Number(r.longitude),
+  ].join(','));
+  const csv = '\uFEFF' + [header, ...rows].join('\n'); // BOM付きでExcel文字化け防止
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `saved_queries_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// イベント登録
+document.getElementById('save-query-btn').addEventListener('click', openSaveDialog);
+document.getElementById('save-confirm-btn').addEventListener('click', confirmSave);
+document.getElementById('open-saved-list-btn').addEventListener('click', openSavedListDialog);
+document.getElementById('saved-export-btn').addEventListener('click', exportSavedCSV);
+	
 // ============================================================
 // APP START
 // ============================================================
