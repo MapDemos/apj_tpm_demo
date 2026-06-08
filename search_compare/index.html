@@ -79,7 +79,7 @@
     #csv-body.open { display: block; }
     #csv-table { width: 100%; border-collapse: collapse; font-size: 11px; }
     #csv-table th { padding: 4px 12px; background: #1a1a1a; color: #666; text-align: left; font-weight: normal; border-bottom: 1px solid #2a2a2a; position: sticky; top: 0; z-index: 1;}
-    #csv-table td { padding: 5px 12px; border-bottom: 1px solid #1a1a1a; color: #aaa; cursor: pointer; }
+    #csv-table td { padding: 5px 12px; border-bottom: 1px solid #1a1a1a; color: #aaa; cursor: pointer; height: 28px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
     #csv-table tr:hover td { background: #1e1e1e; }
     #csv-table tr.active td { background: #1a2744; color: #fff; }
     #csv-table tr.active td:first-child { color: #60a5fa; font-weight: bold; }
@@ -1128,40 +1128,80 @@ function parseCSV(text) {
   })).filter(r => !isNaN(r.latitude) && !isNaN(r.longitude));
 }
 	
+const CSV_ROW_H = 28;            // ★ CSSの td height と一致させる
+let csvHandlersAttached = false;
+
 function renderCSVTable() {
-  const tbody   = document.getElementById('csv-tbody');
-  const WINDOW  = 20; // 前後に表示する行数
-  const start   = Math.max(0, csvIndex - WINDOW);
-  const end     = Math.min(csvRows.length - 1, csvIndex + WINDOW);
-  const visible = csvRows.slice(start, end + 1);
-
- tbody.innerHTML = visible.map((r, i) => {
-   const realIdx = start + i;
-   const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-   return `
-     <tr class="${realIdx === csvIndex ? 'active' : ''}" data-idx="${realIdx}">
-       <td>${realIdx + 1}</td>
-       <td>${esc(r.query_text)}</td>
-       <td>${r.latitude.toFixed(6)}</td>
-       <td>${r.longitude.toFixed(6)}</td>
-       <td>${esc(r.reason)}</td>
-       <td>${esc(r.comment)}</td>
-     </tr>`;
- }).join('');
-
-  tbody.querySelectorAll('tr').forEach(tr => {
-    tr.addEventListener('click', () => jumpToCSVRow(parseInt(tr.dataset.idx)));
-  });
+  const body  = document.getElementById('csv-body');
+  const tbody = document.getElementById('csv-tbody');
 
   document.getElementById('csv-progress').textContent = csvRows.length > 0
-    ? `${csvIndex >= 0 ? csvIndex + 1 : '-'} / ${csvRows.length}`
-    : '';
-
+    ? `${csvIndex >= 0 ? csvIndex + 1 : '-'} / ${csvRows.length}` : '';
   document.getElementById('csv-prev-btn').disabled = csvRows.length === 0 || csvIndex <= 0;
   document.getElementById('csv-next-btn').disabled = csvRows.length === 0 || csvIndex >= csvRows.length - 1;
 
-  const activeRow = tbody.querySelector('tr.active');
-  if (activeRow) activeRow.scrollIntoView({ block: 'nearest' });
+  // ハンドラは1回だけ登録（スクロール再描画＋クリック委譲）
+  if (!csvHandlersAttached) {
+    body.addEventListener('scroll', renderCSVViewport);
+    tbody.addEventListener('click', (e) => {
+      const tr = e.target.closest('tr[data-idx]');
+      if (tr) jumpToCSVRow(parseInt(tr.dataset.idx));
+    });
+    csvHandlersAttached = true;
+  }
+
+  renderCSVViewport();
+}
+
+// 表示領域に入っている行だけ描画
+function renderCSVViewport() {
+  const body  = document.getElementById('csv-body');
+  const tbody = document.getElementById('csv-tbody');
+  const total = csvRows.length;
+  if (total === 0) { tbody.innerHTML = ''; return; }
+
+  const viewH = body.clientHeight || 180;
+  const first = Math.max(0, Math.floor(body.scrollTop / CSV_ROW_H) - 5);
+  const last  = Math.min(total - 1, first + Math.ceil(viewH / CSV_ROW_H) + 10);
+
+  const padTop    = first * CSV_ROW_H;
+  const padBottom = (total - 1 - last) * CSV_ROW_H;
+  const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  let html = '';
+  if (padTop > 0)
+    html += `<tr><td colspan="6" style="height:${padTop}px;padding:0;border:none;"></td></tr>`;
+
+  for (let i = first; i <= last; i++) {
+    const r = csvRows[i];
+    html += `
+      <tr class="${i === csvIndex ? 'active' : ''}" data-idx="${i}">
+        <td>${i + 1}</td>
+        <td>${esc(r.query_text)}</td>
+        <td>${r.latitude.toFixed(6)}</td>
+        <td>${r.longitude.toFixed(6)}</td>
+        <td>${esc(r.reason)}</td>
+        <td>${esc(r.comment)}</td>
+      </tr>`;
+  }
+
+  if (padBottom > 0)
+    html += `<tr><td colspan="6" style="height:${padBottom}px;padding:0;border:none;"></td></tr>`;
+
+  tbody.innerHTML = html;
+}
+
+// 指定行が見える位置までスクロール（ナビ操作時のみ呼ぶ）
+function scrollCSVToIndex(idx) {
+  const body  = document.getElementById('csv-body');
+  const viewH = body.clientHeight || 180;
+  const top   = idx * CSV_ROW_H;
+  if (top < body.scrollTop) {
+    body.scrollTop = top;
+  } else if (top + CSV_ROW_H > body.scrollTop + viewH) {
+    body.scrollTop = top - viewH + CSV_ROW_H;
+  }
+  renderCSVViewport();
 }
 
 async function jumpToCSVRow(idx) {
@@ -1177,6 +1217,7 @@ async function jumpToCSVRow(idx) {
   drawRangeOverlays();
 
   renderCSVTable();
+  scrollCSVToIndex(idx); 
 
   // 検索実行
   await doSearch();
@@ -1232,7 +1273,7 @@ function initCSV() {
 	  const val = parseInt(jumpInput.value);
 	  if (isNaN(val) || val < 1) { jumpHint.textContent = '無効な値'; return; }
 	  if (val > csvRows.length) { jumpHint.textContent = `最大 ${csvRows.length}`; return; }
-	  jumpToCSVRow(val - 1);   // ← csvIndex=… / renderCSVTable() を置き換え
+	  jumpToCSVRow(val - 1);   // ★ csvIndex=… / renderCSVTable() を置き換え
 	  jumpHint.textContent = `→ ${val}行目`;
 	  setTimeout(() => jumpHint.textContent = '', 2000);
 	};
