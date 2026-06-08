@@ -1232,8 +1232,7 @@ function initCSV() {
 	  const val = parseInt(jumpInput.value);
 	  if (isNaN(val) || val < 1) { jumpHint.textContent = '無効な値'; return; }
 	  if (val > csvRows.length) { jumpHint.textContent = `最大 ${csvRows.length}`; return; }
-	  csvIndex = val - 1; // 1始まり → 0始まりに変換
-	  renderCSVTable();
+	  jumpToCSVRow(val - 1);   // ← csvIndex=… / renderCSVTable() を置き換え
 	  jumpHint.textContent = `→ ${val}行目`;
 	  setTimeout(() => jumpHint.textContent = '', 2000);
 	};
