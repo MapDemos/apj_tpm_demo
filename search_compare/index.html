@@ -474,7 +474,7 @@ let GOOGLE_API_KEY = '';
 let MAPBOX_TOKEN   = '';
 const LS_GKEY      = 'apc_google_api_key';
 const LS_MBTOKEN   = 'apc_mapbox_token';
-const MAPBOX_STYLE = 'mapbox://styles/10da032y/cmnqqyl6e001901re8rf02za5';
+const MAPBOX_STYLE = 'mapbox://styles/10da032y/cmq4kcm10005001rfh7jb79cx';
 const PRESET_MAPBOX_TOKEN = "pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw";
 
 // ============================================================
@@ -1083,31 +1083,35 @@ async function doSearch() {
 // ============================================================
 // CSV
 // ============================================================
-// CSV1行を引用符対応でパース（新規追加）
-function parseCSVLine(line) {
-  const result = [];
-  let cur = '', inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
+
+// CSV全文を引用符（内部のカンマ・改行も含む）対応でパース
+function parseCSVText(text) {
+  text = text.replace(/^\uFEFF/, ''); // BOM除去
+  const rows = [];
+  let row = [], cur = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
     if (inQuotes) {
       if (ch === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; }
+        if (text[i + 1] === '"') { cur += '"'; i++; } // "" → "
         else inQuotes = false;
       } else cur += ch;
     } else {
       if (ch === '"') inQuotes = true;
-      else if (ch === ',') { result.push(cur); cur = ''; }
+      else if (ch === ',') { row.push(cur); cur = ''; }
+      else if (ch === '\r') { /* skip CR */ }
+      else if (ch === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
       else cur += ch;
     }
   }
-  result.push(cur);
-  return result;
+  if (cur !== '' || row.length > 0) { row.push(cur); rows.push(row); }
+  return rows;
 }
 
 function parseCSV(text) {
-  const lines = text.trim().split('\n');
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+  const rows = parseCSVText(text);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map(h => h.trim().toLowerCase());
   const latIdx     = headers.indexOf('latitude');
   const lngIdx     = headers.indexOf('longitude');
   const qIdx       = headers.indexOf('query_text');
@@ -1115,18 +1119,15 @@ function parseCSV(text) {
   const commentIdx = headers.indexOf('comment');  // 任意
   if (latIdx < 0 || lngIdx < 0 || qIdx < 0) return null;
 
-  return lines.slice(1).map(line => {
-    const cols = parseCSVLine(line);
-    return {
-      latitude:   parseFloat(cols[latIdx]),
-      longitude:  parseFloat(cols[lngIdx]),
-      query_text: cols[qIdx]?.trim() ?? '',
-      reason:     reasonIdx  >= 0 ? (cols[reasonIdx]?.trim()  ?? '') : '',
-      comment:    commentIdx >= 0 ? (cols[commentIdx]?.trim() ?? '') : '',
-    };
-  }).filter(r => !isNaN(r.latitude) && !isNaN(r.longitude));
+  return rows.slice(1).map(cols => ({
+    latitude:   parseFloat(cols[latIdx]),
+    longitude:  parseFloat(cols[lngIdx]),
+    query_text: cols[qIdx]?.trim() ?? '',
+    reason:     reasonIdx  >= 0 ? (cols[reasonIdx]?.trim()  ?? '') : '',
+    comment:    commentIdx >= 0 ? (cols[commentIdx]?.trim() ?? '') : '',
+  })).filter(r => !isNaN(r.latitude) && !isNaN(r.longitude));
 }
-
+	
 function renderCSVTable() {
   const tbody   = document.getElementById('csv-tbody');
   const WINDOW  = 20; // 前後に表示する行数
