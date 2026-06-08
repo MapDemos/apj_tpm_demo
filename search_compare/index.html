@@ -234,6 +234,8 @@
 		    <th>query_text</th>
 		    <th>latitude</th>
 		    <th>longitude</th>
+		    <th>reason</th>
+		    <th>comment</th>
 		  </tr>
 		</thead>
       <tbody id="csv-tbody"></tbody>
@@ -1132,16 +1134,19 @@ function renderCSVTable() {
   const end     = Math.min(csvRows.length - 1, csvIndex + WINDOW);
   const visible = csvRows.slice(start, end + 1);
 
-  tbody.innerHTML = visible.map((r, i) => {
-    const realIdx = start + i;
-    return `
-      <tr class="${realIdx === csvIndex ? 'active' : ''}" data-idx="${realIdx}">
-        <td>${realIdx + 1}</td>
-        <td>${r.query_text}</td>
-        <td>${r.latitude.toFixed(6)}</td>
-        <td>${r.longitude.toFixed(6)}</td>
-      </tr>`;
-  }).join('');
+ tbody.innerHTML = visible.map((r, i) => {
+   const realIdx = start + i;
+   const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+   return `
+     <tr class="${realIdx === csvIndex ? 'active' : ''}" data-idx="${realIdx}">
+       <td>${realIdx + 1}</td>
+       <td>${esc(r.query_text)}</td>
+       <td>${r.latitude.toFixed(6)}</td>
+       <td>${r.longitude.toFixed(6)}</td>
+       <td>${esc(r.reason)}</td>
+       <td>${esc(r.comment)}</td>
+     </tr>`;
+ }).join('');
 
   tbody.querySelectorAll('tr').forEach(tr => {
     tr.addEventListener('click', () => jumpToCSVRow(parseInt(tr.dataset.idx)));
