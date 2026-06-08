@@ -1081,21 +1081,46 @@ async function doSearch() {
 // ============================================================
 // CSV
 // ============================================================
+// CSV1行を引用符対応でパース（新規追加）
+function parseCSVLine(line) {
+  const result = [];
+  let cur = '', inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else cur += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { result.push(cur); cur = ''; }
+      else cur += ch;
+    }
+  }
+  result.push(cur);
+  return result;
+}
+
 function parseCSV(text) {
   const lines = text.trim().split('\n');
   if (lines.length < 2) return [];
   const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-  const latIdx  = headers.indexOf('latitude');
-  const lngIdx  = headers.indexOf('longitude');
-  const qIdx    = headers.indexOf('query_text');
-  if (latIdx < 0 || lngIdx < 0 || qIdx < 0) return null; // カラムが見つからない
+  const latIdx     = headers.indexOf('latitude');
+  const lngIdx     = headers.indexOf('longitude');
+  const qIdx       = headers.indexOf('query_text');
+  const reasonIdx  = headers.indexOf('reason');   // 任意
+  const commentIdx = headers.indexOf('comment');  // 任意
+  if (latIdx < 0 || lngIdx < 0 || qIdx < 0) return null;
 
   return lines.slice(1).map(line => {
-    const cols = line.split(',');
+    const cols = parseCSVLine(line);
     return {
       latitude:   parseFloat(cols[latIdx]),
       longitude:  parseFloat(cols[lngIdx]),
       query_text: cols[qIdx]?.trim() ?? '',
+      reason:     reasonIdx  >= 0 ? (cols[reasonIdx]?.trim()  ?? '') : '',
+      comment:    commentIdx >= 0 ? (cols[commentIdx]?.trim() ?? '') : '',
     };
   }).filter(r => !isNaN(r.latitude) && !isNaN(r.longitude));
 }
@@ -1851,9 +1876,19 @@ function openSaveDialog() {
   const { lat, lng } = getCurrentLocation();
   document.getElementById('save-target-info').innerHTML =
     `query: ${query}<br>lat: ${lat.toFixed(6)}<br>lng: ${lng.toFixed(6)}`;
-  // 初期化
-  document.querySelector('input[name="save-reason"][value="Mapbox側のPOI情報が古い"]').checked = true;
-  document.getElementById('save-comment').value = '';
+
+  // CSV読込行に理由/コメントがあればプリフィル
+  let presetReason  = 'Mapbox側のPOI情報が古い';
+  let presetComment = '';
+  if (csvIndex >= 0 && csvRows[csvIndex]) {
+    if (csvRows[csvIndex].reason)  presetReason  = csvRows[csvIndex].reason;
+    if (csvRows[csvIndex].comment) presetComment = csvRows[csvIndex].comment;
+  }
+  const radio = document.querySelector(`input[name="save-reason"][value="${presetReason}"]`);
+  if (radio) radio.checked = true;
+  else document.querySelector('input[name="save-reason"][value="その他"]').checked = true;
+  document.getElementById('save-comment').value = presetComment;
+
   document.getElementById('save-dialog').classList.add('open');
 }
 
@@ -1934,13 +1969,15 @@ function exportSavedCSV() {
     const s = String(v ?? '');
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const header = 'query_text,latitude,longitude';
+  const header = 'query_text,latitude,longitude,reason,comment';
   const rows = arr.map(r => [
     escCsv(r.query_text),
     Number(r.latitude),
     Number(r.longitude),
+    escCsv(r.reason),
+    escCsv(r.comment),
   ].join(','));
-  const csv = '\uFEFF' + [header, ...rows].join('\n'); // BOM付きでExcel文字化け防止
+  const csv = '\uFEFF' + [header, ...rows].join('\n');
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
