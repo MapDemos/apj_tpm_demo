@@ -28,5 +28,10 @@
     "title": "rain_radar",
     "description": "simple rain radar by weatehr tileset",
     "path": "./rain_radar/"
+  },
+  {
+    "title": "Geonator",
+    "description": "AI-powered location finder — identify precise coordinates from vague natural-language descriptions (Claude + Mapbox)",
+    "path": "./geonator/"
   }
 ]

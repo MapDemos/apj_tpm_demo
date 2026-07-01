@@ -1,0 +1,12 @@
+# Local-only files (not committed)
+memory/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+*.swp
+*.swo

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Geonator</title>
+  <meta name="description" content="Claude + Mapbox による緊急・配車位置特定AIエージェント">
+
+  <!-- Favicon -->
+  <link rel="shortcut icon" href="https://static-assets.mapbox.com/branding/favicon/v1/favicon.ico" type="image/x-icon"/>
+
+  <!-- Mapbox GL JS -->
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.11.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.11.0/mapbox-gl.js"></script>
+
+  <!-- Turf.js (spatial calculations) -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <!-- Application Styles -->
+  <link rel="stylesheet" href="./styles/main.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <h1 id="app-title">Geonator</h1>
+    </div>
+    <div class="header-right">
+      <span class="header-sub">Location AI · Claude + Mapbox</span>
+      <button class="lang-toggle-btn" id="lang-toggle" title="Switch language / 言語切替">🌐 Switch to EN</button>
+      <span class="model-badge" id="model-badge">-</span>
+      <span class="api-counter" id="api-counter-sb" title="Search Box APIリクエスト回数">SB:0</span>
+      <span class="api-counter" id="api-counter-tq" title="Tilequery APIリクエスト回数">TQ:0</span>
+      <span class="token-display" id="token-display" title="累計トークン（↑入力 ↓出力）">-</span>
+      <button id="debugToggleBtn" class="control-btn debug-toggle-btn" title="各ツール実行後に一時停止してステップ確認できます">🔍 デバッグ OFF</button>
+      <button id="clearChatBtn" class="control-btn">チャットをクリア</button>
+    </div>
+  </header>
+
+  <!-- Main Application Container -->
+  <div class="app-container">
+
+    <!-- Chat Panel -->
+    <div class="chat-panel">
+
+      <!-- Chat Messages -->
+      <div class="chat-messages" id="chatMessages"></div>
+
+      <!-- Example Query Chips -->
+      <div id="examplesArea">
+        <div class="examples-label" id="examples-label">入力例</div>
+        <button class="example-chip"
+          data-q-ja="新橋駅の烏森口を出てすぐのセブンイレブン"
+          data-q-en="7-Eleven just outside Karasumori exit of Shinbashi station">
+          <span class="chip-text-ja">新橋駅の烏森口を出てすぐのセブンイレブン</span>
+          <span class="chip-text-en" style="display:none">7-Eleven just outside Karasumori exit of Shinbashi station</span>
+        </button>
+        <button class="example-chip"
+          data-q-ja="今江ノ島付近の国道。左手にレッドロブスターが見える車線にいる"
+          data-q-en="On a national highway near Enoshima, driving with Red Lobster visible on my left">
+          <span class="chip-text-ja">今江ノ島付近の国道。左手にレッドロブスターが見える車線にいる</span>
+          <span class="chip-text-en" style="display:none">On a national highway near Enoshima, driving with Red Lobster visible on my left</span>
+        </button>
+        <button class="example-chip"
+          data-q-ja="池袋のビジネスホテルで、すぐ近くにモスバーガーが見える場所"
+          data-q-en="In a business hotel in Ikebukuro, with a MOS Burger visible nearby">
+          <span class="chip-text-ja">池袋のビジネスホテルで、すぐ近くにモスバーガーが見える場所</span>
+          <span class="chip-text-en" style="display:none">In a business hotel in Ikebukuro, with a MOS Burger visible nearby</span>
+        </button>
+      </div>
+
+      <!-- Input Area -->
+      <div class="input-area">
+        <div class="input-container">
+          <textarea
+            id="chatInput"
+            class="chat-input"
+            placeholder="通報内容を入力… (Enter×2で送信 / Shift+Enterで改行)"
+            autocomplete="off"
+            rows="2"
+          ></textarea>
+          <button id="sendBtn" class="send-btn" title="送信">➤</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Map Panel -->
+    <div class="map-panel">
+      <div class="map-status-label" id="mapStatus">地図を読み込み中…</div>
+
+      <!-- Thinking float widget (bottom-right of map) -->
+      <div class="thinking-float" id="thinkingDisplay" style="display:none;">
+        <div class="thinking-float-badge" id="thinkingBadge">
+          <div class="thinking-spinner-sm"></div>
+          <span id="thinkingStatus">処理中…</span>
+          <button class="thinking-toggle-btn" id="thinkingToggleBtn" title="ログを展開">▲</button>
+        </div>
+        <div class="thinking-float-log" id="thinkingLog" style="display:none;">
+          <div class="thinking-log-header">
+            <span>処理ログ</span>
+            <button class="thinking-toggle-btn" id="thinkingCollapseBtn">▼</button>
+          </div>
+          <div class="thinking-steps" id="thinkingSteps"></div>
+        </div>
+      </div>
+      <div class="map-legend" id="mapLegend" style="display:none;">
+        <div class="legend-row"><span class="legend-dot" style="background:#f97316"></span>proximity / bbox</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#06b6d4"></span>Search Box hits</div>
+        <div class="legend-row"><span class="legend-dot legend-circle-only" style="border-color:#f59e0b;border-radius:50%;width:12px;height:12px"></span>Cluster center</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#a855f7"></span>Tilequery hits</div>
+        <div class="legend-row"><span class="legend-dot legend-circle-only" style="border-color:#f59e0b"></span>Tilequery radius</div>
+        <div class="legend-row"><span class="legend-dot" style="background:#8b5cf6"></span>Route corridor</div>
+      </div>
+      <div class="map-computing-overlay" id="mapComputing" style="display:none;">
+        <div class="map-computing-spinner"></div>
+        <span id="mapComputingText">計算中…</span>
+      </div>
+      <div id="map" class="map-container"></div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Application Scripts — loaded in dependency order.
+       No ES6 import/export: each file defines globals so that
+       scripts loaded later can reference them directly.
+       ═══════════════════════════════════════════════════════════ -->
+
+  <!-- 1. Config -->
+  <script src="./config.js"></script>
+
+  <!-- 2. System prompt -->
+  <script src="./prompts/prompt.js"></script>
+
+  <!-- 3. Spatial utilities (Turf.js wrappers) -->
+  <script src="./modules/spatial-utils.js"></script>
+
+  <!-- 4. Mapbox MCP client (depends on SpatialUtils + CONFIG) -->
+  <script src="./modules/mapbox-mcp.js"></script>
+
+  <!-- 5. Main application (depends on everything above) -->
+  <script src="./index.js"></script>
+
+</body>
+</html>
