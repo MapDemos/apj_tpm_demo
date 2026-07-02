@@ -1145,11 +1145,12 @@ class LocationFinderApp {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({
-            model:      this.config.CLAUDE_MODEL,
-            max_tokens: this.config.MAX_TOKENS,
-            system:     POSITION_AGENT_PROMPT,
-            messages:   this.messages,
-            tools:      allTools,
+            model:       this.config.CLAUDE_MODEL,
+            max_tokens:  this.config.MAX_TOKENS,
+            temperature: this.config.TEMPERATURE ?? 0,
+            system:      POSITION_AGENT_PROMPT,
+            messages:    this.messages,
+            tools:       allTools,
           }),
         });
       } catch (err) {

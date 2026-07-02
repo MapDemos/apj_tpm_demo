@@ -22,7 +22,7 @@ const CONFIG = {
 
   CLAUDE_MODEL:    'claude-sonnet-4-6',
   MAX_TOKENS:      4096,
-  TEMPERATURE:     0.7,
+  TEMPERATURE:     0,
   MAX_TOOL_TURNS:  20,   // max agentic loop iterations
 
   // ============================================
