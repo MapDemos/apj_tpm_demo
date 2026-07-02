@@ -850,18 +850,28 @@ class LocationFinderApp {
       this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 16), duration: 600 });
     }
 
-    // search_nearby_poi: fly to proximity, draw Tilequery radius if bbox known
+    // search_nearby_poi: fly to proximity, draw all Tilequery grid circles
     if (toolName === 'search_nearby_poi' && args.proximity?.length >= 2) {
       const [pLng, pLat] = args.proximity;
       this.map.flyTo({ center: [pLng, pLat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
       if (args.bbox?.length === 4) {
-        // Compute Tilequery radius the same way MCP does (circumscribed circle)
+        // Replicate _gridTilequeryPOI grid logic to show all actual scan circles
         const [minX, minY, maxX, maxY] = args.bbox;
-        const lat  = (minY + maxY) / 2;
-        const dx   = Math.abs(maxX - minX) * 111320 * Math.cos(lat * Math.PI / 180);
-        const dy   = Math.abs(maxY - minY) * 110540;
-        const tqR  = Math.min(Math.round(Math.sqrt(dx*dx + dy*dy) / 2), 800);
-        this._drawScanCircle(pLat, pLng, tqR);
+        const gridRadius = 100; // matches _gridTilequeryPOI's fixed radius
+        const spacingM   = gridRadius * 1.5;
+        const DEG_LNG    = 1 / (111320 * Math.cos(pLat * Math.PI / 180));
+        const DEG_LAT    = 1 / 110540;
+        const widthM     = (maxX - minX) / DEG_LNG;
+        const heightM    = (maxY - minY) / DEG_LAT;
+        const nx = Math.max(1, Math.round(widthM  / spacingM));
+        const ny = Math.max(1, Math.round(heightM / spacingM));
+        for (let iy = 0; iy < ny; iy++) {
+          for (let ix = 0; ix < nx; ix++) {
+            const gLng = minX + (ix + 0.5) * (maxX - minX) / nx;
+            const gLat = minY + (iy + 0.5) * (maxY - minY) / ny;
+            this._drawScanCircle(gLat, gLng, gridRadius);
+          }
+        }
       }
     }
   }
