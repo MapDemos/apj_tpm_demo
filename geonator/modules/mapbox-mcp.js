@@ -26,7 +26,9 @@ class MapboxMCPClient {
     this.spatialUtils    = new SpatialUtils();
     this._lastRouteData  = null; // set by _getRoutePOIs, read by index.js for map drawing
     this._sbRequests     = 0;   // Search Box API request count (reset by index.js on chat clear)
-    this._tqRequests     = 0;   // Tilequery API request count
+    this._tqRequests     = 0;   // Tilequery API request count (actual fetches only)
+    this._tqCacheHits    = 0;   // Tilequery cache hits
+    this._tqCache        = new Map(); // url → parsed JSON (cleared on chat reset)
   }
 
   /**
@@ -276,6 +278,61 @@ class MapboxMCPClient {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════
+  // Tilequery grid-snap cache
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Snap lat/lng to a uniform grid of cellSizeM × cellSizeM meters.
+   * Nearby coordinates that fall in the same cell share a single Tilequery fetch.
+   * cellSizeM = radius / 4 keeps max positional error ≤ 18% of radius.
+   */
+  _snapCoord(lat, lng, cellSizeM) {
+    const dLat = cellSizeM / 110540;
+    const dLng = cellSizeM / (111320 * Math.cos(lat * Math.PI / 180));
+    return {
+      lat: Math.round(lat / dLat) * dLat,
+      lng: Math.round(lng / dLng) * dLng,
+    };
+  }
+
+  /**
+   * Snap the lat/lng in a Tilequery URL to a grid (cellSize = radius/4, max 50m).
+   * This gives a stable cache key for nearby calls.
+   * Max positional error ≈ 18% of radius (diagonal of half-cell).
+   */
+  _snapTilequeryUrl(url) {
+    // Match: /tilequery/LNG,LAT.json?...&radius=R&...
+    const m = url.match(/\/tilequery\/([\d.+-]+),([\d.+-]+)\.json[^&]*[?&]radius=(\d+)/);
+    if (!m) return url;
+    const lng = parseFloat(m[1]), lat = parseFloat(m[2]), radius = parseInt(m[3]);
+    const cellSizeM = Math.max(Math.min(radius / 4, 50), 5);
+    const { lat: sLat, lng: sLng } = this._snapCoord(lat, lng, cellSizeM);
+    return url.replace(`/${lng},${lat}.json`, `/${+sLng.toFixed(6)},${+sLat.toFixed(6)}.json`);
+  }
+
+  /**
+   * Fetch a Tilequery URL with in-memory cache.
+   * Coordinates are snapped to a grid before caching so nearby calls share results.
+   * _tqRequests counts only real API calls; _tqCacheHits counts saved calls.
+   */
+  async _fetchTilequeryWithCache(url) {
+    const snappedUrl = this._snapTilequeryUrl(url);
+    const cached = this._tqCache.get(snappedUrl);
+    if (cached) {
+      this._tqCacheHits++;
+      if (this.config.DEBUG)
+        console.log(`[TQ cache HIT #${this._tqCacheHits}] saves=${this._tqCacheHits} actual=${this._tqRequests}`);
+      return { ok: true, json: async () => cached };
+    }
+    this._tqRequests++;
+    const res = await this._fetchWithRetry(snappedUrl);
+    if (!res.ok) return res;
+    const data = await res.json();
+    this._tqCache.set(snappedUrl, data);
+    return { ok: true, json: async () => data };
+  }
+
   // Search expansion helpers
   // ═══════════════════════════════════════════════════════════════
 
@@ -768,8 +825,7 @@ class MapboxMCPClient {
       `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
       `?access_token=${this.token}&radius=${radius}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=poi_label`;
     try {
-      this._tqRequests++;
-      const res  = await this._fetchWithRetry(url);
+      const res  = await this._fetchTilequeryWithCache(url);
       if (!res.ok) return [];
       const data = await res.json();
       return (data.features || [])
@@ -798,8 +854,7 @@ class MapboxMCPClient {
       `&dedupe=true` +
       `&layers=poi_label`;
     try {
-      this._tqRequests++;
-      const res  = await this._fetchWithRetry(url);
+      const res  = await this._fetchTilequeryWithCache(url);
       if (!res.ok) return [];
       const data = await res.json();
       const results = (data.features || [])
@@ -828,8 +883,7 @@ class MapboxMCPClient {
       `https://api.mapbox.com/v4/10da032y.busstop_gov_0608/tilequery/${lng},${lat}.json` +
       `?access_token=${this.token}&radius=${radius}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true`;
     try {
-      this._tqRequests++;
-      const res  = await this._fetchWithRetry(url);
+      const res  = await this._fetchTilequeryWithCache(url);
       if (!res.ok) return [];
       const data = await res.json();
       return (data.features || [])
@@ -905,8 +959,7 @@ class MapboxMCPClient {
       `?access_token=${this.token}&geometries=geojson&overview=full&steps=false&alternatives=true`;
 
     try {
-      this._tqRequests++;
-      const res  = await this._fetchWithRetry(url);
+      const res  = await this._fetchTilequeryWithCache(url);
       if (!res.ok) return JSON.stringify({ error: `Directions API HTTP ${res.status}` });
       const data = await res.json();
 
@@ -1086,8 +1139,7 @@ class MapboxMCPClient {
           `?access_token=${this.token}&radius=${Math.round(currentRadius)}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true` +
           `&layers=water,waterway,landuse,natural_label`;
 
-        this._tqRequests++;
-        const res  = await this._fetchWithRetry(url);
+        const res  = await this._fetchTilequeryWithCache(url);
         if (!res.ok) return JSON.stringify({ error: `Tilequery HTTP ${res.status}` });
         const data = await res.json();
 
@@ -1167,8 +1219,7 @@ class MapboxMCPClient {
       `?access_token=${this.token}&steps=false&overview=false&alternatives=false`;
 
     try {
-      this._tqRequests++;
-      const res  = await this._fetchWithRetry(url);
+      const res  = await this._fetchTilequeryWithCache(url);
       if (!res.ok) return JSON.stringify({ error: `Directions API ${res.status}` });
       const data = await res.json();
 
@@ -1217,8 +1268,7 @@ class MapboxMCPClient {
         `?access_token=${this.token}` +
         `&radius=${radius}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road`;
       try {
-        this._tqRequests++;
-        const res  = await this._fetchWithRetry(url);
+        const res  = await this._fetchTilequeryWithCache(url);
         if (!res.ok) continue;
         const data = await res.json();
 
@@ -1310,8 +1360,7 @@ class MapboxMCPClient {
           `&dedupe=true` +
           `&layers=${layers}`;
 
-        this._tqRequests++;
-        const res  = await this._fetchWithRetry(url);
+        const res  = await this._fetchTilequeryWithCache(url);
         if (!res.ok) return JSON.stringify({ error: `Tilequery HTTP ${res.status}` });
         const data = await res.json();
 

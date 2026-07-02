@@ -25,6 +25,7 @@ class LocationFinderApp {
     this.map              = null;
     this.candidateMarkers = [];
     this.finalMarker      = null;
+    this._scanCircleIds   = [];   // accumulated Tilequery radius circle layer/source IDs
 
     // Conversation history for Claude
     this.messages = [];
@@ -205,7 +206,12 @@ class LocationFinderApp {
     this.messages = [];
     this._tokens  = { input: 0, output: 0 };
     this._updateTokenDisplay();
-    if (this.mapboxMCP) { this.mapboxMCP._sbRequests = 0; this.mapboxMCP._tqRequests = 0; }
+    if (this.mapboxMCP) {
+      this.mapboxMCP._sbRequests  = 0;
+      this.mapboxMCP._tqRequests  = 0;
+      this.mapboxMCP._tqCacheHits = 0;
+      this.mapboxMCP._tqCache.clear();
+    }
     this._updateAPICountDisplay();
     // Resolve any pending debug pause
     if (this._debugStepResolve) { this._debugStepResolve(); this._debugStepResolve = null; }
@@ -374,6 +380,7 @@ class LocationFinderApp {
     this.candidateMarkers = [];
     this._removeBoundaryLayers();
     this._removeProbableArea();
+    this.clearScanCircles();
     return 'マップ要素をクリアしました';
   }
 
@@ -839,20 +846,35 @@ class LocationFinderApp {
     if (status) status.textContent = msg;
     if (overlay) overlay.style.display = 'flex';
 
-    // For scan_street_features: draw a radius circle on the map
+    // Draw Tilequery radius circles on the map
     if (toolName === 'scan_street_features' && args.lat && args.lng) {
       this._drawScanCircle(args.lat, args.lng, args.radius);
       this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 14), duration: 800 });
     }
 
-    // For search_nearby_poi with proximity: fly to search center
-    if (toolName === 'search_nearby_poi' && args.proximity && args.proximity.length >= 2) {
-      this.map.flyTo({ center: args.proximity, zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
+    if (toolName === 'scan_natural_features' && args.lat && args.lng) {
+      this._drawScanCircle(args.lat, args.lng, args.radius);
+      this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
     }
 
     if (toolName === 'get_facing_road' && args.lat && args.lng) {
       this._drawScanCircle(args.lat, args.lng, 50);
       this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 16), duration: 600 });
+    }
+
+    // search_nearby_poi: fly to proximity, draw Tilequery radius if bbox known
+    if (toolName === 'search_nearby_poi' && args.proximity?.length >= 2) {
+      const [pLng, pLat] = args.proximity;
+      this.map.flyTo({ center: [pLng, pLat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
+      if (args.bbox?.length === 4) {
+        // Compute Tilequery radius the same way MCP does (circumscribed circle)
+        const [minX, minY, maxX, maxY] = args.bbox;
+        const lat  = (minY + maxY) / 2;
+        const dx   = Math.abs(maxX - minX) * 111320 * Math.cos(lat * Math.PI / 180);
+        const dy   = Math.abs(maxY - minY) * 110540;
+        const tqR  = Math.min(Math.round(Math.sqrt(dx*dx + dy*dy) / 2), 800);
+        this._drawScanCircle(pLat, pLng, tqR);
+      }
     }
   }
 
@@ -860,41 +882,41 @@ class LocationFinderApp {
   _hideMapComputing() {
     const overlay = document.getElementById('mapComputing');
     if (overlay) overlay.style.display = 'none';
-    this._removeScanCircle();
   }
 
-  /** Draw a filled circle showing the Tilequery scan radius. */
+  /** Draw a filled circle showing the Tilequery scan radius. Accumulates — call clearScanCircles() to remove all. */
   _drawScanCircle(lat, lng, radiusMeters) {
-    this._removeScanCircle();
+    const idx    = this._scanCircleIds.length;
+    const srcPfx = `scan-${idx}`;
     const center = turf.point([lng, lat]);
     const circle = turf.circle(center, radiusMeters / 1000, { units: 'kilometers', steps: 64 });
 
-    this.map.addSource('scan-circle', { type: 'geojson', data: circle });
+    this.map.addSource(`${srcPfx}-circle`, { type: 'geojson', data: circle });
     this.map.addLayer({
-      id: 'scan-circle-fill', type: 'fill', source: 'scan-circle',
-      paint: { 'fill-color': '#f59e0b', 'fill-opacity': 0.12 },
+      id: `${srcPfx}-fill`, type: 'fill', source: `${srcPfx}-circle`,
+      paint: { 'fill-color': '#f59e0b', 'fill-opacity': 0.10 },
     });
     this.map.addLayer({
-      id: 'scan-circle-line', type: 'line', source: 'scan-circle',
+      id: `${srcPfx}-line`, type: 'line', source: `${srcPfx}-circle`,
       paint: { 'line-color': '#f59e0b', 'line-width': 1.5, 'line-dasharray': [3, 2] },
     });
 
     // Center dot
-    this.map.addSource('scan-center', {
+    this.map.addSource(`${srcPfx}-center`, {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [
         { type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: {} },
       ]},
     });
     this.map.addLayer({
-      id: 'scan-center-dot', type: 'circle', source: 'scan-center',
+      id: `${srcPfx}-dot`, type: 'circle', source: `${srcPfx}-center`,
       paint: { 'circle-radius': 5, 'circle-color': '#f59e0b', 'circle-opacity': 0.9,
                'circle-stroke-width': 2, 'circle-stroke-color': '#fff' },
     });
 
     // Radius label at the top edge of the circle
     const degsNorth = radiusMeters / 110540;
-    this.map.addSource('scan-label', {
+    this.map.addSource(`${srcPfx}-label`, {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [
         { type: 'Feature',
@@ -903,7 +925,7 @@ class LocationFinderApp {
       ]},
     });
     this.map.addLayer({
-      id: 'scan-label-sym', type: 'symbol', source: 'scan-label',
+      id: `${srcPfx}-sym`, type: 'symbol', source: `${srcPfx}-label`,
       layout: {
         'text-field':            ['get', 'label'],
         'text-size':             11,
@@ -918,15 +940,20 @@ class LocationFinderApp {
         'text-halo-width':  1.5,
       },
     });
+
+    this._scanCircleIds.push({
+      layers:  [`${srcPfx}-fill`, `${srcPfx}-line`, `${srcPfx}-dot`, `${srcPfx}-sym`],
+      sources: [`${srcPfx}-circle`, `${srcPfx}-center`, `${srcPfx}-label`],
+    });
   }
 
-  _removeScanCircle() {
-    ['scan-circle-fill', 'scan-circle-line', 'scan-center-dot', 'scan-label-sym'].forEach(id => {
-      try { this.map.removeLayer(id); } catch (_) {}
+  /** Remove all accumulated Tilequery scan circles. */
+  clearScanCircles() {
+    this._scanCircleIds.forEach(({ layers, sources }) => {
+      layers.forEach(id  => { try { this.map.removeLayer(id);  } catch (_) {} });
+      sources.forEach(id => { try { this.map.removeSource(id); } catch (_) {} });
     });
-    ['scan-circle', 'scan-center', 'scan-label'].forEach(id => {
-      try { this.map.removeSource(id); } catch (_) {}
-    });
+    this._scanCircleIds = [];
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -1567,8 +1594,12 @@ class LocationFinderApp {
   _updateAPICountDisplay() {
     const sb = document.getElementById('api-counter-sb');
     const tq = document.getElementById('api-counter-tq');
-    if (sb) sb.textContent = `SB:${this.mapboxMCP?._sbRequests ?? 0}`;
-    if (tq) tq.textContent = `TQ:${this.mapboxMCP?._tqRequests ?? 0}`;
+    if (sb) sb.textContent = `SB: ${this.mapboxMCP?._sbRequests ?? 0} req`;
+    const tqHits = this.mapboxMCP?._tqCacheHits ?? 0;
+    const tqReal = this.mapboxMCP?._tqRequests  ?? 0;
+    if (tq) tq.textContent = tqHits > 0
+      ? `TQ: ${tqReal} req (+${tqHits}↩)`
+      : `TQ: ${tqReal} req`;
   }
 
   _updateTokenDisplay() {
