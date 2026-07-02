@@ -25,7 +25,8 @@ class LocationFinderApp {
     this.map              = null;
     this.candidateMarkers = [];
     this.finalMarker      = null;
-    this._scanCircleIds   = [];   // accumulated Tilequery radius circle layer/source IDs
+    this._mapLayerRegistry = []; // { layers:[{id,type}], sources:[id], gen:N }
+    this._mapGen           = 0;  // current generation (increments each user send)
 
     // Conversation history for Claude
     this.messages = [];
@@ -188,6 +189,7 @@ class LocationFinderApp {
     input.disabled   = true;
 
     this.addMessage('user', text);
+    this._advanceMapGen();
     this._showThinking(LANG[this._lang].connecting);
 
     try {
@@ -241,11 +243,12 @@ class LocationFinderApp {
    * @param {number[]} bbox - [minX, minY, maxX, maxY]
    */
   drawSearchBoundary(rawBbox) {
-    this._removeBoundaryLayers();
-
     // Enforce ±500m max (same cap as MCP side)
     const bbox = _capBBoxFE(rawBbox);
     const [minX, minY, maxX, maxY] = bbox;
+    const idx = this._mapLayerRegistry.length;
+    const p   = `bbox-${idx}`;
+
     const geojson = {
       type: 'FeatureCollection',
       features: [{
@@ -257,49 +260,35 @@ class LocationFinderApp {
       }],
     };
 
-    this.map.addSource('search-boundary', { type: 'geojson', data: geojson });
-    this.map.addLayer({
-      id: 'search-boundary-fill', type: 'fill', source: 'search-boundary',
-      paint: { 'fill-color': '#3b82f6', 'fill-opacity': 0.12 },
-    });
-    this.map.addLayer({
-      id: 'search-boundary-line', type: 'line', source: 'search-boundary',
-      paint: { 'line-color': '#60a5fa', 'line-width': 2, 'line-dasharray': [4, 2] },
-    });
+    this.map.addSource(`${p}-poly`, { type: 'geojson', data: geojson });
+    this.map.addLayer({ id: `${p}-fill`, type: 'fill', source: `${p}-poly`,
+      paint: { 'fill-color': '#3b82f6', 'fill-opacity': 0.12 } });
+    this.map.addLayer({ id: `${p}-line`, type: 'line', source: `${p}-poly`,
+      paint: { 'line-color': '#60a5fa', 'line-width': 2, 'line-dasharray': [4, 2] } });
 
     // Size label at top-center
     const midLat = (minY + maxY) / 2;
     const wm = Math.round(Math.abs(maxX - minX) * 111320 * Math.cos(midLat * Math.PI / 180));
     const hm = Math.round(Math.abs(maxY - minY) * 110540);
     const sbLabel = wm === hm ? `${wm}m` : `${wm}×${hm}m`;
-    const sbLabelGeo = { type: 'FeatureCollection', features: [{
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [(minX + maxX) / 2, maxY] },
-      properties: { label: sbLabel },
-    }]};
-    try {
-      if (this.map.getSource('sb-label')) {
-        this.map.getSource('sb-label').setData(sbLabelGeo);
-      } else {
-        this.map.addSource('sb-label', { type: 'geojson', data: sbLabelGeo });
-        this.map.addLayer({
-          id: 'sb-label-sym', type: 'symbol', source: 'sb-label',
-          layout: {
-            'text-field':            ['get', 'label'],
-            'text-size':             11,
-            'text-anchor':           'bottom',
-            'text-offset':           ['literal', [0, -0.3]],
-            'text-allow-overlap':    true,
-            'text-ignore-placement': true,
-          },
-          paint: {
-            'text-color':       '#60a5fa',
-            'text-halo-color':  'rgba(8,13,26,0.9)',
-            'text-halo-width':  1.5,
-          },
-        });
-      }
-    } catch(_) {}
+    this.map.addSource(`${p}-lbl`, { type: 'geojson', data: {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature',
+        geometry: { type: 'Point', coordinates: [(minX + maxX) / 2, maxY] },
+        properties: { label: sbLabel } }],
+    }});
+    this.map.addLayer({ id: `${p}-sym`, type: 'symbol', source: `${p}-lbl`,
+      layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-anchor': 'bottom',
+                'text-offset': ['literal', [0, -0.3]],
+                'text-allow-overlap': true, 'text-ignore-placement': true },
+      paint: { 'text-color': '#60a5fa', 'text-halo-color': 'rgba(8,13,26,0.9)', 'text-halo-width': 1.5 } });
+
+    this._mapLayerRegistry.push({
+      layers:  [{ id: `${p}-fill`, type: 'fill' }, { id: `${p}-line`, type: 'line' },
+                { id: `${p}-sym`,  type: 'symbol' }],
+      sources: [`${p}-poly`, `${p}-lbl`],
+      gen:     this._mapGen,
+    });
 
     this.map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 70, duration: 1200 });
 
@@ -378,9 +367,8 @@ class LocationFinderApp {
   clearMapElements() {
     this.candidateMarkers.forEach(m => m.remove());
     this.candidateMarkers = [];
-    this._removeBoundaryLayers();
     this._removeProbableArea();
-    this.clearScanCircles();
+    this._clearMapLayers();
     return 'マップ要素をクリアしました';
   }
 
@@ -884,76 +872,107 @@ class LocationFinderApp {
     if (overlay) overlay.style.display = 'none';
   }
 
-  /** Draw a filled circle showing the Tilequery scan radius. Accumulates — call clearScanCircles() to remove all. */
+  /** Draw a filled circle showing the Tilequery scan radius. Accumulates with generation tracking. */
   _drawScanCircle(lat, lng, radiusMeters) {
-    const idx    = this._scanCircleIds.length;
-    const srcPfx = `scan-${idx}`;
+    const idx    = this._mapLayerRegistry.length;
+    const p      = `scan-${idx}`;
     const center = turf.point([lng, lat]);
     const circle = turf.circle(center, radiusMeters / 1000, { units: 'kilometers', steps: 64 });
 
-    this.map.addSource(`${srcPfx}-circle`, { type: 'geojson', data: circle });
-    this.map.addLayer({
-      id: `${srcPfx}-fill`, type: 'fill', source: `${srcPfx}-circle`,
-      paint: { 'fill-color': '#f59e0b', 'fill-opacity': 0.10 },
-    });
-    this.map.addLayer({
-      id: `${srcPfx}-line`, type: 'line', source: `${srcPfx}-circle`,
-      paint: { 'line-color': '#f59e0b', 'line-width': 1.5, 'line-dasharray': [3, 2] },
-    });
+    this.map.addSource(`${p}-poly`, { type: 'geojson', data: circle });
+    this.map.addLayer({ id: `${p}-fill`, type: 'fill', source: `${p}-poly`,
+      paint: { 'fill-color': '#f59e0b', 'fill-opacity': 0.10 } });
+    this.map.addLayer({ id: `${p}-line`, type: 'line', source: `${p}-poly`,
+      paint: { 'line-color': '#f59e0b', 'line-width': 1.5, 'line-dasharray': [3, 2] } });
 
-    // Center dot
-    this.map.addSource(`${srcPfx}-center`, {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [
-        { type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: {} },
-      ]},
-    });
-    this.map.addLayer({
-      id: `${srcPfx}-dot`, type: 'circle', source: `${srcPfx}-center`,
+    this.map.addSource(`${p}-ctr`, { type: 'geojson', data: {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: {} }],
+    }});
+    this.map.addLayer({ id: `${p}-dot`, type: 'circle', source: `${p}-ctr`,
       paint: { 'circle-radius': 5, 'circle-color': '#f59e0b', 'circle-opacity': 0.9,
-               'circle-stroke-width': 2, 'circle-stroke-color': '#fff' },
-    });
+               'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
 
-    // Radius label at the top edge of the circle
     const degsNorth = radiusMeters / 110540;
-    this.map.addSource(`${srcPfx}-label`, {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [
-        { type: 'Feature',
-          geometry: { type: 'Point', coordinates: [lng, lat + degsNorth] },
-          properties: { label: `r=${radiusMeters}m` } },
-      ]},
-    });
-    this.map.addLayer({
-      id: `${srcPfx}-sym`, type: 'symbol', source: `${srcPfx}-label`,
-      layout: {
-        'text-field':            ['get', 'label'],
-        'text-size':             11,
-        'text-anchor':           'bottom',
-        'text-offset':           ['literal', [0, -0.3]],
-        'text-allow-overlap':    true,
-        'text-ignore-placement': true,
-      },
-      paint: {
-        'text-color':       '#f59e0b',
-        'text-halo-color':  'rgba(8,13,26,0.9)',
-        'text-halo-width':  1.5,
-      },
-    });
+    this.map.addSource(`${p}-lbl`, { type: 'geojson', data: {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lng, lat + degsNorth] },
+        properties: { label: `r=${radiusMeters}m` } }],
+    }});
+    this.map.addLayer({ id: `${p}-sym`, type: 'symbol', source: `${p}-lbl`,
+      layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-anchor': 'bottom',
+                'text-offset': ['literal', [0, -0.3]],
+                'text-allow-overlap': true, 'text-ignore-placement': true },
+      paint: { 'text-color': '#f59e0b', 'text-halo-color': 'rgba(8,13,26,0.9)', 'text-halo-width': 1.5 } });
 
-    this._scanCircleIds.push({
-      layers:  [`${srcPfx}-fill`, `${srcPfx}-line`, `${srcPfx}-dot`, `${srcPfx}-sym`],
-      sources: [`${srcPfx}-circle`, `${srcPfx}-center`, `${srcPfx}-label`],
+    this._mapLayerRegistry.push({
+      layers:  [{ id: `${p}-fill`, type: 'fill' }, { id: `${p}-line`, type: 'line' },
+                { id: `${p}-dot`,  type: 'circle' }, { id: `${p}-sym`, type: 'symbol' }],
+      sources: [`${p}-poly`, `${p}-ctr`, `${p}-lbl`],
+      gen:     this._mapGen,
     });
   }
 
-  /** Remove all accumulated Tilequery scan circles. */
-  clearScanCircles() {
-    this._scanCircleIds.forEach(({ layers, sources }) => {
-      layers.forEach(id  => { try { this.map.removeLayer(id);  } catch (_) {} });
-      sources.forEach(id => { try { this.map.removeSource(id); } catch (_) {} });
+  /** Gray-out a single layer (called when it ages one generation). */
+  _grayOutLayer(id) {
+    const layer = this.map.getLayer(id);
+    if (!layer) return;
+    try {
+      switch (layer.type) {
+        case 'fill':
+          this.map.setPaintProperty(id, 'fill-color',   '#6b7280');
+          this.map.setPaintProperty(id, 'fill-opacity',  0.06);
+          break;
+        case 'line':
+          this.map.setPaintProperty(id, 'line-color',   '#6b7280');
+          this.map.setPaintProperty(id, 'line-opacity',  0.35);
+          break;
+        case 'circle':
+          this.map.setPaintProperty(id, 'circle-color',        '#6b7280');
+          this.map.setPaintProperty(id, 'circle-opacity',       0.4);
+          this.map.setPaintProperty(id, 'circle-stroke-color', '#4b5563');
+          break;
+        case 'symbol':
+          this.map.setPaintProperty(id, 'text-color',      '#6b7280');
+          this.map.setPaintProperty(id, 'text-halo-color', 'rgba(8,13,26,0.5)');
+          break;
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * Called when the user sends a new message.
+   * Gen-1 layers → gray out. Gen-2+ layers → remove.
+   */
+  _advanceMapGen() {
+    this._mapGen++;
+    const keep = [];
+    this._mapLayerRegistry.forEach(entry => {
+      const age = this._mapGen - entry.gen;
+      if (age === 1) {
+        // gray out
+        entry.layers.forEach(({ id }) => this._grayOutLayer(id));
+        keep.push(entry);
+      } else if (age >= 2) {
+        // remove
+        entry.layers.forEach(({ id }) => { try { this.map.removeLayer(id);  } catch (_) {} });
+        entry.sources.forEach(id       => { try { this.map.removeSource(id); } catch (_) {} });
+      } else {
+        keep.push(entry);
+      }
     });
-    this._scanCircleIds = [];
+    this._mapLayerRegistry = keep;
+  }
+
+  /** Remove all tracked map layers (used by clearMapElements / resetChat). */
+  _clearMapLayers() {
+    this._mapLayerRegistry.forEach(({ layers, sources }) => {
+      layers.forEach(({ id }) => { try { this.map.removeLayer(id);  } catch (_) {} });
+      sources.forEach(id     => { try { this.map.removeSource(id); } catch (_) {} });
+    });
+    this._mapLayerRegistry = [];
+    this._mapGen = 0;
   }
 
   // ═══════════════════════════════════════════════════════════════
