@@ -1641,10 +1641,13 @@ class LocationFinderApp {
       switch (toolName) {
         case 'search_nearby_poi': {
           const isPrimary = toolInput.purpose === 'primary_search';
+          // primary_search は上位3件のみ渡す（Step1以降への汚染防止）
+          const rawItems = d.items || [];
+          const items = isPrimary ? rawItems.slice(0, 3) : rawItems;
           return JSON.stringify({
             source: d.source,
-            count:  d.count,
-            items: (d.items || []).map(i => ({
+            count:  items.length,
+            items: items.map(i => ({
               id:   i._rid,
               name: i.name,
               ...(isPrimary ? {} : { latitude: i.latitude, longitude: i.longitude }),
@@ -1800,11 +1803,7 @@ class LocationFinderApp {
 
     const VALID_SEQUENCE = ['input_eval', 'primary_search', 'step1_main', 'step1_type_check', 'step1_conditions', 'step2_eval', 'result_present'];
 
-    // ループ外での重複実行をブロック（ループ内はloopCompletedで管理）
-    const inLoop = this._flowState.loopStarted;
-    const dupInMain  = !inLoop && this._flowState.completed.includes(step);
-    const dupInLoop  = inLoop  && this._flowState.loopCompleted.includes(step);
-    if (step !== 'step1_prime' && (dupInMain || dupInLoop)) {
+    if (step !== 'step1_prime' && this._flowState.completed.includes(step)) {
       return JSON.stringify({
         ok: false,
         error: `ステップ "${step}" は既に実行済みです。重複実行は禁止されています。`,
