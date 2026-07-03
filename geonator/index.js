@@ -1569,20 +1569,22 @@ class LocationFinderApp {
       if (msg.role !== 'user' || !Array.isArray(msg.content)) continue;
       if (!msg.content.some(b => b.type === 'tool_result')) continue;
 
-      // Build tool_use_id → tool_name map from the preceding assistant message
+      // Build tool_use_id → { name, input } map from the preceding assistant message
       const toolNameMap = {};
       const prevAssist = i > 0 ? this.messages[i - 1] : null;
       if (prevAssist?.role === 'assistant' && Array.isArray(prevAssist.content)) {
         prevAssist.content
           .filter(b => b.type === 'tool_use')
-          .forEach(b => { toolNameMap[b.id] = b.name; });
+          .forEach(b => { toolNameMap[b.id] = { name: b.name, input: b.input }; });
       }
 
       // Compress each tool_result block
       msg.content = msg.content.map(b => {
         if (b.type !== 'tool_result') return b;
-        const toolName = toolNameMap[b.tool_use_id] || 'unknown';
-        const compressed = this._summarizeToolResult(toolName, b.content);
+        const toolMeta  = toolNameMap[b.tool_use_id] || {};
+        const toolName  = toolMeta.name || 'unknown';
+        const toolInput = toolMeta.input || {};
+        const compressed = this._summarizeToolResult(toolName, b.content, toolInput);
         if (this.config.DEBUG && compressed !== b.content) {
           const before = b.content?.length ?? 0;
           const after  = compressed?.length ?? 0;
@@ -1598,23 +1600,26 @@ class LocationFinderApp {
    * Return a compact JSON string retaining only the fields Claude
    * might need to reference in later turns.
    */
-  _summarizeToolResult(toolName, content) {
+  _summarizeToolResult(toolName, content, toolInput = {}) {
     try {
       const d = JSON.parse(content);
       if (d.error) return JSON.stringify({ error: d.error });
 
       switch (toolName) {
-        case 'search_nearby_poi':
+        case 'search_nearby_poi': {
+          const isPrimary = toolInput.purpose === 'primary_search';
           return JSON.stringify({
             source: d.source,
             count:  d.count,
             items: (d.items || []).map(i => ({
               id:   i._rid,
               name: i.name,
+              ...(isPrimary ? {} : { latitude: i.latitude, longitude: i.longitude }),
               ...(i.feature_type ? { feature_type: i.feature_type } : {}),
               ...(i.bbox         ? { bbox:         i.bbox }         : {}),
             })),
           });
+        }
 
         case 'scan_street_features':
           return JSON.stringify({

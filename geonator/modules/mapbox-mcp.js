@@ -87,6 +87,11 @@ class MapboxMCPClient {
               enum: ['specific', 'category_building', 'category_busstop', 'category_busstop_location', 'intersection', 'signal'],
               description: 'クエリの種別。specific=固有名・通常POI、category_building=マンション/アパート/ビル、category_busstop=バス停名あり（バス停タイルセット・代表点）、category_busstop_location=バス停カテゴリ・位置関係のみ（transit_stop_label mode=bus・個別ポイント）、intersection=交差点、signal=信号機',
             },
+            purpose: {
+              type: 'string',
+              enum: ['primary_search', 'step1'],
+              description: 'primary_search=一次検索（proximity確定用）→結果にlat/lngなし。step1=二次検索以降→結果にlat/lngあり。デフォルト: step1',
+            },
           },
           required: ['queries'],
         },

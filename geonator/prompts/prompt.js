@@ -105,14 +105,17 @@ search_nearby_poi の結果は名前とidのみ返ってくる（緯度経度は
 緯度経度が必要な場合は resolve_result(ids=[id]) で取得すること。
 
 一次検索では：
-1. 結果からクエリに最も一致する1件のidを選ぶ
-2. resolve_result(ids=[選んだid]) → latitude, longitude を取得
-3. その座標をproximityとして使用
-全30件を分析する必要はない。複数候補が区別できない場合のみ ask_choice で確認。
+- search_nearby_poi に必ず purpose="primary_search" を指定すること
+- 結果は {id, name} のみ（lat/lngなし）
+- クエリに最も一致する1件のidを選ぶ
+- resolve_result(ids=[選んだid]) → latitude, longitude を取得
+- その座標をproximityとして使用
+- 複数候補が区別できない場合のみ ask_choice で確認
 
 Step1/Step2では：
-- search_nearby_poi 後に resolve_result(ids=[全件のid]) で全座標を一括取得
-- 取得した座標をfilter_by_isochroneのcandidatesやanchorとして使用
+- search_nearby_poi に purpose="step1" を指定すること（または省略）
+- 結果は {id, name, latitude, longitude} が含まれる
+- lat/lngをそのままfilter_by_isochroneのcandidatesやanchorとして使用可能
 
 ■ 二次検索（proximity周辺の探索）
 確定したproximityを起点に探索。query_intentに応じてルーティングが変わる。
