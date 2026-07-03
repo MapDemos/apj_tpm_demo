@@ -48,6 +48,9 @@ class LocationFinderApp {
     // Probable area
     this._probableAreaActive = false;
 
+    // Current agent loop turn (for layer metadata)
+    this._currentTurn = 0;
+
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -249,6 +252,13 @@ class LocationFinderApp {
     const idx = this._mapLayerRegistry.length;
     const p   = `bbox-${idx}`;
 
+    const midLat = (minY + maxY) / 2;
+    const wm = Math.round(Math.abs(maxX - minX) * 111320 * Math.cos(midLat * Math.PI / 180));
+    const hm = Math.round(Math.abs(maxY - minY) * 110540);
+    const sbLabel = wm === hm ? `${wm}m` : `${wm}×${hm}m`;
+
+    const meta = { tool: 'draw_search_boundary', turn: this._currentTurn, params: sbLabel };
+
     const geojson = {
       type: 'FeatureCollection',
       features: [{
@@ -257,6 +267,7 @@ class LocationFinderApp {
           type: 'Polygon',
           coordinates: [[ [minX,minY],[maxX,minY],[maxX,maxY],[minX,maxY],[minX,minY] ]],
         },
+        properties: meta,
       }],
     };
 
@@ -266,11 +277,10 @@ class LocationFinderApp {
     this.map.addLayer({ id: `${p}-line`, type: 'line', source: `${p}-poly`,
       paint: { 'line-color': '#60a5fa', 'line-width': 2, 'line-dasharray': [4, 2] } });
 
-    // Size label at top-center
-    const midLat = (minY + maxY) / 2;
-    const wm = Math.round(Math.abs(maxX - minX) * 111320 * Math.cos(midLat * Math.PI / 180));
-    const hm = Math.round(Math.abs(maxY - minY) * 110540);
-    const sbLabel = wm === hm ? `${wm}m` : `${wm}×${hm}m`;
+    this.map.on('click', `${p}-fill`, (e) => this._showLayerPopup(e.lngLat, e.features[0].properties));
+    this.map.on('mouseenter', `${p}-fill`, () => { this.map.getCanvas().style.cursor = 'pointer'; });
+    this.map.on('mouseleave', `${p}-fill`, () => { this.map.getCanvas().style.cursor = ''; });
+
     this.map.addSource(`${p}-lbl`, { type: 'geojson', data: {
       type: 'FeatureCollection',
       features: [{ type: 'Feature',
@@ -836,17 +846,20 @@ class LocationFinderApp {
 
     // Draw Tilequery radius circles on the map
     if (toolName === 'scan_street_features' && args.lat && args.lng) {
-      this._drawScanCircle(args.lat, args.lng, args.radius);
+      const meta = { tool: toolName, turn: this._currentTurn, params: `r=${args.radius}m | target=${args.target || 'both'}` };
+      this._drawScanCircle(args.lat, args.lng, args.radius, 'amber', meta);
       this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 14), duration: 800 });
     }
 
     if (toolName === 'scan_natural_features' && args.lat && args.lng) {
-      this._drawScanCircle(args.lat, args.lng, args.radius);
+      const meta = { tool: toolName, turn: this._currentTurn, params: `r=${args.radius}m` };
+      this._drawScanCircle(args.lat, args.lng, args.radius, 'amber', meta);
       this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
     }
 
     if (toolName === 'get_facing_road' && args.lat && args.lng) {
-      this._drawScanCircle(args.lat, args.lng, 50);
+      const meta = { tool: toolName, turn: this._currentTurn, params: 'r=50m (自動拡張)' };
+      this._drawScanCircle(args.lat, args.lng, 50, 'amber', meta);
       this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 16), duration: 600 });
     }
 
@@ -865,9 +878,11 @@ class LocationFinderApp {
         const radiusLat  = gridRadius * DEG_LAT;
         const gMinX = minX + radiusLng, gMaxX = maxX - radiusLng;
         const gMinY = minY + radiusLat, gMaxY = maxY - radiusLat;
+        const qs = Array.isArray(args.queries) ? args.queries.slice(0, 2).join(', ') + (args.queries.length > 2 ? '…' : '') : '';
+        const gridMeta = { tool: toolName, turn: this._currentTurn, params: `r=200m${qs ? ` | ${qs}` : ''}` };
 
         if (gMinX >= gMaxX || gMinY >= gMaxY) {
-          this._drawScanCircle((minY + maxY) / 2, (minX + maxX) / 2, gridRadius, 'cyan');
+          this._drawScanCircle((minY + maxY) / 2, (minX + maxX) / 2, gridRadius, 'cyan', gridMeta);
         } else {
           const widthM  = (gMaxX - gMinX) / DEG_LNG;
           const heightM = (gMaxY - gMinY) / DEG_LAT;
@@ -877,7 +892,7 @@ class LocationFinderApp {
             for (let ix = 0; ix < nx; ix++) {
               const gLng = nx === 1 ? (gMinX + gMaxX) / 2 : gMinX + ix * (gMaxX - gMinX) / (nx - 1);
               const gLat = ny === 1 ? (gMinY + gMaxY) / 2 : gMinY + iy * (gMaxY - gMinY) / (ny - 1);
-              this._drawScanCircle(gLat, gLng, gridRadius, 'cyan');
+              this._drawScanCircle(gLat, gLng, gridRadius, 'cyan', gridMeta);
             }
           }
         }
@@ -891,15 +906,33 @@ class LocationFinderApp {
     if (overlay) overlay.style.display = 'none';
   }
 
+  /** Show a popup with layer metadata (tool, turn, params). */
+  _showLayerPopup(lngLat, meta) {
+    const toolLabel = LANG[this._lang]?.tools?.[meta.tool] || meta.tool;
+    new mapboxgl.Popup({ closeButton: true, className: 'layer-info-popup', maxWidth: '240px' })
+      .setLngLat(lngLat)
+      .setHTML(
+        `<div class="layer-popup-tool">${_esc(toolLabel)}</div>` +
+        `<div class="layer-popup-turn">ターン ${meta.turn ?? '-'}</div>` +
+        (meta.params ? `<div class="layer-popup-params">${_esc(meta.params)}</div>` : '')
+      )
+      .addTo(this.map);
+  }
+
   /**
    * Draw a filled circle showing the Tilequery scan radius. Accumulates with generation tracking.
    * @param {string} color - 'amber' (single-point Tilequery) or 'cyan' (grid circles)
+   * @param {object|null} meta - { tool, turn, params } for click popup
    */
-  _drawScanCircle(lat, lng, radiusMeters, color = 'amber') {
+  _drawScanCircle(lat, lng, radiusMeters, color = 'amber', meta = null) {
     const idx    = this._mapLayerRegistry.length;
     const p      = `scan-${idx}`;
     const center = turf.point([lng, lat]);
-    const circle = turf.circle(center, radiusMeters / 1000, { units: 'kilometers', steps: 64 });
+    const circleGeom = turf.circle(center, radiusMeters / 1000, { units: 'kilometers', steps: 64 });
+    const circle = {
+      ...circleGeom,
+      properties: meta || {},
+    };
 
     const fillColor = color === 'cyan' ? '#06b6d4' : '#f59e0b';
     const lineColor = color === 'cyan' ? '#22d3ee' : '#f59e0b';
@@ -910,6 +943,12 @@ class LocationFinderApp {
       paint: { 'fill-color': fillColor, 'fill-opacity': 0.08 } });
     this.map.addLayer({ id: `${p}-line`, type: 'line', source: `${p}-poly`,
       paint: { 'line-color': lineColor, 'line-width': 1.5, 'line-dasharray': [3, 2] } });
+
+    if (meta) {
+      this.map.on('click', `${p}-fill`, (e) => this._showLayerPopup(e.lngLat, meta));
+      this.map.on('mouseenter', `${p}-fill`, () => { this.map.getCanvas().style.cursor = 'pointer'; });
+      this.map.on('mouseleave', `${p}-fill`, () => { this.map.getCanvas().style.cursor = ''; });
+    }
 
     this.map.addSource(`${p}-ctr`, { type: 'geojson', data: {
       type: 'FeatureCollection',
@@ -1225,6 +1264,8 @@ class LocationFinderApp {
 
         const toolUseBlocks = (data.content || []).filter(b => b.type === 'tool_use');
         const toolResults   = [];
+
+        this._currentTurn = turn + 1;
 
         for (const tu of toolUseBlocks) {
           const label = getToolLabel(tu.name, this._lang);
