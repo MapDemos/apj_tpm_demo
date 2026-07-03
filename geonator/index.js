@@ -2086,7 +2086,7 @@ const LANG = {
       get_route_pois:                  '🗺  経路沿いのPOIを判定中',
       scan_natural_features:           '🌿 自然地物をスキャン中',
       show_probable_area:              '🔴 候補エリアを表示中',
-      check_travel_time:               '⏱  移動時間を確認中',
+
       filter_by_isochrone:             '🔵 到達圏フィルタ中',
       compute_area_from_landmark_bearing: '🧭 ランドマーク方位からエリアを計算中',
     },
@@ -2137,7 +2137,7 @@ const LANG = {
       get_route_pois:                  '🗺  Checking route POIs',
       scan_natural_features:           '🌿 Scanning natural features',
       show_probable_area:              '🔴 Showing probable area',
-      check_travel_time:               '⏱  Checking travel time',
+
       filter_by_isochrone:             '🔵 Filtering by isochrone',
       compute_area_from_landmark_bearing: '🧭 Computing bearing area',
     },

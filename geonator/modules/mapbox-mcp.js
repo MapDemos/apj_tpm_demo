@@ -179,28 +179,6 @@ class MapboxMCPClient {
         },
       },
 
-      // ── Tool: check_travel_time ──────────────────────────────
-      {
-        name: 'check_travel_time',
-        description:
-          '【使用API】Mapbox Directions API（durationのみ取得・軽量版）\n' +
-          '2点間の移動時間（秒・分）を取得する。「〜から歩いてn分」「〜から車でn分くらいのところ」という時間ベースの位置条件を検証する際に使用。\n' +
-          '候補が複数ある場合は全候補に対して実行し、ユーザーのn分と一致（n×0.5〜n×1.5の範囲）するものを優先。duration_textを根拠としてオペレーターに提示。\n' +
-          '返却: {duration_seconds, duration_minutes, duration_text("約X分"), distance_meters, distance_text, profile}\n' +
-          'get_route_poisとの違い: こちらは候補が正しい時間圏内にあるかの検証専用（POI絞り込みはしない）\n' +
-          '2点間の距離計算にも使用可（distance_metersを参照）',
-        input_schema: {
-          type: 'object',
-          properties: {
-            from_lat: { type: 'number', description: '出発地の緯度' },
-            from_lng: { type: 'number', description: '出発地の経度' },
-            to_lat:   { type: 'number', description: '目的地（候補）の緯度' },
-            to_lng:   { type: 'number', description: '目的地（候補）の経度' },
-            profile:  { type: 'string', enum: ['driving', 'walking'], description: '徒歩→walking / 車→driving' },
-          },
-          required: ['from_lat', 'from_lng', 'to_lat', 'to_lng', 'profile'],
-        },
-      },
 
       // ── Tool: get_facing_road ──────────────────────────────
       {
@@ -316,8 +294,6 @@ class MapboxMCPClient {
           );
         case 'scan_natural_features':
           return await this._scanNaturalFeatures(args.lat, args.lng, args.radius);
-        case 'check_travel_time':
-          return await this._checkTravelTime(args.from_lat, args.from_lng, args.to_lat, args.to_lng, args.profile);
         case 'get_facing_road':
           return await this._getFacingRoad(args.lat, args.lng);
         case 'filter_by_isochrone':
