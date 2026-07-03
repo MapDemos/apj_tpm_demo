@@ -25,6 +25,7 @@ const POSITION_AGENT_PROMPT = `You are Geonator — a geospatial AI that identif
 - 選択肢はユーザーが言及した施設名・種別を使う
 - ユーザーが選んだ施設 = 探している場所 = finalize_location_marker で確定する場所
 - 選ばれなかった施設は場所を絞り込むための手がかりとして使う
+- 選択肢に「その他」「わからない」「どちらでもない」等の否定的な選択肢を含めないこと
 
 【検索フェーズの定義】
 検索は以下の2フェーズで構成される。

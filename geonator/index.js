@@ -1394,8 +1394,12 @@ class LocationFinderApp {
     }
 
     const totalSec = PerfLogger.endQuery(turnCount);
-    // Show timing summary as a subtle message in chat
     this.addMessage('tool-status', `⏱ 完了: ${totalSec}s / APIターン ${turnCount}回`);
+
+    // finalMarkerがあるのにパネルが出ていない場合は確実に表示
+    if (this.finalMarker && !document.getElementById('resolutionPanel')) {
+      this._showResolutionPanel();
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════
