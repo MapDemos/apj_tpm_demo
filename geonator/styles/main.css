@@ -749,3 +749,44 @@ html, body {
   color: #cbd5e1;
   word-break: break-all;
 }
+
+/* Choice panel (ask_choice tool) */
+.message.choice-request .msg-label { color: #a78bfa; }
+.choice-bubble {
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.choice-question {
+  font-size: 13px;
+  color: #e2e8f0;
+  margin-bottom: 10px;
+}
+.choice-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.choice-btn {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  border-radius: 6px;
+  color: #c4b5fd;
+  font-size: 13px;
+  padding: 6px 16px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.choice-btn:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.3);
+  border-color: #818cf8;
+  color: #e0e7ff;
+}
+.choice-btn:disabled { opacity: 0.5; cursor: default; }
+.choice-btn-selected {
+  background: rgba(99, 102, 241, 0.4) !important;
+  border-color: #818cf8 !important;
+  color: #e0e7ff !important;
+  opacity: 1 !important;
+}

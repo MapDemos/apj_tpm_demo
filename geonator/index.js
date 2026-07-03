@@ -1137,6 +1137,22 @@ class LocationFinderApp {
           required: ['lat', 'lng', 'address'],
         },
       },
+      {
+        name: 'ask_choice',
+        description: '探索対象が複数ある場合にオペレーターへ選択肢をボタン形式で提示し、どれをメインに探すか確認する。ユーザーの回答を待ってから探索を開始すること。',
+        input_schema: {
+          type: 'object',
+          properties: {
+            question: { type: 'string', description: '確認の質問文（例：「どちらを先に探しますか？」）' },
+            choices:  {
+              type: 'array',
+              items: { type: 'string' },
+              description: '選択肢ラベルの配列（例：["ホテル", "レンタカー屋"]）',
+            },
+          },
+          required: ['question', 'choices'],
+        },
+      },
     ];
   }
 
@@ -1159,6 +1175,8 @@ class LocationFinderApp {
         return this.showProbableArea(args.candidates || [], args.message);
       case 'finalize_location_marker':
         return this.finalizeLocationMarker(args.lat, args.lng, args.address);
+      case 'ask_choice':
+        return await this._showChoicePanel(args.question, args.choices || []);
       default:
         return await this.mapboxMCP.executeTool(name, args);
     }
@@ -1567,6 +1585,52 @@ class LocationFinderApp {
       wrapper.querySelector('.hint-bubble').style.opacity = '0.5';
       this._hintResolve = null;
       onResponse(null);
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Choice panel
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * Show choice buttons in chat and wait for operator selection.
+   * Returns the selected choice string as the tool result.
+   */
+  _showChoicePanel(question, choices) {
+    return new Promise(resolve => {
+      const container = document.getElementById('chatMessages');
+      const uid = `choice-${Date.now()}`;
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'message choice-request';
+      wrapper.innerHTML = `
+        <div class="msg-label">🔀 選択</div>
+        <div class="choice-bubble">
+          <div class="choice-question">${_formatMsg(question)}</div>
+          <div class="choice-buttons" id="${uid}-btns">
+            ${choices.map((c, i) =>
+              `<button class="choice-btn" id="${uid}-btn-${i}">${_esc(c)}</button>`
+            ).join('')}
+          </div>
+        </div>
+      `;
+      container.appendChild(wrapper);
+      container.scrollTop = container.scrollHeight;
+
+      choices.forEach((choice, i) => {
+        document.getElementById(`${uid}-btn-${i}`).addEventListener('click', () => {
+          // Disable all buttons after selection
+          choices.forEach((_, j) => {
+            const btn = document.getElementById(`${uid}-btn-${j}`);
+            if (btn) {
+              btn.disabled = true;
+              btn.classList.toggle('choice-btn-selected', j === i);
+            }
+          });
+          this.addMessage('user', choice);
+          resolve(`選択: ${choice}`);
+        });
+      });
     });
   }
 
