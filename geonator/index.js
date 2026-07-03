@@ -1522,8 +1522,8 @@ class LocationFinderApp {
         // Warn Claude when the next turn is the last so it finalizes
         if (turn === maxTurns - 2) {
           const lastTurnWarning = this._lang === 'ja'
-            ? '【システム】これが最後の探索ターンです。これ以上ツールは使えません。現時点で最も可能性の高い地点を特定し、必ずfinalize_location_markerを呼び出して回答を確定してください。情報が不十分でも、最善の推測で回答してください。'
-            : '[SYSTEM] This is the final turn. No more tool calls will be available. Identify the most likely location based on what you have found and call finalize_location_marker to confirm your answer. Make your best guess even if information is incomplete.';
+            ? 'これ以上ツールを呼ぶことができません。現在の情報で最も可能性の高い候補をadd_candidate_markersかfinalize_location_markerで表示してください。'
+            : 'No more tool calls available. Please show the most likely candidates using add_candidate_markers or finalize_location_marker based on current findings.';
           this.messages.push({ role: 'user', content: lastTurnWarning });
         }
 
