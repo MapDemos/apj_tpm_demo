@@ -31,8 +31,9 @@ class MapboxMCPClient {
     this._tqCache        = new Map(); // url → parsed JSON (cleared on chat reset)
     this._poiGridCache      = new Map();
     this._searchResultCache = new Map();
-    this._resultBuffer      = new Map(); // id → full item (lat/lng lookup)
-    this._resultIdCounter   = 0;        // auto-increment across all searches
+    this._resultBuffer         = new Map(); // id → full item (lat/lng lookup)
+    this._resultIdCounter      = 0;        // auto-increment across all searches
+    this._primarySearchIds     = new Set(); // IDs from primary_search (cleared at step1_main)
     this._lastIsochroneData = null; // visualization用
   }
 
@@ -316,7 +317,7 @@ class MapboxMCPClient {
           const queries = Array.isArray(args.queries)
             ? args.queries
             : (args.queries ? [args.queries] : []);
-          return await this._searchNearbyPOI(queries, args.proximity || null, args.bbox || null, args.query_intent || null, args.radius_meters || null);
+          return await this._searchNearbyPOI(queries, args.proximity || null, args.bbox || null, args.query_intent || null, args.radius_meters || null, args.purpose === 'primary_search');
         }
         case 'scan_street_features':
           return await this._scanStreetFeatures(args.lat, args.lng, args.radius, args.target || 'both');
@@ -711,15 +712,16 @@ class MapboxMCPClient {
     return this._minify({ count: items.length, items });
   }
 
-  _assignIds(items) {
+  _assignIds(items, isPrimary = false) {
     return items.map(item => {
       const id = this._resultIdCounter++;
       this._resultBuffer.set(id, item);
+      if (isPrimary) this._primarySearchIds.add(id);
       return { ...item, _rid: id };
     });
   }
 
-  async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null) {
+  async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null, isPrimary = false) {
     // ── 信号・交差点クエリ: Tilequeryのみ（Search Box不可） ──
     // bboxが渡されている場合（localityのbbox等）はそのbboxの外接円半径を使い全域をカバーする
     if (queryIntent === 'intersection' && proximity?.length >= 2) {
@@ -796,7 +798,7 @@ class MapboxMCPClient {
       if (this.config.DEBUG) console.log(`[MapboxMCP] バス停クエリ → バス停タイルセットのみ (r=${radius}m)`);
       const busStops = await this._busStopFallback(lat, lng, radius);
       busStops.forEach(item => { if (!seen.has(item.name)) seen.set(item.name, item); });
-      const items = this._assignIds([...seen.values()].slice(0, 150));
+      const items = this._assignIds([...seen.values()].slice(0, 150), isPrimary);
       const result = this._minify({ source: 'バス停タイルセット (10da032y.busstop_gov_0608)', count: items.length, items, _debug: { sb_count: 0, tq_count: items.length, sb_items: [], tq_items: items.slice(0,30).map(i=>({name:i.name,distance:i.distance})) } });
       this._searchResultCache.set(searchCacheKey, result);
       return result;
@@ -844,7 +846,7 @@ class MapboxMCPClient {
 
       const items = this._assignIds([...seen.values()]
         .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
-        .slice(0, 150));
+        .slice(0, 150), isPrimary);
       const src = items.length
         ? (seen.size > 0 && items[0].full_address !== undefined
             ? 'Search Box (building fallback)' : 'Tilequery poi_label grid (buildings)')
@@ -909,7 +911,7 @@ class MapboxMCPClient {
 
     const items = this._assignIds([...seen.values()]
       .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
-      .slice(0, 150));
+      .slice(0, 150), isPrimary);
     const tqActuallyRan = hasPOIQuery && proximity?.length >= 2;
     const source = items.length
       ? (tqActuallyRan ? 'Search Box + Tilequery poi_label (parallel)' : 'Search Box API')

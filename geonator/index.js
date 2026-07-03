@@ -227,6 +227,7 @@ class LocationFinderApp {
       this.mapboxMCP._searchResultCache?.clear();
       this.mapboxMCP._resultBuffer?.clear();
       this.mapboxMCP._resultIdCounter = 0;
+      this.mapboxMCP._primarySearchIds?.clear();
     }
     this._resetFlowState();
     this._conditionTracker = [];
@@ -1818,6 +1819,14 @@ class LocationFinderApp {
           error: `地理的範囲が広すぎます（feature_type: ${data.feature_type}）。`,
           action: 'オペレーターに「もう少し具体的な地名・駅名・施設名を教えてください」と質問すること。',
         });
+      }
+    }
+
+    // step1_main開始時にプライマリ検索IDをバッファから削除（Step1への汚染防止）
+    if (step === 'step1_main') {
+      if (this.mapboxMCP?._primarySearchIds?.size > 0) {
+        this.mapboxMCP._primarySearchIds.forEach(id => this.mapboxMCP._resultBuffer.delete(id));
+        this.mapboxMCP._primarySearchIds.clear();
       }
     }
 
