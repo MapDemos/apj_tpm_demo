@@ -1865,8 +1865,8 @@ const LANG = {
   },
 };
 
-/** Mirror of MapboxMCPClient._capBBox — cap bbox to ±500m each side. */
-function _capBBoxFE(bbox, maxHalfM = 500) {
+/** Mirror of MapboxMCPClient._capBBox — cap bbox to ±750m each side. */
+function _capBBoxFE(bbox, maxHalfM = 750) {
   const [minX, minY, maxX, maxY] = bbox;
   const cx   = (minX + maxX) / 2;
   const cy   = (minY + maxY) / 2;

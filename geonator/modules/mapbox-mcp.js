@@ -348,7 +348,7 @@ class MapboxMCPClient {
    * Cap a bbox so neither half-width nor half-height exceeds maxHalfM meters.
    * Applied to all Search Box and Tilequery grid calls to prevent oversized searches.
    */
-  _capBBox(bbox, maxHalfM = 500) {
+  _capBBox(bbox, maxHalfM = 750) {
     const [minX, minY, maxX, maxY] = bbox;
     const cx   = (minX + maxX) / 2;
     const cy   = (minY + maxY) / 2;
@@ -647,7 +647,7 @@ class MapboxMCPClient {
         console.log(`[MapboxMCP] 建物系 → グリッドTilequery のみ (初期bbox幅=${Math.round((currentBbox[2]-currentBbox[0])*111320)}m)`);
 
       for (let exp = 0; exp <= MAX_EXPANSIONS; exp++) {
-        const tqItems = await this._gridTilequeryPOI(lat, lng, currentBbox, 100);
+        const tqItems = await this._gridTilequeryPOI(lat, lng, currentBbox, 200);
         tqItems.forEach(item => {
           if (!_notBlocked(item.name)) return;
           if (!seen.has(dedupKey(item))) seen.set(dedupKey(item), item);
@@ -710,7 +710,7 @@ class MapboxMCPClient {
       // ── Tilequery poi_label (streets-v8) — grid search for poi/both queries ──
       // Use grid (same as building path) so edge-of-bbox facilities are covered.
       const tqPromise = (hasPOIQuery && proximity?.length >= 2)
-        ? this._gridTilequeryPOI(proximity[1], proximity[0], currentBbox, 100)
+        ? this._gridTilequeryPOI(proximity[1], proximity[0], currentBbox, 200)
         : Promise.resolve([]);
 
       // ── Run both in parallel ──
