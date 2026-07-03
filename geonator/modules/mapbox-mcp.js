@@ -81,8 +81,8 @@ class MapboxMCPClient {
             bbox:          { type: 'array', items: { type: 'number' }, description: '[minX,minY,maxX,maxY]。get_midpoint_area結果等を直接渡す場合のみ使用。通常はradius_metersを使うこと。' },
             query_intent:  {
               type: 'string',
-              enum: ['specific', 'category_building', 'category_busstop', 'intersection', 'signal'],
-              description: 'クエリの種別。specific=固有名・通常POI、category_building=マンション/アパート/ビルのカテゴリ検索、category_busstop=バス停、intersection=交差点（Tilequeryのみ）、signal=信号機（Tilequeryのみ）',
+              enum: ['specific', 'category_building', 'category_busstop', 'category_busstop_location', 'intersection', 'signal'],
+              description: 'クエリの種別。specific=固有名・通常POI、category_building=マンション/アパート/ビル、category_busstop=バス停名あり（バス停タイルセット・代表点）、category_busstop_location=バス停カテゴリ・位置関係のみ（transit_stop_label mode=bus・個別ポイント）、intersection=交差点、signal=信号機',
             },
           },
           required: ['queries'],
@@ -743,6 +743,15 @@ class MapboxMCPClient {
       return !POI_BLOCKLIST_FLAT.some(b => n.startsWith(b.toLowerCase()));
     };
 
+    // ── バス停ロケーション（名前なし・位置関係）: transit_stop_label mode=bus ──
+    if (queryIntent === 'category_busstop_location' && effectiveProximity) {
+      const [lng, lat] = effectiveProximity;
+      const r = bbox?.length >= 4
+        ? Math.min(Math.ceil(this._bboxToRadius(bbox)), 400)
+        : Math.min(radiusMeters ?? 200, 400);
+      return await this._busStopLocationSearch(lat, lng, r);
+    }
+
     const isBusStop = queryIntent === 'category_busstop' || (!queryIntent && this._isBusStopQuery(queries));
     const isBuilding = queryIntent === 'category_building' || (!queryIntent && !isBusStop && this._isBuildingQuery(queries));
 
@@ -1085,6 +1094,68 @@ class MapboxMCPClient {
         }))
         .filter(f => f.longitude != null && f.latitude != null);
     } catch (_) { return []; }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Tool impl: category_busstop_location
+  // streets-v8 transit_stop_label (mode=bus) で個別バス停ポイントを取得
+  // ─────────────────────────────────────────────────────────────
+
+  async _busStopLocationSearch(lat, lng, radius) {
+    // グリッド方式: 1クエリ50件枠を節約
+    const GRID_RADIUS = 100;
+    const DEG_LNG = 1 / (111320 * Math.cos(lat * Math.PI / 180));
+    const DEG_LAT = 1 / 110540;
+    const spacingM = GRID_RADIUS * 1.5;
+
+    const gridPoints = [];
+    const steps = Math.max(1, Math.ceil(radius / spacingM));
+    for (let iy = -steps; iy <= steps; iy++) {
+      for (let ix = -steps; ix <= steps; ix++) {
+        const d = Math.sqrt((ix * spacingM) ** 2 + (iy * spacingM) ** 2);
+        if (d <= radius) gridPoints.push([lng + ix * spacingM * DEG_LNG, lat + iy * spacingM * DEG_LAT]);
+      }
+    }
+
+    try {
+      const results = await Promise.all(gridPoints.map(async ([gLng, gLat]) => {
+        const url =
+          `${this.config.TILEQUERY_API}/${gLng},${gLat}.json` +
+          `?access_token=${this.token}&radius=${GRID_RADIUS}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=transit_stop_label`;
+        const res = await this._fetchTilequeryWithCache(url);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data.features || [])
+          .filter(f => f.properties?.mode === 'bus' && f.properties?.stop_type === 'stop')
+          .map(f => ({
+            name:      MapboxMCPClient._cleanName(f.properties.name) || null,
+            latitude:  f.geometry?.coordinates?.[1],
+            longitude: f.geometry?.coordinates?.[0],
+          }))
+          .filter(f => f.latitude != null && f.longitude != null);
+      }));
+
+      const center = turf.point([lng, lat]);
+      const seen = new Map();
+      results.flat().forEach(item => {
+        const key = `${Math.round((item.longitude ?? 0) * 1000)}|${Math.round((item.latitude ?? 0) * 1000)}`;
+        if (!seen.has(key)) seen.set(key, item);
+      });
+
+      const items = [...seen.values()].map(item => ({
+        ...item,
+        distance: Math.round(turf.distance(center, turf.point([item.longitude, item.latitude]), { units: 'meters' })),
+      })).sort((a, b) => a.distance - b.distance);
+
+      return this._minify({
+        source: 'Tilequery API (transit_stop_label, mode=bus)',
+        count:  items.length,
+        items,
+      });
+    } catch (err) {
+      if (this.config.DEBUG) console.error('[MapboxMCP] _busStopLocationSearch error:', err);
+      return JSON.stringify({ error: err.message });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
