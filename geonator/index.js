@@ -876,7 +876,7 @@ class LocationFinderApp {
       type: 'FeatureCollection',
       features: [{ type: 'Feature',
         geometry: { type: 'Point', coordinates: [cLng, cLat] },
-        properties: { label: `${minutes}分 (${profile === 'driving' ? '車' : '徒歩'})` } }],
+        properties: { label: radiusMeters != null ? `${radiusMeters}m圏内` : `${minutes}分 (${profile === 'driving' ? '車' : '徒歩'})` } }],
     }});
     this.map.addLayer({ id: `${p}-sym`, type: 'symbol', source: `${p}-lbl`,
       layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-anchor': 'center',

@@ -198,17 +198,18 @@ class MapboxMCPClient {
       {
         name: 'filter_by_isochrone',
         description:
-          '距離・近接条件の検証。Isochrone APIでアンカー地点からの到達可能ポリゴンを生成し、' +
-          '候補POIがポリゴン内にあるかを turf.booleanPointInPolygon で判定する。\n' +
-          '用途：「○○から歩いてN分」「川のそば」「道路の前」など近接条件の検証。\n' +
-          'minutes: 「前/隣/すぐ」→3、「近く/付近」→10、「やや遠い/少し先」→20\n' +
-          'profile: デフォルト walking。ユーザーが車と明示した場合のみ driving。',
+          '距離・近接条件の検証。候補POIがアンカー地点からのポリゴン内にあるかを turf.booleanPointInPolygon で判定する。\n' +
+          'radius_metersとminutesの使い分け：\n' +
+          '- radius_meters（直線距離・turf.circle）: 「すぐ隣」「隣接」「目の前」など150m以下の近接条件。APIコールなし。\n' +
+          '- minutes（isochrone API）: 「歩いてN分」「近く」など150m超の条件。3/10/20分から選択。\n' +
+          'どちらか一方のみ指定すること。direction（北/東等）はどちらでも使用可。',
         input_schema: {
           type: 'object',
           properties: {
-            anchor_lat: { type: 'number', description: 'アンカー地点の緯度' },
-            anchor_lng: { type: 'number', description: 'アンカー地点の経度' },
-            minutes:    { type: 'number', enum: [3, 10, 20], description: '到達時間(分): 3/10/20から選択' },
+            anchor_lat:    { type: 'number', description: 'アンカー地点の緯度' },
+            anchor_lng:    { type: 'number', description: 'アンカー地点の経度' },
+            radius_meters: { type: 'number', description: '直線距離の半径(m)。すぐ隣=60、目の前=120。150m以下向け。' },
+            minutes:       { type: 'number', enum: [3, 10, 20], description: 'isochrone到達時間(分)。150m超向け。' },
             profile:    { type: 'string', enum: ['walking', 'driving'], description: 'デフォルト: walking' },
             direction:  {
               type: 'string',
@@ -299,8 +300,9 @@ class MapboxMCPClient {
         case 'filter_by_isochrone':
           return await this._filterByIsochrone(
             args.anchor_lat, args.anchor_lng,
-            args.minutes, args.profile || 'walking',
-            args.candidates || [], args.direction || null
+            args.minutes || null, args.profile || 'walking',
+            args.candidates || [], args.direction || null,
+            args.radius_meters || null
           );
         case 'find_intersections':
           return await this._findIntersections(args.lat, args.lng, args.radius, args.name_filter || null);
@@ -1513,25 +1515,32 @@ class MapboxMCPClient {
     return clipped;
   }
 
-  async _filterByIsochrone(anchorLat, anchorLng, minutes, profile, candidates, direction = null) {
+  async _filterByIsochrone(anchorLat, anchorLng, minutes, profile, candidates, direction = null, radiusMeters = null) {
     const prof = profile === 'driving' ? 'driving' : 'walking';
-    const url =
-      `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${anchorLng},${anchorLat}` +
-      `?contours_minutes=${minutes}&polygons=true&access_token=${this.token}`;
 
     try {
-      const res = await this._fetchWithRetry(url);
-      if (!res.ok) return JSON.stringify({ error: `Isochrone API ${res.status}` });
-      const data = await res.json();
+      let polygon;
 
-      let polygon = data.features?.[0];
-      if (!polygon) return JSON.stringify({ error: 'isochrone polygon not returned' });
+      if (radiusMeters != null) {
+        // 直線距離モード: turf.circle（APIコールなし）
+        polygon = turf.circle(turf.point([anchorLng, anchorLat]), radiusMeters / 1000, { units: 'kilometers', steps: 64 });
+      } else {
+        // isochroneモード: Mapbox Isochrone API
+        const url =
+          `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${anchorLng},${anchorLat}` +
+          `?contours_minutes=${minutes}&polygons=true&access_token=${this.token}`;
+        const res = await this._fetchWithRetry(url);
+        if (!res.ok) return JSON.stringify({ error: `Isochrone API ${res.status}` });
+        const data = await res.json();
+        polygon = data.features?.[0];
+        if (!polygon) return JSON.stringify({ error: 'isochrone polygon not returned' });
+      }
 
       if (direction) {
         polygon = this._clipIsochroneToDirection(polygon, anchorLng, anchorLat, direction);
       }
 
-      this._lastIsochroneData = { polygon, anchorLat, anchorLng, minutes, profile: prof, direction };
+      this._lastIsochroneData = { polygon, anchorLat, anchorLng, minutes, radiusMeters, profile: prof, direction };
 
       const results = candidates.map(c => {
         const inside = c.longitude != null && c.latitude != null
