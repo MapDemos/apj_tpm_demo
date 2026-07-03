@@ -30,6 +30,7 @@ class MapboxMCPClient {
     this._tqCacheHits    = 0;   // Tilequery cache hits
     this._tqCache        = new Map(); // url → parsed JSON (cleared on chat reset)
     this._poiGridCache      = new Map();
+    this._searchResultCache = new Map();
     this._lastIsochroneData = null; // visualization用
   }
 
@@ -695,9 +696,6 @@ class MapboxMCPClient {
    *   → Search Box のみ（streets-v8 に place データなし）
    */
   async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null) {
-    const MAX_EXPANSIONS = 3;
-    const EXPAND_FACTOR  = 1.2;
-
     // ── 信号・交差点クエリ: Tilequeryのみ（Search Box不可） ──
     // bboxが渡されている場合（localityのbbox等）はそのbboxの外接円半径を使い全域をカバーする
     if (queryIntent === 'intersection' && proximity?.length >= 2) {
@@ -723,6 +721,16 @@ class MapboxMCPClient {
       const dLng   = r / (111320 * Math.cos(lat * Math.PI / 180));
       const dLat   = r / 110540;
       bbox = [lng - dLng, lat - dLat, lng + dLng, lat + dLat];
+    }
+
+    const bboxForCache = bbox || null;
+    const bboxSnapped = bboxForCache
+      ? bboxForCache.map(v => Math.round(v * 1000)).join(',')
+      : 'null';
+    const searchCacheKey = `${queryIntent ?? 'auto'}|${queries.slice(0,2).join(',')}|${bboxSnapped}`;
+    if (this._searchResultCache.has(searchCacheKey)) {
+      if (this.config.DEBUG) console.log(`[SearchCache HIT] ${searchCacheKey}`);
+      return this._searchResultCache.get(searchCacheKey);
     }
 
     // Coordinate-based dedup key: merges same-location results across both APIs
@@ -765,7 +773,9 @@ class MapboxMCPClient {
       const busStops = await this._busStopFallback(lat, lng, radius);
       busStops.forEach(item => { if (!seen.has(item.name)) seen.set(item.name, item); });
       const items = [...seen.values()].slice(0, 150);
-      return this._minify({ source: 'バス停タイルセット (10da032y.busstop_gov_0608)', count: items.length, items, _debug: { sb_count: 0, tq_count: items.length, sb_items: [], tq_items: items.slice(0,30).map(i=>({name:i.name,distance:i.distance})) } });
+      const result = this._minify({ source: 'バス停タイルセット (10da032y.busstop_gov_0608)', count: items.length, items, _debug: { sb_count: 0, tq_count: items.length, sb_items: [], tq_items: items.slice(0,30).map(i=>({name:i.name,distance:i.distance})) } });
+      this._searchResultCache.set(searchCacheKey, result);
+      return result;
     }
 
     // ── Building priority: Grid Tilequery ONLY (マンション/アパート/ビル/ホテル) ──
@@ -783,19 +793,11 @@ class MapboxMCPClient {
       if (this.config.DEBUG)
         console.log(`[MapboxMCP] 建物系 → グリッドTilequery のみ (初期bbox幅=${Math.round((currentBbox[2]-currentBbox[0])*111320)}m)`);
 
-      for (let exp = 0; exp <= MAX_EXPANSIONS; exp++) {
-        const tqItems = await this._gridTilequeryPOI(lat, lng, currentBbox, 200);
-        tqItems.forEach(item => {
-          if (!_notBlocked(item.name)) return;
-          if (!seen.has(dedupKey(item))) seen.set(dedupKey(item), item);
-        });
-        if (seen.size > 0 || exp === MAX_EXPANSIONS) break;
-        currentBbox = this._capBBox(this._expandBBox(currentBbox, EXPAND_FACTOR));
-        if (this.config.DEBUG) {
-          const w = Math.round((currentBbox[2] - currentBbox[0]) * 111320);
-          console.log(`[MapboxMCP] 建物0件 → bbox ${w}m幅に拡張`);
-        }
-      }
+      const tqItems = await this._gridTilequeryPOI(lat, lng, currentBbox, 200);
+      tqItems.forEach(item => {
+        if (!_notBlocked(item.name)) return;
+        if (!seen.has(dedupKey(item))) seen.set(dedupKey(item), item);
+      });
 
       // ── Building fallback: Search Box when Tilequery returns 0 ──
       if (seen.size === 0) {
@@ -823,7 +825,9 @@ class MapboxMCPClient {
         ? (seen.size > 0 && items[0].full_address !== undefined
             ? 'Search Box (building fallback)' : 'Tilequery poi_label grid (buildings)')
         : 'no results';
-      return this._minify({ source: src, count: items.length, items, _debug: { sb_count: 0, tq_count: items.length, sb_items: [], tq_items: items.slice(0,30).map(i=>({name:i.name,distance:i.distance})) } });
+      const result = this._minify({ source: src, count: items.length, items, _debug: { sb_count: 0, tq_count: items.length, sb_items: [], tq_items: items.slice(0,30).map(i=>({name:i.name,distance:i.distance})) } });
+      this._searchResultCache.set(searchCacheKey, result);
+      return result;
     }
 
     let currentBbox = bbox ? this._capBBox([...bbox]) : null;
@@ -834,53 +838,40 @@ class MapboxMCPClient {
     let sbCount = 0, tqCount = 0;
     const sbItems = [], tqItems = [];
 
-    for (let exp = 0; exp <= MAX_EXPANSIONS; exp++) {
+    // ── Search Box requests (type-classified per query) ──
+    const sbRequests = queries.flatMap(q => {
+      const qt = MapboxMCPClient.classifyQueryType(q);
+      if (qt === 'place') return [this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, currentBbox)];
+      if (qt === 'poi')   return [this._searchBoxRequest(q, 'poi',                     effectiveProximity, currentBbox)];
+      return [  // 'both'
+        this._searchBoxRequest(q, 'poi',                     effectiveProximity, currentBbox),
+        this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, currentBbox),
+      ];
+    });
 
-      // ── Search Box requests (type-classified per query) ──
-      const sbRequests = queries.flatMap(q => {
-        const qt = MapboxMCPClient.classifyQueryType(q);
-        if (qt === 'place') return [this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, currentBbox)];
-        if (qt === 'poi')   return [this._searchBoxRequest(q, 'poi',                     effectiveProximity, currentBbox)];
-        return [  // 'both'
-          this._searchBoxRequest(q, 'poi',                     effectiveProximity, currentBbox),
-          this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, currentBbox),
-        ];
-      });
+    // ── Tilequery poi_label (streets-v8) — grid search for poi/both queries ──
+    // Use grid (same as building path) so edge-of-bbox facilities are covered.
+    const tqPromise = (hasPOIQuery && effectiveProximity)
+      ? this._gridTilequeryPOI(effectiveProximity[1], effectiveProximity[0], currentBbox, 200)
+      : Promise.resolve([]);
 
-      // ── Tilequery poi_label (streets-v8) — grid search for poi/both queries ──
-      // Use grid (same as building path) so edge-of-bbox facilities are covered.
-      const tqPromise = (hasPOIQuery && effectiveProximity)
-        ? this._gridTilequeryPOI(effectiveProximity[1], effectiveProximity[0], currentBbox, 200)
-        : Promise.resolve([]);
+    // ── Run both in parallel ──
+    const [sbResultArrays, tqResults] = await Promise.all([
+      Promise.all(sbRequests),
+      tqPromise,
+    ]);
 
-      // ── Run both in parallel ──
-      const [sbResultArrays, tqResults] = await Promise.all([
-        Promise.all(sbRequests),
-        tqPromise,
-      ]);
+    // ── Merge with coordinate-based dedup ──
 
-      // ── Merge with coordinate-based dedup ──
-
-      sbResultArrays.flat().forEach(item => {
-        const key = dedupKey(item);
-        if (!seen.has(key)) { seen.set(key, item); sbItems.push(item); sbCount++; }
-      });
-      tqResults.forEach(item => {
-        if (!this._matchesAnyQuery(item.name, queries)) return;
-        const key = dedupKey(item);
-        if (!seen.has(key)) { seen.set(key, item); tqItems.push(item); tqCount++; }
-      });
-
-      if (seen.size > 0 || exp === MAX_EXPANSIONS) break;
-
-      if (currentBbox) {
-        currentBbox = this._capBBox(this._expandBBox(currentBbox, EXPAND_FACTOR));
-        if (this.config.DEBUG) {
-          const w = Math.round((currentBbox[2] - currentBbox[0]) * 111320);
-          console.log(`[MapboxMCP] 0件 → bbox ${w}m幅に拡張`);
-        }
-      }
-    }
+    sbResultArrays.flat().forEach(item => {
+      const key = dedupKey(item);
+      if (!seen.has(key)) { seen.set(key, item); sbItems.push(item); sbCount++; }
+    });
+    tqResults.forEach(item => {
+      if (!this._matchesAnyQuery(item.name, queries)) return;
+      const key = dedupKey(item);
+      if (!seen.has(key)) { seen.set(key, item); tqItems.push(item); tqCount++; }
+    });
 
     // ── Final fallback: bus stop tileset (non-bus-stop queries only) ──
     if (seen.size === 0 && effectiveProximity && !this._isBusStopQuery(queries)) {
@@ -900,7 +891,7 @@ class MapboxMCPClient {
       ? (tqActuallyRan ? 'Search Box + Tilequery poi_label (parallel)' : 'Search Box API')
       : 'no results';
 
-    return this._minify({
+    const result = this._minify({
       source,
       count: items.length,
       items,
@@ -911,6 +902,8 @@ class MapboxMCPClient {
         tq_items: tqItems.slice(0, 30).map(i => ({ name: i.name, distance: i.distance })),
       },
     });
+    this._searchResultCache.set(searchCacheKey, result);
+    return result;
   }
 
   /**
@@ -1383,74 +1376,58 @@ class MapboxMCPClient {
    * Returns minimal filtered fields per spec.
    */
   async _scanNaturalFeatures(lat, lng, radius) {
-    const MAX_EXPANSIONS = 3;
-    const EXPAND_FACTOR  = 1.2;
-    let currentRadius    = radius;
-    let items            = [];
-
     try {
-      for (let exp = 0; exp <= MAX_EXPANSIONS; exp++) {
-        const url =
-          `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
-          `?access_token=${this.token}&radius=${Math.round(currentRadius)}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true` +
-          `&layers=water,waterway,landuse,natural_label`;
+      const url =
+        `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
+        `?access_token=${this.token}&radius=${Math.round(radius)}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true` +
+        `&layers=water,waterway,landuse,natural_label`;
 
-        const res  = await this._fetchTilequeryWithCache(url);
-        if (!res.ok) return JSON.stringify({ error: `Tilequery HTTP ${res.status}` });
-        const data = await res.json();
+      const res  = await this._fetchTilequeryWithCache(url);
+      if (!res.ok) return JSON.stringify({ error: `Tilequery HTTP ${res.status}` });
+      const data = await res.json();
 
-        const raw = (data.features || []).map(f => {
-          const p     = f.properties || {};
-          const tq    = p.tilequery || {};
-          const layer = tq.layer;
-          const dist  = Math.round(tq.distance || 0);
+      const raw = (data.features || []).map(f => {
+        const p     = f.properties || {};
+        const tq    = p.tilequery || {};
+        const layer = tq.layer;
+        const dist  = Math.round(tq.distance || 0);
 
-          // Extract coordinates: Point→[lng,lat], Line/Polygon→first coord pair
-          const geom = f.geometry;
-          const coords = geom?.type === 'Point'
-            ? geom.coordinates
-            : geom?.coordinates?.[0] ?? null;
+        const geom = f.geometry;
+        const coords = geom?.type === 'Point'
+          ? geom.coordinates
+          : geom?.coordinates?.[0] ?? null;
 
-          switch (layer) {
-            case 'water':
-            case 'waterway':
-              // coords = nearest point on the water body (useful as proximity anchor)
-              return { layer, dist, coordinates: coords };
-            case 'natural_label':
-              // named features (隅田川, 相模湾 etc.) — coords is centroid
-              return { layer, name: p.name || null, class: p.class || null, dist, coordinates: coords };
-            case 'landuse':
-              return { layer, class: p.class || null, dist, coordinates: coords };
-            default:
-              return null;
-          }
-        }).filter(Boolean);
+        switch (layer) {
+          case 'water':
+          case 'waterway':
+            return { layer, dist, coordinates: coords };
+          case 'natural_label':
+            return { layer, name: p.name || null, class: p.class || null, dist, coordinates: coords };
+          case 'landuse':
+            return { layer, class: p.class || null, dist, coordinates: coords };
+          default:
+            return null;
+        }
+      }).filter(Boolean);
 
-        // Deduplicate natural_label by name
-        const nlSeen = new Map();
-        const deduped = [];
-        raw.forEach(f => {
-          if (f.layer === 'natural_label' && f.name) {
-            if (!nlSeen.has(f.name)) nlSeen.set(f.name, f);
-          } else {
-            deduped.push(f);
-          }
-        });
-        deduped.push(...nlSeen.values());
-        deduped.sort((a, b) => a.dist - b.dist);
-        items = deduped;
-
-        if (items.length > 0 || exp === MAX_EXPANSIONS) break;
-        currentRadius *= EXPAND_FACTOR;
-        if (this.config.DEBUG) console.log(`[MapboxMCP] natural 0件 → radius ${Math.round(currentRadius)}mに拡張`);
-      }
+      const nlSeen = new Map();
+      const deduped = [];
+      raw.forEach(f => {
+        if (f.layer === 'natural_label' && f.name) {
+          if (!nlSeen.has(f.name)) nlSeen.set(f.name, f);
+        } else {
+          deduped.push(f);
+        }
+      });
+      deduped.push(...nlSeen.values());
+      deduped.sort((a, b) => a.dist - b.dist);
 
       return this._minify({
         source:      'Tilequery API (natural features)',
         layers:      'water,waterway,landuse,natural_label',
-        radius_used: Math.round(currentRadius),
-        count:       items.length,
-        items,
+        radius_used: Math.round(radius),
+        count:       deduped.length,
+        items:       deduped,
       });
 
     } catch (err) {
@@ -1905,57 +1882,45 @@ class MapboxMCPClient {
     };
     const layers = layerMap[target] || 'road,transit_stop_label';
 
-    const MAX_EXPANSIONS = 3;
-    const EXPAND_FACTOR  = 1.2;
-    let   currentRadius  = radius;
-    let   capped         = [];
-
     try {
-      for (let exp = 0; exp <= MAX_EXPANSIONS; exp++) {
-        const url =
-          `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
-          `?access_token=${this.token}` +
-          `&radius=${Math.round(currentRadius)}` +
-          `&limit=${this.config.TILEQUERY_LIMIT}` +
-          `&dedupe=true` +
-          `&layers=${layers}`;
+      const url =
+        `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
+        `?access_token=${this.token}` +
+        `&radius=${Math.round(radius)}` +
+        `&limit=${this.config.TILEQUERY_LIMIT}` +
+        `&dedupe=true` +
+        `&layers=${layers}`;
 
-        const res  = await this._fetchTilequeryWithCache(url);
-        if (!res.ok) return JSON.stringify({ error: `Tilequery HTTP ${res.status}` });
-        const data = await res.json();
+      const res  = await this._fetchTilequeryWithCache(url);
+      if (!res.ok) return JSON.stringify({ error: `Tilequery HTTP ${res.status}` });
+      const data = await res.json();
 
-        const rawFeatures = (data.features || [])
-          .filter(f => {
-            const g = f.properties?.tilequery?.geometry;
-            return !g || g === 'point' || g === 'linestring';
-          })
-          .map(f => this._filterTilequeryFeature(f))
-          .filter(Boolean);
+      const rawFeatures = (data.features || [])
+        .filter(f => {
+          const g = f.properties?.tilequery?.geometry;
+          return !g || g === 'point' || g === 'linestring';
+        })
+        .map(f => this._filterTilequeryFeature(f))
+        .filter(Boolean);
 
-        // Deduplicate named road features
-        const roadSeen = new Map();
-        const items = [];
-        rawFeatures.forEach(f => {
-          if (f.layer === 'road' && f.name) {
-            const prev = roadSeen.get(f.name);
-            if (!prev || f.dist < prev.dist) roadSeen.set(f.name, f);
-          } else {
-            items.push(f);
-          }
-        });
-        items.push(...roadSeen.values());
-        items.sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
-        capped = items.slice(0, 25);
-
-        if (capped.length > 0 || exp === MAX_EXPANSIONS) break;
-        currentRadius *= EXPAND_FACTOR;
-        if (this.config.DEBUG) console.log(`[MapboxMCP] scan 0件 → radius ${Math.round(currentRadius)}mに拡張`);
-      }
+      const roadSeen = new Map();
+      const items = [];
+      rawFeatures.forEach(f => {
+        if (f.layer === 'road' && f.name) {
+          const prev = roadSeen.get(f.name);
+          if (!prev || f.dist < prev.dist) roadSeen.set(f.name, f);
+        } else {
+          items.push(f);
+        }
+      });
+      items.push(...roadSeen.values());
+      items.sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
+      const capped = items.slice(0, 25);
 
       return this._minify({
         source:      'Tilequery API (streets-v8)',
         layers,
-        radius_used: Math.round(currentRadius),
+        radius_used: Math.round(radius),
         count:       capped.length,
         items:       capped,
       });

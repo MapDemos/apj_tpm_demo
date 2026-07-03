@@ -220,7 +220,9 @@ class LocationFinderApp {
       this.mapboxMCP._tqCacheHits = 0;
       this.mapboxMCP._tqCache.clear();
       this.mapboxMCP._poiGridCache?.clear();
+      this.mapboxMCP._searchResultCache?.clear();
     }
+    this._resetFlowState();
     this._updateAPICountDisplay();
     // Resolve any pending debug pause
     if (this._debugStepResolve) { this._debugStepResolve(); this._debugStepResolve = null; }
@@ -1228,6 +1230,33 @@ class LocationFinderApp {
         },
       },
       {
+        name: 'log_flow_step',
+        description:
+          '各フローステップの完了を記録する。ステップの順序を監視し、スキップや余分な実行を検出する。' +
+          '必須ステップ: input_eval → primary_search → step1_main → step1_conditions → step2_eval → result_present。' +
+          'Step1以降を繰り返す場合: step1_prime → step2_eval → result_present。' +
+          '結果: {ok, error?, action?} — errorがあればその指示に従うこと。',
+        input_schema: {
+          type: 'object',
+          properties: {
+            step: {
+              type: 'string',
+              enum: ['input_eval', 'primary_search', 'step1_main', 'step1_conditions', 'step2_eval', 'result_present', 'step1_prime'],
+              description: '完了したステップ名',
+            },
+            data: {
+              type: 'object',
+              description: '検証用データ',
+              properties: {
+                feature_type: { type: 'string', description: 'primary_search時のSearch Box feature_type' },
+                candidate_count: { type: 'number', description: 'step1_main完了後の候補数' },
+              },
+            },
+          },
+          required: ['step'],
+        },
+      },
+      {
         name: 'ask_choice',
         description: '探索対象が複数ある場合にオペレーターへ選択肢をボタン形式で提示し、どれをメインに探すか確認する。ユーザーの回答を待ってから探索を開始すること。',
         input_schema: {
@@ -1265,6 +1294,8 @@ class LocationFinderApp {
         return this.showProbableArea(args.candidates || [], args.message);
       case 'finalize_location_marker':
         return this.finalizeLocationMarker(args.lat, args.lng, args.address);
+      case 'log_flow_step':
+        return this._logFlowStep(args.step, args.data || {});
       case 'ask_choice':
         return await this._showChoicePanel(args.question, args.choices || []);
       case 'filter_by_isochrone': {
@@ -1291,6 +1322,7 @@ class LocationFinderApp {
    * @param {string} userText - Raw user input
    */
   async processUserMessage(userText) {
+    this._resetFlowState();
     this.messages.push({ role: 'user', content: userText });
 
     const allTools = [
@@ -1721,6 +1753,70 @@ class LocationFinderApp {
     });
   }
 
+  _logFlowStep(step, data = {}) {
+    if (!this._flowState) this._resetFlowState();
+
+    const VALID_SEQUENCE = ['input_eval', 'primary_search', 'step1_main', 'step1_conditions', 'step2_eval', 'result_present'];
+
+    if (step !== 'step1_prime' && this._flowState.completed.includes(step)) {
+      return JSON.stringify({
+        ok: false,
+        error: `ステップ "${step}" は既に実行済みです。重複実行は禁止されています。`,
+      });
+    }
+
+    if (step === 'primary_search' && data.feature_type) {
+      const TOO_BROAD = ['place', 'region', 'country', 'district'];
+      if (TOO_BROAD.includes(data.feature_type)) {
+        return JSON.stringify({
+          ok: false,
+          error: `地理的範囲が広すぎます（feature_type: ${data.feature_type}）。`,
+          action: 'オペレーターに「もう少し具体的な地名・駅名・施設名を教えてください」と質問すること。',
+        });
+      }
+    }
+
+    if (step === 'step1_main' && data.candidate_count != null) {
+      if (data.candidate_count > 30) {
+        return JSON.stringify({
+          ok: false,
+          error: `候補が多すぎます（${data.candidate_count}件）。`,
+          action: 'Step2評価を開始する前に、オペレーターに絞り込み条件の追加を求めること。例：「候補が多すぎます。近くの目印（駅・交差点・コンビニ等）を追加で教えていただけますか？」',
+        });
+      }
+    }
+
+    if (!this._flowState.loopStarted) {
+      const expectedIdx = VALID_SEQUENCE.indexOf(step);
+      const lastIdx = this._flowState.completed.length > 0
+        ? VALID_SEQUENCE.indexOf(this._flowState.completed[this._flowState.completed.length - 1])
+        : -1;
+      if (expectedIdx !== -1 && expectedIdx !== lastIdx + 1) {
+        const expected = VALID_SEQUENCE[lastIdx + 1];
+        return JSON.stringify({
+          ok: false,
+          error: `ステップの順序が正しくありません。"${expected}" を先に実行してください。`,
+        });
+      }
+    }
+
+    if (step === 'step1_prime') {
+      this._flowState.loopStarted = true;
+      this._flowState.loopCompleted = [];
+    }
+
+    this._flowState.completed.push(step);
+    if (this._flowState.loopStarted) {
+      this._flowState.loopCompleted.push(step);
+    }
+
+    return JSON.stringify({ ok: true, completed: this._flowState.completed });
+  }
+
+  _resetFlowState() {
+    this._flowState = { completed: [], loopStarted: false, loopCompleted: [] };
+  }
+
   // ─────────────────────────────────────────────────────────────
   // Choice panel
   // ─────────────────────────────────────────────────────────────
@@ -2118,6 +2214,7 @@ const LANG = {
       check_same_building:             '🏢 同一建物チェック中',
       compute_bbox_from_points:        '📐 出口カバレッジを計算中',
       compute_area_from_landmark_bearing: '🧭 ランドマーク方位からエリアを計算中',
+      log_flow_step: '📋 フローステップを記録中',
     },
   },
   en: {
@@ -2171,6 +2268,7 @@ const LANG = {
       check_same_building:             '🏢 Checking same building',
       compute_bbox_from_points:        '📐 Computing exit coverage bbox',
       compute_area_from_landmark_bearing: '🧭 Computing bearing area',
+      log_flow_step: '📋 Logging flow step',
     },
   },
 };
