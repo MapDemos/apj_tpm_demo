@@ -948,7 +948,7 @@ class LocationFinderApp {
       this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 16), duration: 600 });
     }
 
-    if (toolName === 'filter_by_isochrone' && args.anchor_lat && args.anchor_lng) {
+    if (toolName === 'evaluate_distance' && args.anchor_lat && args.anchor_lng) {
       this.map.flyTo({ center: [args.anchor_lng, args.anchor_lat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
     }
 
@@ -1300,7 +1300,7 @@ class LocationFinderApp {
         return this._logFlowStep(args.step, args.data || {});
       case 'ask_choice':
         return await this._showChoicePanel(args.question, args.choices || []);
-      case 'filter_by_isochrone': {
+      case 'evaluate_distance': {
         const result = await this.mapboxMCP.executeTool(name, args);
         if (this.mapboxMCP._lastIsochroneData) {
           this._drawIsochroneLayer(this.mapboxMCP._lastIsochroneData);
@@ -1820,7 +1820,7 @@ class LocationFinderApp {
         });
       }
       if (conditions != null && conditions === 0) {
-        return JSON.stringify({ ok: false, error: '条件が1つも評価されていません。filter_by_isochroneを実行してください。' });
+        return JSON.stringify({ ok: false, error: '条件が1つも評価されていません。evaluate_distanceを実行してください。' });
       }
     }
 
@@ -2248,8 +2248,7 @@ const LANG = {
       scan_natural_features:           '🌿 自然地物をスキャン中',
       show_probable_area:              '🔴 候補エリアを表示中',
 
-      filter_by_isochrone:             '🔵 到達圏フィルタ中',
-      check_same_building:             '🏢 同一建物チェック中',
+      evaluate_distance:               '📏 距離条件を評価中',
       resolve_result:                  '🔍 座標を解決中',
       compute_bbox_from_points:        '📐 出口カバレッジを計算中',
       compute_area_from_landmark_bearing: '🧭 ランドマーク方位からエリアを計算中',
@@ -2303,8 +2302,7 @@ const LANG = {
       scan_natural_features:           '🌿 Scanning natural features',
       show_probable_area:              '🔴 Showing probable area',
 
-      filter_by_isochrone:             '🔵 Filtering by isochrone',
-      check_same_building:             '🏢 Checking same building',
+      evaluate_distance:               '📏 Evaluating distance',
       resolve_result:                  '🔍 Resolving coordinates',
       compute_bbox_from_points:        '📐 Computing exit coverage bbox',
       compute_area_from_landmark_bearing: '🧭 Computing bearing area',

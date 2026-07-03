@@ -125,20 +125,31 @@ class MapboxMCPClient {
         },
       },
 
-      // ── Tool: check_same_building ─────────────────────────────
+      // ── Tool: evaluate_distance ───────────────────────────────
       {
-        name: 'check_same_building',
+        name: 'evaluate_distance',
         description:
-          '「同じビルの中」「同じビルに入っている」条件の評価。アンカー地点と候補POIのbuildingレイヤーIDを比較し、同一建物かを判定する。\n' +
-          '注意: 六本木ヒルズ等の大型複合施設は複数建物IDに分かれる場合があり、同施設でも不一致になりうる（既知の制限）。',
+          '距離・近接条件の評価。ユーザーの言葉から proximity_level を選ぶだけでよい。内部実装（circle/isochrone/buildingID）はMCPが選択する。\n' +
+          'proximity_level の選択基準:\n' +
+          '  same_building = 同じビルの中\n' +
+          '  adjacent      = 隣・目の前・すぐ隣（~50m）\n' +
+          '  very_close    = すぐ近く・出てすぐ（~250m歩き）\n' +
+          '  nearby        = 近く・付近・そば（~700m歩き）\n' +
+          '  somewhat_nearby = 少し歩く（~1.4km歩き）\n' +
+          '  far           = かなり歩く（距離制約なし・全候補通過）',
         input_schema: {
           type: 'object',
           properties: {
-            anchor_lat: { type: 'number', description: '基準となる地点の緯度（コンビニ等）' },
-            anchor_lng: { type: 'number', description: '基準となる地点の経度' },
+            proximity_level: {
+              type: 'string',
+              enum: ['same_building', 'adjacent', 'very_close', 'nearby', 'somewhat_nearby', 'far'],
+              description: '距離レベル',
+            },
+            anchor_lat: { type: 'number', description: 'アンカー地点の緯度' },
+            anchor_lng: { type: 'number', description: 'アンカー地点の経度' },
             candidates: {
               type: 'array',
-              description: '同じビル内かチェックする候補',
+              description: '判定する候補POIリスト',
               items: {
                 type: 'object',
                 properties: {
@@ -149,8 +160,18 @@ class MapboxMCPClient {
                 required: ['name', 'latitude', 'longitude'],
               },
             },
+            direction: {
+              type: 'string',
+              enum: ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'],
+              description: '方向制約（オプション）。「北に」→ north 等。',
+            },
+            profile: {
+              type: 'string',
+              enum: ['walking', 'driving'],
+              description: 'デフォルト: walking。ユーザーが車と明示した場合のみ driving。',
+            },
           },
-          required: ['anchor_lat', 'anchor_lng', 'candidates'],
+          required: ['proximity_level', 'anchor_lat', 'anchor_lng', 'candidates'],
         },
       },
 
@@ -246,46 +267,6 @@ class MapboxMCPClient {
         },
       },
 
-      // ── Tool: filter_by_isochrone ─────────────────────────
-      {
-        name: 'filter_by_isochrone',
-        description:
-          '距離・近接条件の検証。候補POIがアンカー地点からのポリゴン内にあるかを turf.booleanPointInPolygon で判定する。\n' +
-          'radius_metersとminutesの使い分け：\n' +
-          '- radius_meters（直線距離・turf.circle）: 「すぐ隣」「隣接」「目の前」など150m以下の近接条件。APIコールなし。\n' +
-          '- minutes（isochrone API）: 「歩いてN分」「近く」など150m超の条件。3/10/20分から選択。\n' +
-          'どちらか一方のみ指定すること。direction（北/東等）はどちらでも使用可。',
-        input_schema: {
-          type: 'object',
-          properties: {
-            anchor_lat:    { type: 'number', description: 'アンカー地点の緯度' },
-            anchor_lng:    { type: 'number', description: 'アンカー地点の経度' },
-            radius_meters: { type: 'number', description: '直線距離の半径(m)。すぐ隣=60、目の前=120。150m以下向け。' },
-            minutes:       { type: 'number', enum: [3, 10, 20], description: 'isochrone到達時間(分)。すぐ近く=3、近く=10、少し歩く=20。50m超向け（50m以下はradius_meters使用）。' },
-            profile:    { type: 'string', enum: ['walking', 'driving'], description: 'デフォルト: walking' },
-            direction:  {
-              type: 'string',
-              enum: ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'],
-              description: '方向制約。「北に3分」→ north、「北東方向」→ northeast。省略可（全方向）。',
-            },
-            candidates: {
-              type: 'array',
-              description: '判定する候補POIリスト',
-              items: {
-                type: 'object',
-                properties: {
-                  name:      { type: 'string' },
-                  latitude:  { type: 'number' },
-                  longitude: { type: 'number' },
-                },
-                required: ['name', 'latitude', 'longitude'],
-              },
-            },
-          },
-          required: ['anchor_lat', 'anchor_lng', 'minutes', 'candidates'],
-        },
-      },
-
       // ── Tool: find_intersections ───────────────────────────
       {
         name: 'find_intersections',
@@ -351,12 +332,10 @@ class MapboxMCPClient {
           return this._computeBboxFromPoints(args.points || [], args.min_padding_meters ?? 150);
         case 'get_facing_road':
           return await this._getFacingRoad(args.lat, args.lng);
-        case 'filter_by_isochrone':
-          return await this._filterByIsochrone(
-            args.anchor_lat, args.anchor_lng,
-            args.minutes || null, args.profile || 'walking',
-            args.candidates || [], args.direction || null,
-            args.radius_meters || null
+        case 'evaluate_distance':
+          return await this._evaluateDistance(
+            args.proximity_level, args.anchor_lat, args.anchor_lng,
+            args.candidates || [], args.direction || null, args.profile || 'walking'
           );
         case 'find_intersections':
           return await this._findIntersections(args.lat, args.lng, args.radius, args.name_filter || null);
@@ -364,8 +343,6 @@ class MapboxMCPClient {
           return await this._findTrafficSignals(args.lat, args.lng, args.radius);
         case 'resolve_result':
           return this._resolveResult(args.ids || []);
-        case 'check_same_building':
-          return await this._checkSameBuilding(args.anchor_lat, args.anchor_lng, args.candidates || []);
         default:
           return JSON.stringify({ error: `Unknown tool: ${toolName}` });
       }
@@ -1693,6 +1670,32 @@ class MapboxMCPClient {
   // ─────────────────────────────────────────────────────────────
   // Tool impl: filter_by_isochrone
   // ─────────────────────────────────────────────────────────────
+
+  async _evaluateDistance(proximityLevel, anchorLat, anchorLng, candidates, direction, profile = 'walking') {
+    switch (proximityLevel) {
+      case 'same_building':
+        return await this._checkSameBuilding(anchorLat, anchorLng, candidates);
+      case 'adjacent':
+        return await this._filterByIsochrone(anchorLat, anchorLng, null, profile, candidates, direction, 50);
+      case 'very_close':
+        return await this._filterByIsochrone(anchorLat, anchorLng, 3, profile, candidates, direction, null);
+      case 'nearby':
+        return await this._filterByIsochrone(anchorLat, anchorLng, 10, profile, candidates, direction, null);
+      case 'somewhat_nearby':
+        return await this._filterByIsochrone(anchorLat, anchorLng, 20, profile, candidates, direction, null);
+      case 'far':
+        return this._minify({
+          source:        'evaluate_distance (far - no constraint)',
+          proximity_level: 'far',
+          inside_count:  candidates.length,
+          outside_count: 0,
+          inside_items:  candidates.map(({ name, latitude, longitude }) => ({ name, latitude, longitude })),
+          outside_items: [],
+        });
+      default:
+        return JSON.stringify({ error: `Unknown proximity_level: ${proximityLevel}` });
+    }
+  }
 
   _clipIsochroneToDirection(polygon, anchorLng, anchorLat, direction) {
     const B = 1; // 約100km、十分大きい
