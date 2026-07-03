@@ -265,11 +265,9 @@ Query Expansionを行うのは「曖昧な表現」のみ：
 
 ステップ2【評価・並列実行】ステップ1で取得した全マンション候補を**同一ターンで並列評価**すること
    - 全マンション候補に対するfilter_by_isochroneを1ターンで一括発行する（1候補ずつ逐次実行禁止）
-   - 例：マンションが4件なら、4件分のfilter_by_isochroneを同一ターンのtool_useブロックとして発行
-   - filter_by_isochrone(anchor=マンション1座標, radius_meters=60, candidates=全ローソン)
-   - filter_by_isochrone(anchor=マンション2座標, radius_meters=60, candidates=全ローソン)
-   - ... （全候補分）
-   - 各条件についても同様に並列発行する（ローソン条件とバス停条件も同一ターンで可）
+   - radius_metersとminutesの値は必ず距離テーブルから決定すること（ハードコード禁止）
+     例：「すぐ隣」→ radius_meters=50、「目の前」→ minutes=3、「近く」→ minutes=10
+   - 条件が複数ある場合、より厳しい条件（小さいradius_meters）から先に評価してよい（早期終了最適化）
    - 両条件を満たすもの → match_level="full"
    - 片方だけ満たすもの → match_level="partial"
 
