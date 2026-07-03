@@ -338,14 +338,12 @@ class LocationFinderApp {
         const passed = this._conditionTracker.filter(s => s.has(place.name)).length;
         matchLevel = passed === totalConditions ? 'full' : 'partial';
       }
-      const dist = (this._lastProximity && place.latitude)
-        ? turf.distance(turf.point(this._lastProximity), turf.point([place.longitude, place.latitude]), { units: 'meters' })
-        : 9999;
-      return { ...place, match_level: matchLevel, _dist: dist };
+      return { ...place, match_level: matchLevel };
     }).sort((a, b) => {
+      // full before partial, same-level order preserved
       if (a.match_level === 'full' && b.match_level !== 'full') return -1;
       if (a.match_level !== 'full' && b.match_level === 'full') return 1;
-      return a._dist - b._dist;
+      return 0;
     });
 
     processed.forEach((place) => {
@@ -1841,6 +1839,11 @@ class LocationFinderApp {
         }
         this._flowState.typeCheckAfterCount = after;
       }
+    }
+
+    // step2_eval開始時にconditionTrackerをリセット（ループ蓄積バグ防止）
+    if (step === 'step2_eval') {
+      this._conditionTracker = [];
     }
 
     // ② step2_evalの評価数がtype_checkのafterと一致するか
