@@ -31,6 +31,8 @@ class MapboxMCPClient {
     this._tqCache        = new Map(); // url → parsed JSON (cleared on chat reset)
     this._poiGridCache      = new Map();
     this._searchResultCache = new Map();
+    this._resultBuffer      = new Map(); // id → full item (lat/lng lookup)
+    this._resultIdCounter   = 0;        // auto-increment across all searches
     this._lastIsochroneData = null; // visualization用
   }
 
@@ -102,6 +104,19 @@ class MapboxMCPClient {
             target: { type: 'string', enum: ['road', 'transit', 'both'] },
           },
           required: ['lat', 'lng', 'radius'],
+        },
+      },
+
+      // ── Tool: resolve_result ──────────────────────────────────
+      {
+        name: 'resolve_result',
+        description: 'search_nearby_poiで返されたidから緯度経度を取得する。一次検索で選んだ候補のproximity座標取得、またはStep1で取得した候補の座標一括取得に使用。',
+        input_schema: {
+          type: 'object',
+          properties: {
+            ids: { type: 'array', items: { type: 'number' }, description: '取得するid配列' },
+          },
+          required: ['ids'],
         },
       },
 
@@ -342,6 +357,8 @@ class MapboxMCPClient {
           return await this._findIntersections(args.lat, args.lng, args.radius, args.name_filter || null);
         case 'find_traffic_signals':
           return await this._findTrafficSignals(args.lat, args.lng, args.radius);
+        case 'resolve_result':
+          return this._resolveResult(args.ids || []);
         case 'check_same_building':
           return await this._checkSameBuilding(args.anchor_lat, args.anchor_lng, args.candidates || []);
         default:
@@ -695,6 +712,31 @@ class MapboxMCPClient {
    * place クエリ:
    *   → Search Box のみ（streets-v8 に place データなし）
    */
+  _resolveResult(ids) {
+    const items = ids.map(id => {
+      const item = this._resultBuffer.get(id);
+      if (!item) return null;
+      return {
+        id,
+        name:         item.name,
+        latitude:     item.latitude,
+        longitude:    item.longitude,
+        full_address: item.full_address || null,
+        feature_type: item.feature_type || null,
+        bbox:         item.bbox         || null,
+      };
+    }).filter(Boolean);
+    return this._minify({ count: items.length, items });
+  }
+
+  _assignIds(items) {
+    return items.map(item => {
+      const id = this._resultIdCounter++;
+      this._resultBuffer.set(id, item);
+      return { ...item, _rid: id };
+    });
+  }
+
   async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null) {
     // ── 信号・交差点クエリ: Tilequeryのみ（Search Box不可） ──
     // bboxが渡されている場合（localityのbbox等）はそのbboxの外接円半径を使い全域をカバーする
@@ -772,7 +814,7 @@ class MapboxMCPClient {
       if (this.config.DEBUG) console.log(`[MapboxMCP] バス停クエリ → バス停タイルセットのみ (r=${radius}m)`);
       const busStops = await this._busStopFallback(lat, lng, radius);
       busStops.forEach(item => { if (!seen.has(item.name)) seen.set(item.name, item); });
-      const items = [...seen.values()].slice(0, 150);
+      const items = this._assignIds([...seen.values()].slice(0, 150));
       const result = this._minify({ source: 'バス停タイルセット (10da032y.busstop_gov_0608)', count: items.length, items, _debug: { sb_count: 0, tq_count: items.length, sb_items: [], tq_items: items.slice(0,30).map(i=>({name:i.name,distance:i.distance})) } });
       this._searchResultCache.set(searchCacheKey, result);
       return result;
@@ -818,9 +860,9 @@ class MapboxMCPClient {
         });
       }
 
-      const items = [...seen.values()]
+      const items = this._assignIds([...seen.values()]
         .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
-        .slice(0, 150);
+        .slice(0, 150));
       const src = items.length
         ? (seen.size > 0 && items[0].full_address !== undefined
             ? 'Search Box (building fallback)' : 'Tilequery poi_label grid (buildings)')
@@ -883,9 +925,9 @@ class MapboxMCPClient {
       });
     }
 
-    const items = [...seen.values()]
+    const items = this._assignIds([...seen.values()]
       .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
-      .slice(0, 150);
+      .slice(0, 150));
     const tqActuallyRan = hasPOIQuery && proximity?.length >= 2;
     const source = items.length
       ? (tqActuallyRan ? 'Search Box + Tilequery poi_label (parallel)' : 'Search Box API')

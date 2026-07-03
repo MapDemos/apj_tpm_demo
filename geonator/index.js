@@ -221,6 +221,8 @@ class LocationFinderApp {
       this.mapboxMCP._tqCache.clear();
       this.mapboxMCP._poiGridCache?.clear();
       this.mapboxMCP._searchResultCache?.clear();
+      this.mapboxMCP._resultBuffer?.clear();
+      this.mapboxMCP._resultIdCounter = 0;
     }
     this._resetFlowState();
     this._updateAPICountDisplay();
@@ -1607,8 +1609,8 @@ class LocationFinderApp {
             source: d.source,
             count:  d.count,
             items: (d.items || []).map(i => ({
-              name: i.name, latitude: i.latitude, longitude: i.longitude,
-              ...(i.operator     ? { operator:     i.operator }     : {}),
+              id:   i._rid,
+              name: i.name,
               ...(i.feature_type ? { feature_type: i.feature_type } : {}),
               ...(i.bbox         ? { bbox:         i.bbox }         : {}),
             })),
@@ -2212,6 +2214,7 @@ const LANG = {
 
       filter_by_isochrone:             '🔵 到達圏フィルタ中',
       check_same_building:             '🏢 同一建物チェック中',
+      resolve_result:                  '🔍 座標を解決中',
       compute_bbox_from_points:        '📐 出口カバレッジを計算中',
       compute_area_from_landmark_bearing: '🧭 ランドマーク方位からエリアを計算中',
       log_flow_step: '📋 フローステップを記録中',
@@ -2266,6 +2269,7 @@ const LANG = {
 
       filter_by_isochrone:             '🔵 Filtering by isochrone',
       check_same_building:             '🏢 Checking same building',
+      resolve_result:                  '🔍 Resolving coordinates',
       compute_bbox_from_points:        '📐 Computing exit coverage bbox',
       compute_area_from_landmark_bearing: '🧭 Computing bearing area',
       log_flow_step: '📋 Logging flow step',
