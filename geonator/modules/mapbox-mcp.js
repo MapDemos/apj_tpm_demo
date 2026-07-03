@@ -213,6 +213,37 @@ class MapboxMCPClient {
           required: ['lat', 'lng'],
         },
       },
+
+      // ── Tool: find_intersections ───────────────────────────
+      {
+        name: 'find_intersections',
+        description: 'ユーザーが交差点名を目印として言及した場合に使用。周辺の名前付き交差点を取得し座標を返す。取得した座標をproximityや絞り込みの起点として使用できる。',
+        input_schema: {
+          type: 'object',
+          properties: {
+            lat:         { type: 'number' },
+            lng:         { type: 'number' },
+            radius:      { type: 'number', description: '検索半径(m)' },
+            name_filter: { type: 'string',  description: '交差点名の部分一致フィルタ（省略可）' },
+          },
+          required: ['lat', 'lng', 'radius'],
+        },
+      },
+
+      // ── Tool: find_traffic_signals ─────────────────────────
+      {
+        name: 'find_traffic_signals',
+        description: 'ユーザーが信号機を目印として言及した場合に使用。周辺の信号機の座標を返す（名称なし）。信号の有無確認や、信号を空間的な起点として使用できる。',
+        input_schema: {
+          type: 'object',
+          properties: {
+            lat:    { type: 'number' },
+            lng:    { type: 'number' },
+            radius: { type: 'number', description: '検索半径(m)' },
+          },
+          required: ['lat', 'lng', 'radius'],
+        },
+      },
     ];
   }
 
@@ -248,6 +279,10 @@ class MapboxMCPClient {
           return await this._checkTravelTime(args.from_lat, args.from_lng, args.to_lat, args.to_lng, args.profile);
         case 'get_facing_road':
           return await this._getFacingRoad(args.lat, args.lng);
+        case 'find_intersections':
+          return await this._findIntersections(args.lat, args.lng, args.radius, args.name_filter || null);
+        case 'find_traffic_signals':
+          return await this._findTrafficSignals(args.lat, args.lng, args.radius);
         case 'get_route_pois':
           return await this._getRoutePOIs(
             args.from_lat, args.from_lng, args.to_lat, args.to_lng,
@@ -1388,6 +1423,79 @@ class MapboxMCPClient {
       all_roads:    unique,
       road_classes: unique.map(r => r.class).join(', '),
     });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Tool impl: find_intersections
+  // ─────────────────────────────────────────────────────────────
+
+  async _findIntersections(lat, lng, radius, nameFilter = null) {
+    const url =
+      `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
+      `?access_token=${this.token}&radius=${radius}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road`;
+    try {
+      const res  = await this._fetchTilequeryWithCache(url);
+      if (!res.ok) return JSON.stringify({ error: `Tilequery HTTP ${res.status}` });
+      const data = await res.json();
+
+      let items = (data.features || [])
+        .filter(f => f.properties?.class === 'intersection' && f.properties?.name)
+        .map(f => ({
+          name:      f.properties.name,
+          latitude:  f.geometry?.coordinates?.[1],
+          longitude: f.geometry?.coordinates?.[0],
+          distance:  Math.round(f.properties?.tilequery?.distance || 0),
+        }))
+        .filter(f => f.latitude != null && f.longitude != null);
+
+      if (nameFilter) {
+        const filter = nameFilter.toLowerCase();
+        items = items.filter(f => f.name.toLowerCase().includes(filter));
+      }
+
+      items.sort((a, b) => a.distance - b.distance);
+
+      return this._minify({
+        source: 'Tilequery API (road layer, class=intersection)',
+        count:  items.length,
+        items,
+      });
+    } catch (err) {
+      return JSON.stringify({ error: err.message });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Tool impl: find_traffic_signals
+  // ─────────────────────────────────────────────────────────────
+
+  async _findTrafficSignals(lat, lng, radius) {
+    const url =
+      `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
+      `?access_token=${this.token}&radius=${radius}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road`;
+    try {
+      const res  = await this._fetchTilequeryWithCache(url);
+      if (!res.ok) return JSON.stringify({ error: `Tilequery HTTP ${res.status}` });
+      const data = await res.json();
+
+      const items = (data.features || [])
+        .filter(f => f.properties?.class === 'traffic_signals')
+        .map(f => ({
+          latitude:  f.geometry?.coordinates?.[1],
+          longitude: f.geometry?.coordinates?.[0],
+          distance:  Math.round(f.properties?.tilequery?.distance || 0),
+        }))
+        .filter(f => f.latitude != null && f.longitude != null)
+        .sort((a, b) => a.distance - b.distance);
+
+      return this._minify({
+        source: 'Tilequery API (road layer, class=traffic_signals)',
+        count:  items.length,
+        items,
+      });
+    } catch (err) {
+      return JSON.stringify({ error: err.message });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
