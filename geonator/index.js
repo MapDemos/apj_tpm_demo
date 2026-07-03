@@ -874,6 +874,8 @@ class LocationFinderApp {
         const dLng = r / (111320 * Math.cos(pLat * Math.PI / 180));
         const dLat = r / 110540;
         vizBbox = [pLng - dLng, pLat - dLat, pLng + dLng, pLat + dLat];
+        // radius_meters使用時はClaudeがdraw_search_boundaryを呼べないため自動描画
+        this.drawSearchBoundary(vizBbox);
       }
 
       if (vizBbox?.length === 4) {
