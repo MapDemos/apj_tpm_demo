@@ -199,6 +199,7 @@ Query Expansionを行うのは「曖昧な表現」のみ：
    - search_nearby_poi(queries=["バス停"], query_intent="category_busstop_location", proximity=<中心座標>, radius_meters=200) → 全バス停を取得（位置関係の評価用は個別ポイントが必要なためこちらを使う）
    - search_nearby_poi(queries=["マンション"], query_intent="category_building", proximity=<中心座標>, radius_meters=200) → 全マンションを取得
    ※ このステップを省略してはならない。ツールで取得していない候補は存在しないものとして扱う。
+   ※ 以前の検索でPOIを目撃していても（例：一次検索でローソンが見えていた）、必ずbbox内で改めて全件取得すること。見えていたPOIだけを使い回してはならない。
    ※ query_intentを正しく指定すること（マンション系はcategory_building、位置関係のバス停はcategory_busstop_location）。
 
 ステップ2【評価・並列実行】ステップ1で取得した全マンション候補を**同一ターンで並列評価**すること
