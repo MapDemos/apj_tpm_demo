@@ -743,6 +743,14 @@ class MapboxMCPClient {
       return !POI_BLOCKLIST_FLAT.some(b => n.startsWith(b.toLowerCase()));
     };
 
+    const isBusStop = queryIntent === 'category_busstop' || (!queryIntent && this._isBusStopQuery(queries));
+    const isBuilding = queryIntent === 'category_building' || (!queryIntent && !isBusStop && this._isBuildingQuery(queries));
+
+    // bboxのみ渡された場合（proximityなし）は中心点をfallback proximityとして使用
+    const effectiveProximity = proximity?.length >= 2
+      ? proximity
+      : (bbox?.length >= 4 ? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2] : null);
+
     // ── バス停ロケーション（名前なし・位置関係）: transit_stop_label mode=bus ──
     if (queryIntent === 'category_busstop_location' && effectiveProximity) {
       const [lng, lat] = effectiveProximity;
@@ -751,14 +759,6 @@ class MapboxMCPClient {
         : Math.min(radiusMeters ?? 200, 400);
       return await this._busStopLocationSearch(lat, lng, r);
     }
-
-    const isBusStop = queryIntent === 'category_busstop' || (!queryIntent && this._isBusStopQuery(queries));
-    const isBuilding = queryIntent === 'category_building' || (!queryIntent && !isBusStop && this._isBuildingQuery(queries));
-
-    // bboxのみ渡された場合（proximityなし）は中心点をfallback proximityとして使用
-    const effectiveProximity = proximity?.length >= 2
-      ? proximity
-      : (bbox?.length >= 4 ? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2] : null);
 
     // ── Bus stop: use bus stop tileset only when explicitly mentioned ──
     if (isBusStop && effectiveProximity) {
