@@ -757,8 +757,9 @@ class MapboxMCPClient {
     const items = [...seen.values()]
       .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
       .slice(0, 150);
+    const tqActuallyRan = hasPOIQuery && proximity?.length >= 2;
     const source = items.length
-      ? (hasPOIQuery ? 'Search Box + Tilequery poi_label (parallel)' : 'Search Box API')
+      ? (tqActuallyRan ? 'Search Box + Tilequery poi_label (parallel)' : 'Search Box API')
       : 'no results';
 
     return this._minify({ source, count: items.length, items });
@@ -794,18 +795,31 @@ class MapboxMCPClient {
 
     if (bbox) {
       const [minLng, minLat, maxLng, maxLat] = bbox;
-      const widthM  = (maxLng - minLng) / DEG_LNG;
-      const heightM = (maxLat - minLat) / DEG_LAT;
-      const nx = Math.max(1, Math.round(widthM  / spacingM));
-      const ny = Math.max(1, Math.round(heightM / spacingM));
+      // Inset grid points by radius so circles align with bbox edges (no overshoot)
+      const radiusLng = radius * DEG_LNG;
+      const radiusLat = radius * DEG_LAT;
+      const gMinLng = minLng + radiusLng;
+      const gMaxLng = maxLng - radiusLng;
+      const gMinLat = minLat + radiusLat;
+      const gMaxLat = maxLat - radiusLat;
 
-      gridPoints = [];
-      for (let iy = 0; iy < ny; iy++) {
-        for (let ix = 0; ix < nx; ix++) {
-          gridPoints.push([
-            minLng + (ix + 0.5) * (maxLng - minLng) / nx,
-            minLat + (iy + 0.5) * (maxLat - minLat) / ny,
-          ]);
+      // Degenerate case: bbox smaller than 2*radius → single center point
+      if (gMinLng >= gMaxLng || gMinLat >= gMaxLat) {
+        gridPoints = [[(minLng + maxLng) / 2, (minLat + maxLat) / 2]];
+      } else {
+        const widthM  = (gMaxLng - gMinLng) / DEG_LNG;
+        const heightM = (gMaxLat - gMinLat) / DEG_LAT;
+        const nx = Math.max(1, Math.ceil(widthM  / spacingM) + 1);
+        const ny = Math.max(1, Math.ceil(heightM / spacingM) + 1);
+
+        gridPoints = [];
+        for (let iy = 0; iy < ny; iy++) {
+          for (let ix = 0; ix < nx; ix++) {
+            gridPoints.push([
+              nx === 1 ? (gMinLng + gMaxLng) / 2 : gMinLng + ix * (gMaxLng - gMinLng) / (nx - 1),
+              ny === 1 ? (gMinLat + gMaxLat) / 2 : gMinLat + iy * (gMaxLat - gMinLat) / (ny - 1),
+            ]);
+          }
         }
       }
     } else {

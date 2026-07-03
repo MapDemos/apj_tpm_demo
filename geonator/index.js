@@ -855,21 +855,30 @@ class LocationFinderApp {
       const [pLng, pLat] = args.proximity;
       this.map.flyTo({ center: [pLng, pLat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
       if (args.bbox?.length === 4) {
-        // Replicate _gridTilequeryPOI grid logic to show all actual scan circles
+        // Replicate _gridTilequeryPOI grid logic (with inset) to show actual scan circles
         const [minX, minY, maxX, maxY] = args.bbox;
-        const gridRadius = 200; // matches _gridTilequeryPOI's fixed radius
+        const gridRadius = 200;
         const spacingM   = gridRadius * 1.5;
         const DEG_LNG    = 1 / (111320 * Math.cos(pLat * Math.PI / 180));
         const DEG_LAT    = 1 / 110540;
-        const widthM     = (maxX - minX) / DEG_LNG;
-        const heightM    = (maxY - minY) / DEG_LAT;
-        const nx = Math.max(1, Math.round(widthM  / spacingM));
-        const ny = Math.max(1, Math.round(heightM / spacingM));
-        for (let iy = 0; iy < ny; iy++) {
-          for (let ix = 0; ix < nx; ix++) {
-            const gLng = minX + (ix + 0.5) * (maxX - minX) / nx;
-            const gLat = minY + (iy + 0.5) * (maxY - minY) / ny;
-            this._drawScanCircle(gLat, gLng, gridRadius);
+        const radiusLng  = gridRadius * DEG_LNG;
+        const radiusLat  = gridRadius * DEG_LAT;
+        const gMinX = minX + radiusLng, gMaxX = maxX - radiusLng;
+        const gMinY = minY + radiusLat, gMaxY = maxY - radiusLat;
+
+        if (gMinX >= gMaxX || gMinY >= gMaxY) {
+          this._drawScanCircle((minY + maxY) / 2, (minX + maxX) / 2, gridRadius, 'cyan');
+        } else {
+          const widthM  = (gMaxX - gMinX) / DEG_LNG;
+          const heightM = (gMaxY - gMinY) / DEG_LAT;
+          const nx = Math.max(1, Math.ceil(widthM  / spacingM) + 1);
+          const ny = Math.max(1, Math.ceil(heightM / spacingM) + 1);
+          for (let iy = 0; iy < ny; iy++) {
+            for (let ix = 0; ix < nx; ix++) {
+              const gLng = nx === 1 ? (gMinX + gMaxX) / 2 : gMinX + ix * (gMaxX - gMinX) / (nx - 1);
+              const gLat = ny === 1 ? (gMinY + gMaxY) / 2 : gMinY + iy * (gMaxY - gMinY) / (ny - 1);
+              this._drawScanCircle(gLat, gLng, gridRadius, 'cyan');
+            }
           }
         }
       }
@@ -882,25 +891,32 @@ class LocationFinderApp {
     if (overlay) overlay.style.display = 'none';
   }
 
-  /** Draw a filled circle showing the Tilequery scan radius. Accumulates with generation tracking. */
-  _drawScanCircle(lat, lng, radiusMeters) {
+  /**
+   * Draw a filled circle showing the Tilequery scan radius. Accumulates with generation tracking.
+   * @param {string} color - 'amber' (single-point Tilequery) or 'cyan' (grid circles)
+   */
+  _drawScanCircle(lat, lng, radiusMeters, color = 'amber') {
     const idx    = this._mapLayerRegistry.length;
     const p      = `scan-${idx}`;
     const center = turf.point([lng, lat]);
     const circle = turf.circle(center, radiusMeters / 1000, { units: 'kilometers', steps: 64 });
 
+    const fillColor = color === 'cyan' ? '#06b6d4' : '#f59e0b';
+    const lineColor = color === 'cyan' ? '#22d3ee' : '#f59e0b';
+    const dotColor  = color === 'cyan' ? '#06b6d4' : '#f59e0b';
+
     this.map.addSource(`${p}-poly`, { type: 'geojson', data: circle });
     this.map.addLayer({ id: `${p}-fill`, type: 'fill', source: `${p}-poly`,
-      paint: { 'fill-color': '#f59e0b', 'fill-opacity': 0.10 } });
+      paint: { 'fill-color': fillColor, 'fill-opacity': 0.08 } });
     this.map.addLayer({ id: `${p}-line`, type: 'line', source: `${p}-poly`,
-      paint: { 'line-color': '#f59e0b', 'line-width': 1.5, 'line-dasharray': [3, 2] } });
+      paint: { 'line-color': lineColor, 'line-width': 1.5, 'line-dasharray': [3, 2] } });
 
     this.map.addSource(`${p}-ctr`, { type: 'geojson', data: {
       type: 'FeatureCollection',
       features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: {} }],
     }});
     this.map.addLayer({ id: `${p}-dot`, type: 'circle', source: `${p}-ctr`,
-      paint: { 'circle-radius': 5, 'circle-color': '#f59e0b', 'circle-opacity': 0.9,
+      paint: { 'circle-radius': 4, 'circle-color': dotColor, 'circle-opacity': 0.9,
                'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
 
     const degsNorth = radiusMeters / 110540;
@@ -914,7 +930,7 @@ class LocationFinderApp {
       layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-anchor': 'bottom',
                 'text-offset': ['literal', [0, -0.3]],
                 'text-allow-overlap': true, 'text-ignore-placement': true },
-      paint: { 'text-color': '#f59e0b', 'text-halo-color': 'rgba(8,13,26,0.9)', 'text-halo-width': 1.5 } });
+      paint: { 'text-color': lineColor, 'text-halo-color': 'rgba(8,13,26,0.9)', 'text-halo-width': 1.5 } });
 
     this._mapLayerRegistry.push({
       layers:  [{ id: `${p}-fill`, type: 'fill' }, { id: `${p}-line`, type: 'line' },
