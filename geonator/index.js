@@ -228,6 +228,7 @@ class LocationFinderApp {
     this.clearMapElements();
     this._clearDebugLayers();
     if (this.finalMarker) { this.finalMarker.remove(); this.finalMarker = null; }
+    document.getElementById('resolutionPanel')?.remove();
     document.getElementById('chatMessages').innerHTML = '';
     document.getElementById('thinkingSteps').innerHTML = '';
     document.getElementById('mapStatus').textContent = '地図の準備ができました';
@@ -316,23 +317,18 @@ class LocationFinderApp {
     this.candidateMarkers.forEach(m => m.remove());
     this.candidateMarkers = [];
 
-    const PRIORITY_LABELS = LANG[this._lang].priorityLabels;
-    const PRIORITY_CLASSES = ['priority-1', 'priority-2', 'priority-3', 'priority-3', 'priority-3'];
-
     places.forEach((place, i) => {
-      const priorityLabel = PRIORITY_LABELS[i] || `第${i + 1}候補`;
-      const priorityClass = PRIORITY_CLASSES[i] || 'priority-3';
+      const isFull = place.match_level === 'full';
+      const badgeClass = isFull ? 'match-full' : 'match-partial';
+      const badgeLabel = isFull ? '🟢 条件合致' : '🟡 一部合致';
 
-      // Marker element
       const el = document.createElement('div');
-      el.className = `candidate-marker ${priorityClass}`;
+      el.className = `candidate-marker ${isFull ? 'priority-1' : 'priority-2'}`;
       el.textContent = i + 1;
       el.title = place.name;
 
-      // Popup HTML
-      const badgeClass = i === 0 ? 'priority-badge-best' : i === 1 ? 'priority-badge-second' : 'priority-badge-other';
       const popupHTML =
-        `<div class="${badgeClass}">${i === 0 ? '⭐' : i === 1 ? '🔵' : '⚪'} ${priorityLabel}</div>` +
+        `<div class="${badgeClass}">${badgeLabel}</div>` +
         `<strong>${_esc(place.name)}</strong>` +
         (place.address ? `<div class="popup-address">${_esc(place.address)}</div>` : '') +
         (place.reason  ? `<div class="popup-reason">💡 ${_esc(place.reason)}</div>` : '');
@@ -349,7 +345,6 @@ class LocationFinderApp {
       this.candidateMarkers.push(marker);
     });
 
-    // Fit map to all candidates
     if (places.length === 1) {
       this.map.flyTo({ center: [places[0].longitude, places[0].latitude], zoom: 16, duration: 1000 });
     } else if (places.length > 1) {
@@ -363,12 +358,15 @@ class LocationFinderApp {
       this.map.fitBounds(bounds, { padding: 90, maxZoom: 17, duration: 1200 });
     }
 
-    // Auto-open popup for 最有力候補 after map settles
-    if (places.length >= 2 && this.candidateMarkers[0]) {
-      setTimeout(() => this.candidateMarkers[0].togglePopup(), 1400);
+    const firstFull = this.candidateMarkers.findIndex((_, i) => places[i]?.match_level === 'full');
+    const autoOpen = firstFull >= 0 ? firstFull : 0;
+    if (places.length >= 2 && this.candidateMarkers[autoOpen]) {
+      setTimeout(() => this.candidateMarkers[autoOpen].togglePopup(), 1400);
     }
 
-    return `${places.length}件の候補ピンを優先度順に追加しました（最有力候補を自動表示）`;
+    const fullCount    = places.filter(p => p.match_level === 'full').length;
+    const partialCount = places.filter(p => p.match_level === 'partial').length;
+    return `条件合致${fullCount}件、一部合致${partialCount}件を地図にプロット`;
   }
 
   /**
@@ -415,7 +413,56 @@ class LocationFinderApp {
 
     document.getElementById('mapStatus').textContent = `📍 ${address}`;
 
+    this._showResolutionPanel();
     return `確定: ${address} [${lat}, ${lng}]`;
+  }
+
+  _showResolutionPanel() {
+    document.getElementById('resolutionPanel')?.remove();
+
+    const container = document.getElementById('chatMessages');
+    const wrapper = document.createElement('div');
+    wrapper.id = 'resolutionPanel';
+    wrapper.className = 'message resolution-panel';
+    wrapper.innerHTML = `
+      <div class="resolution-buttons">
+        <button class="resolution-btn ok" id="resBtn-ok">✅ OK確定</button>
+        <button class="resolution-btn retry" id="resBtn-retry">🔄 やり直し</button>
+        <button class="resolution-btn give-up" id="resBtn-giveup">⏹ 諦める</button>
+      </div>
+    `;
+    container.appendChild(wrapper);
+    container.scrollTop = container.scrollHeight;
+
+    document.getElementById('resBtn-ok').addEventListener('click', () => {
+      wrapper.remove();
+      document.getElementById('mapStatus').textContent = '✅ 捜索完了';
+      this._disableInput();
+    });
+
+    document.getElementById('resBtn-retry').addEventListener('click', () => {
+      wrapper.remove();
+      if (this.finalMarker) { this.finalMarker.remove(); this.finalMarker = null; }
+      document.getElementById('mapStatus').textContent = '地図の準備ができました';
+      this._enableInput();
+    });
+
+    document.getElementById('resBtn-giveup').addEventListener('click', () => {
+      wrapper.remove();
+      document.getElementById('mapStatus').textContent = '⏹ 未解決';
+      this._disableInput();
+    });
+  }
+
+  _disableInput() {
+    document.getElementById('chatInput').disabled = true;
+    document.getElementById('sendBtn').disabled = true;
+  }
+
+  _enableInput() {
+    document.getElementById('chatInput').disabled = false;
+    document.getElementById('sendBtn').disabled = false;
+    document.getElementById('chatInput').focus();
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -1082,11 +1129,16 @@ class LocationFinderApp {
               items: {
                 type: 'object',
                 properties: {
-                  name:      { type: 'string' },
-                  latitude:  { type: 'number' },
-                  longitude: { type: 'number' },
-                  address:   { type: 'string' },
-                  reason:    { type: 'string' },
+                  name:        { type: 'string' },
+                  latitude:    { type: 'number' },
+                  longitude:   { type: 'number' },
+                  address:     { type: 'string' },
+                  reason:      { type: 'string' },
+                  match_level: {
+                    type: 'string',
+                    enum: ['full', 'partial'],
+                    description: 'full=全条件合致、partial=一部条件合致。条件に合致しないものは渡さないこと。'
+                  },
                 },
                 required: ['name', 'latitude', 'longitude'],
               },

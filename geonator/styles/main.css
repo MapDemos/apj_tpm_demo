@@ -821,3 +821,47 @@ html, body {
 .debug-poi-name { color: #e2e8f0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .debug-poi-dist { color: #64748b; margin-left: 8px; flex-shrink: 0; }
 .debug-poi-empty { color: #475569; font-style: italic; padding: 4px; }
+
+/* Resolution buttons */
+.message.resolution-panel { align-self: stretch; align-items: stretch; max-width: 100%; }
+.resolution-buttons {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0 4px;
+}
+.resolution-btn {
+  flex: 1;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 8px;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.resolution-btn:hover { opacity: .85; }
+.resolution-btn.ok      { background: #16a34a; color: #fff; }
+.resolution-btn.retry   { background: #2563eb; color: #fff; }
+.resolution-btn.give-up { background: #475569; color: #e2e8f0; }
+
+/* Match level badges */
+.match-full {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-bottom: 5px;
+  background: #16a34a;
+  color: #fff;
+}
+.match-partial {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-bottom: 5px;
+  background: #ca8a04;
+  color: #fff;
+}
