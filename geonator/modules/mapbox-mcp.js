@@ -775,7 +775,7 @@ class MapboxMCPClient {
    * @param {number[]|null} bbox     - [minLng, minLat, maxLng, maxLat]
    * @param {number}        radius   - per-point radius in meters (default 100)
    */
-  async _gridTilequeryPOI(centerLat, centerLng, bbox, radius = 100) {
+  async _gridTilequeryPOI(centerLat, centerLng, bbox, radius = 200) {
     const DEG_LNG = 1 / (111320 * Math.cos(centerLat * Math.PI / 180));
     const DEG_LAT = 1 / 110540;
     const spacingM = radius * 1.5; // 50% overlap between adjacent circles
