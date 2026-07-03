@@ -58,7 +58,7 @@ class MapboxMCPClient {
 
       {
         name: 'get_midpoint_area',
-        description: '2地点間の中点座標とBBOXを計算する。2駅・2地点の間のエリアを探索範囲として絞る際に使用。',
+        description: '【二次検索補助】AとBの中点座標と矩形bboxを計算する。「AとBの間」のエリアを二次検索の範囲として使う際に使用。ルート沿いかどうかの判定はget_route_poisで別途行うこと。',
         input_schema: {
           type: 'object',
           properties: {
@@ -106,7 +106,7 @@ class MapboxMCPClient {
 
       {
         name: 'get_route_pois',
-        description: '【補助情報として使用】A→Bルートを取得し候補の経路沿い度を判定する。主検索はget_midpoint_area+search_nearby_poiで行うこと（ルートは複数存在するため本ツールだけで絞り込まない）。matching_poisは優先度を上げるがexcluded_poisも候補から除外しない。A・B両方明示されている場合のみ使用。profile: driving/walking',
+        description: '【評価フェーズ】A→Bのルート回廊ポリゴン（turf.buffer）を生成し、候補POIがポリゴン内にあるかをturf.booleanPointInPolygonで判定する。二次検索で洗い出した候補に対して「AからBへの途中にあるか」を評価する。matching_poisは条件合致、excluded_poisは条件外（除外しない・優先度を下げる）。A・B両方明示されている場合のみ使用。profile: driving/walking',
         input_schema: {
           type: 'object',
           properties: {
