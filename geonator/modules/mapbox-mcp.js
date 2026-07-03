@@ -240,7 +240,7 @@ class MapboxMCPClient {
             anchor_lat:    { type: 'number', description: 'アンカー地点の緯度' },
             anchor_lng:    { type: 'number', description: 'アンカー地点の経度' },
             radius_meters: { type: 'number', description: '直線距離の半径(m)。すぐ隣=60、目の前=120。150m以下向け。' },
-            minutes:       { type: 'number', enum: [3, 10, 15, 30], description: 'isochrone到達時間(分)。150m超向け。3=明示的短距離、10=曖昧な近接、15=少し歩く、30=結構歩く。' },
+            minutes:       { type: 'number', enum: [3, 10, 20], description: 'isochrone到達時間(分)。すぐ近く=3、近く=10、少し歩く=20。50m超向け（50m以下はradius_meters使用）。' },
             profile:    { type: 'string', enum: ['walking', 'driving'], description: 'デフォルト: walking' },
             direction:  {
               type: 'string',
