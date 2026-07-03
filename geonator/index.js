@@ -54,6 +54,10 @@ class LocationFinderApp {
     // Flag: finalize_location_marker was called during the current loop
     this._finalizedDuringLoop = false;
 
+    // Condition tracking for mechanical match_level determination
+    this._conditionTracker = []; // [{passed: Set<name>}]
+    this._lastProximity    = null; // [lng, lat] for distance sorting
+
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -225,6 +229,8 @@ class LocationFinderApp {
       this.mapboxMCP._resultIdCounter = 0;
     }
     this._resetFlowState();
+    this._conditionTracker = [];
+    this._lastProximity    = null;
     this._updateAPICountDisplay();
     // Resolve any pending debug pause
     if (this._debugStepResolve) { this._debugStepResolve(); this._debugStepResolve = null; }
@@ -316,22 +322,40 @@ class LocationFinderApp {
 
   /**
    * add_candidate_markers
-   * Plots numbered pins for each candidate POI with priority labels.
-   * Array order = priority order (index 0 = 最有力候補).
-   * @param {object[]} places - [{ name, latitude, longitude, address?, reason? }]
+   * Plots pins for each candidate POI. match_level determined mechanically from
+   * _conditionTracker. Sorted by proximity distance (no arbitrary LLM ranking).
    */
   addCandidateMarkers(places) {
     this.candidateMarkers.forEach(m => m.remove());
     this.candidateMarkers = [];
 
-    places.forEach((place, i) => {
+    const totalConditions = this._conditionTracker.length;
+
+    // Mechanical match_level + distance from proximity
+    const processed = places.map(place => {
+      let matchLevel = place.match_level || 'partial';
+      if (totalConditions > 0) {
+        const passed = this._conditionTracker.filter(s => s.has(place.name)).length;
+        matchLevel = passed === totalConditions ? 'full' : 'partial';
+      }
+      const dist = (this._lastProximity && place.latitude)
+        ? turf.distance(turf.point(this._lastProximity), turf.point([place.longitude, place.latitude]), { units: 'meters' })
+        : 9999;
+      return { ...place, match_level: matchLevel, _dist: dist };
+    }).sort((a, b) => {
+      if (a.match_level === 'full' && b.match_level !== 'full') return -1;
+      if (a.match_level !== 'full' && b.match_level === 'full') return 1;
+      return a._dist - b._dist;
+    });
+
+    processed.forEach((place) => {
       const isFull = place.match_level === 'full';
       const badgeClass = isFull ? 'match-full' : 'match-partial';
       const badgeLabel = isFull ? '🟢 条件合致' : '🟡 一部合致';
 
       const el = document.createElement('div');
       el.className = `candidate-marker ${isFull ? 'priority-1' : 'priority-2'}`;
-      el.textContent = i + 1;
+      // 番号なし - バッジのみ
       el.title = place.name;
 
       const popupHTML =
@@ -352,27 +376,28 @@ class LocationFinderApp {
       this.candidateMarkers.push(marker);
     });
 
-    if (places.length === 1) {
-      this.map.flyTo({ center: [places[0].longitude, places[0].latitude], zoom: 16, duration: 1000 });
-    } else if (places.length > 1) {
-      const bounds = places.reduce(
+    if (processed.length === 1) {
+      this.map.flyTo({ center: [processed[0].longitude, processed[0].latitude], zoom: 16, duration: 1000 });
+    } else if (processed.length > 1) {
+      const bounds = processed.reduce(
         (b, p) => b.extend([p.longitude, p.latitude]),
         new mapboxgl.LngLatBounds(
-          [places[0].longitude, places[0].latitude],
-          [places[0].longitude, places[0].latitude]
+          [processed[0].longitude, processed[0].latitude],
+          [processed[0].longitude, processed[0].latitude]
         )
       );
       this.map.fitBounds(bounds, { padding: 90, maxZoom: 17, duration: 1200 });
     }
 
-    const firstFull = this.candidateMarkers.findIndex((_, i) => places[i]?.match_level === 'full');
+    // Auto-open first full-match candidate
+    const firstFull = processed.findIndex(p => p.match_level === 'full');
     const autoOpen = firstFull >= 0 ? firstFull : 0;
-    if (places.length >= 2 && this.candidateMarkers[autoOpen]) {
+    if (processed.length >= 2 && this.candidateMarkers[autoOpen]) {
       setTimeout(() => this.candidateMarkers[autoOpen].togglePopup(), 1400);
     }
 
-    const fullCount    = places.filter(p => p.match_level === 'full').length;
-    const partialCount = places.filter(p => p.match_level === 'partial').length;
+    const fullCount    = processed.filter(p => p.match_level === 'full').length;
+    const partialCount = processed.filter(p => p.match_level === 'partial').length;
     return `条件合致${fullCount}件、一部合致${partialCount}件を地図にプロット`;
   }
 
@@ -955,6 +980,7 @@ class LocationFinderApp {
     // search_nearby_poi: fly to proximity, draw all Tilequery grid circles
     if (toolName === 'search_nearby_poi' && args.proximity?.length >= 2) {
       const [pLng, pLat] = args.proximity;
+      this._lastProximity = [pLng, pLat]; // track for distance sorting
       this.map.flyTo({ center: [pLng, pLat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
       // radius_metersからbboxを計算（MCP側と同じロジック）
       let vizBbox = args.bbox;
@@ -1306,6 +1332,13 @@ class LocationFinderApp {
           this._drawIsochroneLayer(this.mapboxMCP._lastIsochroneData);
           this.mapboxMCP._lastIsochroneData = null;
         }
+        // Track which candidates passed this condition
+        try {
+          const d = JSON.parse(result);
+          if (d.inside_items) {
+            this._conditionTracker.push(new Set(d.inside_items.map(i => i.name)));
+          }
+        } catch(_) {}
         return result;
       }
       default:
@@ -1325,6 +1358,8 @@ class LocationFinderApp {
    */
   async processUserMessage(userText) {
     this._resetFlowState();
+    this._conditionTracker = [];
+    this._lastProximity    = null;
     this.messages.push({ role: 'user', content: userText });
 
     const allTools = [
