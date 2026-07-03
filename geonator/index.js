@@ -860,6 +860,36 @@ class LocationFinderApp {
     return `エリアをポリゴンで表示しました（${candidates.length}候補を包含）`;
   }
 
+  _drawIsochroneLayer({ polygon, anchorLat, anchorLng, minutes, profile }) {
+    const idx = this._mapLayerRegistry.length;
+    const p   = `iso-${idx}`;
+
+    this.map.addSource(`${p}-poly`, { type: 'geojson', data: polygon });
+    this.map.addLayer({ id: `${p}-fill`, type: 'fill', source: `${p}-poly`,
+      paint: { 'fill-color': '#8b5cf6', 'fill-opacity': 0.12 } });
+    this.map.addLayer({ id: `${p}-line`, type: 'line', source: `${p}-poly`,
+      paint: { 'line-color': '#a78bfa', 'line-width': 2, 'line-dasharray': [4, 2] } });
+
+    const center = turf.centroid(polygon);
+    const [cLng, cLat] = center.geometry.coordinates;
+    this.map.addSource(`${p}-lbl`, { type: 'geojson', data: {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature',
+        geometry: { type: 'Point', coordinates: [cLng, cLat] },
+        properties: { label: `${minutes}分 (${profile === 'driving' ? '車' : '徒歩'})` } }],
+    }});
+    this.map.addLayer({ id: `${p}-sym`, type: 'symbol', source: `${p}-lbl`,
+      layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-anchor': 'center',
+                'text-allow-overlap': true, 'text-ignore-placement': true },
+      paint: { 'text-color': '#a78bfa', 'text-halo-color': 'rgba(8,13,26,0.9)', 'text-halo-width': 1.5 } });
+
+    this._mapLayerRegistry.push({
+      layers:  [{ id: `${p}-fill`, type: 'fill' }, { id: `${p}-line`, type: 'line' }, { id: `${p}-sym`, type: 'symbol' }],
+      sources: [`${p}-poly`, `${p}-lbl`],
+      gen:     this._mapGen,
+    });
+  }
+
   _removeProbableArea() {
     ['probable-area-label', 'probable-area-fill', 'probable-area-line'].forEach(id => {
       try { this.map.removeLayer(id); } catch(_) {}
@@ -912,6 +942,10 @@ class LocationFinderApp {
       const meta = { tool: toolName, turn: this._currentTurn, params: 'r=50m (自動拡張)' };
       this._drawScanCircle(args.lat, args.lng, 50, 'amber', meta);
       this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 16), duration: 600 });
+    }
+
+    if (toolName === 'filter_by_isochrone' && args.anchor_lat && args.anchor_lng) {
+      this.map.flyTo({ center: [args.anchor_lng, args.anchor_lat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
     }
 
     // search_nearby_poi: fly to proximity, draw all Tilequery grid circles
@@ -1233,6 +1267,14 @@ class LocationFinderApp {
         return this.finalizeLocationMarker(args.lat, args.lng, args.address);
       case 'ask_choice':
         return await this._showChoicePanel(args.question, args.choices || []);
+      case 'filter_by_isochrone': {
+        const result = await this.mapboxMCP.executeTool(name, args);
+        if (this.mapboxMCP._lastIsochroneData) {
+          this._drawIsochroneLayer(this.mapboxMCP._lastIsochroneData);
+          this.mapboxMCP._lastIsochroneData = null;
+        }
+        return result;
+      }
       default:
         return await this.mapboxMCP.executeTool(name, args);
     }
@@ -2045,6 +2087,7 @@ const LANG = {
       scan_natural_features:           '🌿 自然地物をスキャン中',
       show_probable_area:              '🔴 候補エリアを表示中',
       check_travel_time:               '⏱  移動時間を確認中',
+      filter_by_isochrone:             '🔵 到達圏フィルタ中',
       compute_area_from_landmark_bearing: '🧭 ランドマーク方位からエリアを計算中',
     },
   },
@@ -2095,6 +2138,7 @@ const LANG = {
       scan_natural_features:           '🌿 Scanning natural features',
       show_probable_area:              '🔴 Showing probable area',
       check_travel_time:               '⏱  Checking travel time',
+      filter_by_isochrone:             '🔵 Filtering by isochrone',
       compute_area_from_landmark_bearing: '🧭 Computing bearing area',
     },
   },

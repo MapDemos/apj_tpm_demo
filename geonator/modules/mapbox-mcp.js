@@ -29,7 +29,8 @@ class MapboxMCPClient {
     this._tqRequests     = 0;   // Tilequery API request count (actual fetches only)
     this._tqCacheHits    = 0;   // Tilequery cache hits
     this._tqCache        = new Map(); // url → parsed JSON (cleared on chat reset)
-    this._poiGridCache   = new Map();
+    this._poiGridCache      = new Map();
+    this._lastIsochroneData = null; // visualization用
   }
 
   /**
@@ -214,6 +215,40 @@ class MapboxMCPClient {
         },
       },
 
+      // ── Tool: filter_by_isochrone ─────────────────────────
+      {
+        name: 'filter_by_isochrone',
+        description:
+          '距離・近接条件の検証。Isochrone APIでアンカー地点からの到達可能ポリゴンを生成し、' +
+          '候補POIがポリゴン内にあるかを turf.booleanPointInPolygon で判定する。\n' +
+          '用途：「○○から歩いてN分」「川のそば」「道路の前」など近接条件の検証。\n' +
+          'minutes: 「前/隣/すぐ」→3、「近く/付近」→10、「やや遠い/少し先」→20\n' +
+          'profile: デフォルト walking。ユーザーが車と明示した場合のみ driving。',
+        input_schema: {
+          type: 'object',
+          properties: {
+            anchor_lat: { type: 'number', description: 'アンカー地点の緯度' },
+            anchor_lng: { type: 'number', description: 'アンカー地点の経度' },
+            minutes:    { type: 'number', enum: [3, 10, 20], description: '到達時間(分): 3/10/20から選択' },
+            profile:    { type: 'string', enum: ['walking', 'driving'], description: 'デフォルト: walking' },
+            candidates: {
+              type: 'array',
+              description: '判定する候補POIリスト',
+              items: {
+                type: 'object',
+                properties: {
+                  name:      { type: 'string' },
+                  latitude:  { type: 'number' },
+                  longitude: { type: 'number' },
+                },
+                required: ['name', 'latitude', 'longitude'],
+              },
+            },
+          },
+          required: ['anchor_lat', 'anchor_lng', 'minutes', 'candidates'],
+        },
+      },
+
       // ── Tool: find_intersections ───────────────────────────
       {
         name: 'find_intersections',
@@ -279,6 +314,12 @@ class MapboxMCPClient {
           return await this._checkTravelTime(args.from_lat, args.from_lng, args.to_lat, args.to_lng, args.profile);
         case 'get_facing_road':
           return await this._getFacingRoad(args.lat, args.lng);
+        case 'filter_by_isochrone':
+          return await this._filterByIsochrone(
+            args.anchor_lat, args.anchor_lng,
+            args.minutes, args.profile || 'walking',
+            args.candidates || []
+          );
         case 'find_intersections':
           return await this._findIntersections(args.lat, args.lng, args.radius, args.name_filter || null);
         case 'find_traffic_signals':
@@ -1447,6 +1488,52 @@ class MapboxMCPClient {
       road_classes: unique.map(r => r.class).join(', '),
     });
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // Tool impl: filter_by_isochrone
+  // ─────────────────────────────────────────────────────────────
+
+  async _filterByIsochrone(anchorLat, anchorLng, minutes, profile, candidates) {
+    const prof = profile === 'driving' ? 'driving' : 'walking';
+    const url =
+      `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${anchorLng},${anchorLat}` +
+      `?contours_minutes=${minutes}&polygons=true&access_token=${this.token}`;
+
+    try {
+      const res = await this._fetchWithRetry(url);
+      if (!res.ok) return JSON.stringify({ error: `Isochrone API ${res.status}` });
+      const data = await res.json();
+
+      const polygon = data.features?.[0];
+      if (!polygon) return JSON.stringify({ error: 'isochrone polygon not returned' });
+
+      this._lastIsochroneData = { polygon, anchorLat, anchorLng, minutes, profile: prof };
+
+      const results = candidates.map(c => {
+        const inside = c.longitude != null && c.latitude != null
+          ? turf.booleanPointInPolygon(turf.point([c.longitude, c.latitude]), polygon)
+          : false;
+        return { ...c, inside };
+      });
+
+      const insideItems  = results.filter(r => r.inside).map(({ name, latitude, longitude }) => ({ name, latitude, longitude }));
+      const outsideItems = results.filter(r => !r.inside).map(({ name }) => ({ name }));
+
+      return this._minify({
+        source:        'Mapbox Isochrone API',
+        profile:       prof,
+        minutes,
+        inside_count:  insideItems.length,
+        outside_count: outsideItems.length,
+        inside_items:  insideItems,
+        outside_items: outsideItems,
+      });
+    } catch (err) {
+      if (this.config.DEBUG) console.error('[MapboxMCP] _filterByIsochrone error:', err);
+      return JSON.stringify({ error: err.message });
+    }
+  }
+
 
   // ─────────────────────────────────────────────────────────────
   // Tool impl: find_intersections
