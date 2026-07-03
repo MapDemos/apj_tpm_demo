@@ -867,9 +867,18 @@ class LocationFinderApp {
     if (toolName === 'search_nearby_poi' && args.proximity?.length >= 2) {
       const [pLng, pLat] = args.proximity;
       this.map.flyTo({ center: [pLng, pLat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
-      if (args.bbox?.length === 4) {
+      // radius_metersからbboxを計算（MCP側と同じロジック）
+      let vizBbox = args.bbox;
+      if (args.radius_meters != null && !vizBbox) {
+        const r    = Math.min(args.radius_meters, 250);
+        const dLng = r / (111320 * Math.cos(pLat * Math.PI / 180));
+        const dLat = r / 110540;
+        vizBbox = [pLng - dLng, pLat - dLat, pLng + dLng, pLat + dLat];
+      }
+
+      if (vizBbox?.length === 4) {
         // Replicate _gridTilequeryPOI grid logic (with inset) to show actual scan circles
-        const [minX, minY, maxX, maxY] = args.bbox;
+        const [minX, minY, maxX, maxY] = vizBbox;
         const gridRadius = 200;
         const spacingM   = gridRadius * 1.5;
         const DEG_LNG    = 1 / (111320 * Math.cos(pLat * Math.PI / 180));

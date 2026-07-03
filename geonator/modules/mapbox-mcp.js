@@ -73,10 +73,11 @@ class MapboxMCPClient {
         input_schema: {
           type: 'object',
           properties: {
-            queries:      { type: 'array', items: { type: 'string' }, description: 'Query Expansion済みクエリ配列' },
-            proximity:    { type: 'array', items: { type: 'number' }, description: '[lng,lat]' },
-            bbox:         { type: 'array', items: { type: 'number' }, description: '[minX,minY,maxX,maxY]' },
-            query_intent: {
+            queries:       { type: 'array', items: { type: 'string' }, description: 'Query Expansion済みクエリ配列' },
+            proximity:     { type: 'array', items: { type: 'number' }, description: '[lng,lat]' },
+            radius_meters: { type: 'number', description: '検索半径（m）。proximityと組み合わせて使用。MCPがbboxを自動計算する。get_midpoint_areaのbbox結果を使う場合はbboxを直接渡すこと。' },
+            bbox:          { type: 'array', items: { type: 'number' }, description: '[minX,minY,maxX,maxY]。get_midpoint_area結果等を直接渡す場合のみ使用。通常はradius_metersを使うこと。' },
+            query_intent:  {
               type: 'string',
               enum: ['specific', 'category_building', 'category_busstop'],
               description: 'クエリの種別。specific=固有名・通常POI、category_building=マンション/アパート/ビルのカテゴリ検索、category_busstop=バス停カテゴリ検索',
@@ -230,7 +231,7 @@ class MapboxMCPClient {
           const queries = Array.isArray(args.queries)
             ? args.queries
             : (args.queries ? [args.queries] : []);
-          return await this._searchNearbyPOI(queries, args.proximity || null, args.bbox || null, args.query_intent || null);
+          return await this._searchNearbyPOI(queries, args.proximity || null, args.bbox || null, args.query_intent || null, args.radius_meters || null);
         }
         case 'scan_street_features':
           return await this._scanStreetFeatures(args.lat, args.lng, args.radius, args.target || 'both');
@@ -597,9 +598,18 @@ class MapboxMCPClient {
    * place クエリ:
    *   → Search Box のみ（streets-v8 に place データなし）
    */
-  async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null) {
+  async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null) {
     const MAX_EXPANSIONS = 3;
     const EXPAND_FACTOR  = 1.2;
+
+    // radius_meters → bbox 変換（Claudeの代わりにMCPが計算）
+    if (radiusMeters != null && proximity?.length >= 2 && !bbox) {
+      const [lng, lat] = proximity;
+      const r      = Math.min(radiusMeters, 250); // 250m上限
+      const dLng   = r / (111320 * Math.cos(lat * Math.PI / 180));
+      const dLat   = r / 110540;
+      bbox = [lng - dLng, lat - dLat, lng + dLng, lat + dLat];
+    }
 
     // Coordinate-based dedup key: merges same-location results across both APIs
     const dedupKey = item => {
