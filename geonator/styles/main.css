@@ -790,3 +790,34 @@ html, body {
   color: #e0e7ff !important;
   opacity: 1 !important;
 }
+/* Debug pause tabs */
+.debug-tabs { margin: 8px 0 6px; }
+.debug-tab-bar { display: flex; gap: 4px; margin-bottom: 6px; }
+.debug-tab {
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 4px;
+  color: #94a3b8;
+  font-size: 11px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.debug-tab.active {
+  background: rgba(99,102,241,.2);
+  border-color: #818cf8;
+  color: #c4b5fd;
+}
+.debug-tab-content {
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: 11px;
+}
+.debug-poi-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 4px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.debug-poi-name { color: #e2e8f0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.debug-poi-dist { color: #64748b; margin-left: 8px; flex-shrink: 0; }
+.debug-poi-empty { color: #475569; font-style: italic; padding: 4px; }

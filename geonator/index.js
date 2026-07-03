@@ -216,6 +216,7 @@ class LocationFinderApp {
       this.mapboxMCP._tqRequests  = 0;
       this.mapboxMCP._tqCacheHits = 0;
       this.mapboxMCP._tqCache.clear();
+      this.mapboxMCP._poiGridCache?.clear();
     }
     this._updateAPICountDisplay();
     // Resolve any pending debug pause
@@ -1680,6 +1681,33 @@ class LocationFinderApp {
 
       // Create pause message element
       const pauseId = `debug-next-${this._debugPauseCount++}`;
+
+      // Build tabs HTML for search_nearby_poi
+      let tabsHtml = '';
+      if (toolName === 'search_nearby_poi') {
+        try {
+          const r = JSON.parse(resultStr);
+          const dbg = r._debug;
+          if (dbg) {
+            const renderList = (items) => (items || []).length
+              ? (items || []).map(i => `<div class="debug-poi-item"><span class="debug-poi-name">${_esc(i.name)}</span><span class="debug-poi-dist">${i.distance ?? '-'}m</span></div>`).join('')
+              : '<div class="debug-poi-empty">0件</div>';
+
+            tabsHtml = `
+              <div class="debug-tabs">
+                <div class="debug-tab-bar">
+                  <button class="debug-tab active" data-tab="sb">Search Box (${dbg.sb_count})</button>
+                  <button class="debug-tab" data-tab="tq">Tilequery (${dbg.tq_count})</button>
+                  <button class="debug-tab" data-tab="all">合計 (${r.count})</button>
+                </div>
+                <div class="debug-tab-content" id="${pauseId}-tab-sb">${renderList(dbg.sb_items)}</div>
+                <div class="debug-tab-content" id="${pauseId}-tab-tq" style="display:none">${renderList(dbg.tq_items)}</div>
+                <div class="debug-tab-content" id="${pauseId}-tab-all" style="display:none">${renderList([...(dbg.sb_items||[]), ...(dbg.tq_items||[])])}</div>
+              </div>
+            `;
+          }
+        } catch(_) {}
+      }
       const container = document.getElementById('chatMessages');
       const wrapper = document.createElement('div');
       wrapper.className = 'message debug-pause';
@@ -1689,6 +1717,7 @@ class LocationFinderApp {
           <div class="debug-tool-name">${getToolLabel(toolName, this._lang)}</div>
           ${inputSummary ? `<div class="debug-input-summary">入力: ${_esc(inputSummary)}</div>` : ''}
           <div class="debug-result-summary">結果: ${_esc(summary)}</div>
+          ${tabsHtml}
           <button class="debug-next-btn" id="${pauseId}">▶ 次のステップへ</button>
         </div>
       `;
@@ -1703,6 +1732,17 @@ class LocationFinderApp {
         document.getElementById(pauseId).textContent = '✓ 続行';
         this._debugStepResolve = null;
         resolve();
+      });
+
+      wrapper.querySelectorAll('.debug-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          wrapper.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          const target = tab.dataset.tab;
+          wrapper.querySelectorAll('.debug-tab-content').forEach(c => c.style.display = 'none');
+          const content = document.getElementById(`${pauseId}-tab-${target}`);
+          if (content) content.style.display = 'block';
+        });
       });
     });
   }

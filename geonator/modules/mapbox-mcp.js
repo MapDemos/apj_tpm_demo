@@ -29,6 +29,7 @@ class MapboxMCPClient {
     this._tqRequests     = 0;   // Tilequery API request count (actual fetches only)
     this._tqCacheHits    = 0;   // Tilequery cache hits
     this._tqCache        = new Map(); // url → parsed JSON (cleared on chat reset)
+    this._poiGridCache   = new Map();
   }
 
   /**
@@ -637,7 +638,7 @@ class MapboxMCPClient {
       const busStops = await this._busStopFallback(lat, lng, radius);
       busStops.forEach(item => { if (!seen.has(item.name)) seen.set(item.name, item); });
       const items = [...seen.values()].slice(0, 150);
-      return this._minify({ source: 'バス停タイルセット (10da032y.busstop_gov_0608)', count: items.length, items });
+      return this._minify({ source: 'バス停タイルセット (10da032y.busstop_gov_0608)', count: items.length, items, _debug: { sb_count: 0, tq_count: items.length, sb_items: [], tq_items: items.slice(0,30).map(i=>({name:i.name,distance:i.distance})) } });
     }
 
     // ── Building priority: Grid Tilequery ONLY (マンション/アパート/ビル/ホテル) ──
@@ -695,13 +696,16 @@ class MapboxMCPClient {
         ? (seen.size > 0 && items[0].full_address !== undefined
             ? 'Search Box (building fallback)' : 'Tilequery poi_label grid (buildings)')
         : 'no results';
-      return this._minify({ source: src, count: items.length, items });
+      return this._minify({ source: src, count: items.length, items, _debug: { sb_count: 0, tq_count: items.length, sb_items: [], tq_items: items.slice(0,30).map(i=>({name:i.name,distance:i.distance})) } });
     }
 
     let currentBbox = bbox ? this._capBBox([...bbox]) : null;
 
     // Determine if any query should trigger Tilequery (poi or both = has POI intent)
     const hasPOIQuery = queries.some(q => MapboxMCPClient.classifyQueryType(q) !== 'place');
+
+    let sbCount = 0, tqCount = 0;
+    const sbItems = [], tqItems = [];
 
     for (let exp = 0; exp <= MAX_EXPANSIONS; exp++) {
 
@@ -729,18 +733,15 @@ class MapboxMCPClient {
       ]);
 
       // ── Merge with coordinate-based dedup ──
-      // Search Box results: pass through as-is (already relevance-ranked by ML)
+
       sbResultArrays.flat().forEach(item => {
         const key = dedupKey(item);
-        if (!seen.has(key)) seen.set(key, item);
+        if (!seen.has(key)) { seen.set(key, item); sbItems.push(item); sbCount++; }
       });
-      // Tilequery results: filter by query terms before merging
-      // (poi_label returns everything in radius; keep only items whose name
-      //  contains at least one query term to suppress irrelevant noise)
       tqResults.forEach(item => {
         if (!this._matchesAnyQuery(item.name, queries)) return;
         const key = dedupKey(item);
-        if (!seen.has(key)) seen.set(key, item);
+        if (!seen.has(key)) { seen.set(key, item); tqItems.push(item); tqCount++; }
       });
 
       if (seen.size > 0 || exp === MAX_EXPANSIONS) break;
@@ -772,7 +773,17 @@ class MapboxMCPClient {
       ? (tqActuallyRan ? 'Search Box + Tilequery poi_label (parallel)' : 'Search Box API')
       : 'no results';
 
-    return this._minify({ source, count: items.length, items });
+    return this._minify({
+      source,
+      count: items.length,
+      items,
+      _debug: {
+        sb_count: sbCount,
+        tq_count: tqCount,
+        sb_items: sbItems.slice(0, 30).map(i => ({ name: i.name, distance: i.distance })),
+        tq_items: tqItems.slice(0, 30).map(i => ({ name: i.name, distance: i.distance })),
+      },
+    });
   }
 
   /**
@@ -786,6 +797,12 @@ class MapboxMCPClient {
    * @param {number}        radius   - per-point radius in meters (default 100)
    */
   async _gridTilequeryPOI(centerLat, centerLng, bbox, radius = 200) {
+    const bboxKey  = bbox?.map(v => Math.round(v * 10000)).join(',') ?? 'null';
+    const gridKey  = `${Math.round(centerLat * 10000)},${Math.round(centerLng * 10000)},r${radius},${bboxKey}`;
+    if (this._poiGridCache.has(gridKey)) {
+      if (this.config.DEBUG) console.log(`[POI grid cache HIT] ${gridKey}`);
+      return this._poiGridCache.get(gridKey);
+    }
     const DEG_LNG = 1 / (111320 * Math.cos(centerLat * Math.PI / 180));
     const DEG_LAT = 1 / 110540;
     const spacingM = radius * 1.5; // 50% overlap between adjacent circles
@@ -854,12 +871,15 @@ class MapboxMCPClient {
     // Each Tilequery returns tilequery.distance relative to its own grid point,
     // so mixed distances would be incomparable. Replace with uniform proximity-based distance.
     const centerPt = turf.point([centerLng, centerLat]);
-    return [...seen.values()].map(item => ({
+    const gridResult = [...seen.values()].map(item => ({
       ...item,
       distance: item.longitude != null && item.latitude != null
         ? Math.round(turf.distance(centerPt, turf.point([item.longitude, item.latitude]), { units: 'meters' }))
         : item.distance,
     })).sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
+
+    this._poiGridCache.set(gridKey, gridResult);
+    return gridResult;
   }
 
   /**
