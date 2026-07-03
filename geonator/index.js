@@ -1273,12 +1273,12 @@ class LocationFinderApp {
           const toolStep   = this._addThinkingStep(label);
           const toolHandle = PerfLogger.startOp(`Tool: ${tu.name}`);
           this._showMapComputing(tu.name, tu.input);
-          this._visualizeSearchArgs(tu.name, tu.input);
+          if (this._debugMode) this._visualizeSearchArgs(tu.name, tu.input);
 
           const result = await this._executeTool(tu.name, tu.input);
 
           this._hideMapComputing();
-          this._visualizeToolResult(tu.name, result);
+          if (this._debugMode) this._visualizeToolResult(tu.name, result);
           this._updateAPICountDisplay();
           const toolElapsed = PerfLogger.endOp(toolHandle);
           this._resolveThinkingStep(toolStep, toolElapsed + 's');
