@@ -1641,12 +1641,7 @@ class MapboxMCPClient {
     const makeBox = (x1, y1, x2, y2, x3, y3, x4, y4) =>
       turf.polygon([[[x1,y1],[x2,y2],[x3,y3],[x4,y4],[x1,y1]]]);
 
-    const dirs = direction.split('').reduce((acc, _, i, arr) => {
-      // Parse 'north','south','east','west','northeast','northwest','southeast','southwest'
-      return acc;
-    }, null);
-
-    // Simple approach: decompose diagonal into two cardinal clips
+    // 斜め方向は2つの基本方向に分解してclip
     const cards = [];
     if (direction.includes('north')) cards.push('north');
     if (direction.includes('south')) cards.push('south');
@@ -1657,7 +1652,7 @@ class MapboxMCPClient {
     for (const card of cards) {
       const [x1,y1,x2,y2,x3,y3,x4,y4] = halfPlane[card];
       const box = makeBox(x1,y1,x2,y2,x3,y3,x4,y4);
-      const result = turf.intersect(turf.featureCollection([clipped, box]));
+      const result = turf.intersect(clipped, box); // turf v6: intersect(poly1, poly2)
       if (result) clipped = result;
     }
     return clipped;
