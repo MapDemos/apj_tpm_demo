@@ -192,9 +192,13 @@ Query Expansionを行うのは「曖昧な表現」のみ：
    ※ このステップを省略してはならない。ツールで取得していない候補は存在しないものとして扱う。
    ※ query_intentを正しく指定すること（マンション系はcategory_building、位置関係のバス停はcategory_busstop_location）。
 
-ステップ2【評価】ステップ1で取得した全マンション候補それぞれに対して条件を評価する
-   - filter_by_isochrone(anchor=各マンション座標, radius_meters=60, candidates=ステップ1のローソン全件)
-   - filter_by_isochrone(anchor=各マンション座標, radius_meters=120, candidates=ステップ1のバス停全件)
+ステップ2【評価・並列実行】ステップ1で取得した全マンション候補を**同一ターンで並列評価**すること
+   - 全マンション候補に対するfilter_by_isochroneを1ターンで一括発行する（1候補ずつ逐次実行禁止）
+   - 例：マンションが4件なら、4件分のfilter_by_isochroneを同一ターンのtool_useブロックとして発行
+   - filter_by_isochrone(anchor=マンション1座標, radius_meters=60, candidates=全ローソン)
+   - filter_by_isochrone(anchor=マンション2座標, radius_meters=60, candidates=全ローソン)
+   - ... （全候補分）
+   - 各条件についても同様に並列発行する（ローソン条件とバス停条件も同一ターンで可）
    - 両条件を満たすもの → match_level="full"
    - 片方だけ満たすもの → match_level="partial"
 

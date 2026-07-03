@@ -1394,32 +1394,52 @@ class LocationFinderApp {
 
         this._currentTurn = turn + 1;
 
-        for (const tu of toolUseBlocks) {
-          const label = getToolLabel(tu.name, this._lang);
-          this._updateThinking(label);
-          const toolStep   = this._addThinkingStep(label);
-          const toolHandle = PerfLogger.startOp(`Tool: ${tu.name}`);
-          this._showMapComputing(tu.name, tu.input);
-          if (this._debugMode) this._visualizeSearchArgs(tu.name, tu.input);
+        // 複数ツールが返された場合、デバッグモード以外では並列実行
+        const parallel = !this._debugMode && toolUseBlocks.length > 1;
 
-          const result = await this._executeTool(tu.name, tu.input);
+        if (parallel) {
+          this._updateThinking(`⚡ ${toolUseBlocks.length}件 並列実行中…`);
+          const parallelSteps = toolUseBlocks.map(tu =>
+            this._addThinkingStep(`${getToolLabel(tu.name, this._lang)} (並列)`)
+          );
+
+          const results = await Promise.all(toolUseBlocks.map(async (tu, i) => {
+            const toolHandle = PerfLogger.startOp(`Tool: ${tu.name}`);
+            const result = await this._executeTool(tu.name, tu.input);
+            this._updateAPICountDisplay();
+            const elapsed = PerfLogger.endOp(toolHandle);
+            this._resolveThinkingStep(parallelSteps[i], elapsed + 's');
+            return result;
+          }));
 
           this._hideMapComputing();
-          if (this._debugMode) this._visualizeToolResult(tu.name, result);
-          this._updateAPICountDisplay();
-          const toolElapsed = PerfLogger.endOp(toolHandle);
-          this._resolveThinkingStep(toolStep, toolElapsed + 's');
-
-          // ── Debug step pause ──────────────────────────────────
-          if (this._debugMode) {
-            await this._debugPause(tu.name, tu.input, result);
-          }
-
-          toolResults.push({
-            type:        'tool_result',
-            tool_use_id: tu.id,
-            content:     result,
+          toolUseBlocks.forEach((tu, i) => {
+            toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: results[i] });
           });
+        } else {
+          // 逐次実行（デバッグモード or 単一ツール）
+          for (const tu of toolUseBlocks) {
+            const label = getToolLabel(tu.name, this._lang);
+            this._updateThinking(label);
+            const toolStep   = this._addThinkingStep(label);
+            const toolHandle = PerfLogger.startOp(`Tool: ${tu.name}`);
+            this._showMapComputing(tu.name, tu.input);
+            if (this._debugMode) this._visualizeSearchArgs(tu.name, tu.input);
+
+            const result = await this._executeTool(tu.name, tu.input);
+
+            this._hideMapComputing();
+            if (this._debugMode) this._visualizeToolResult(tu.name, result);
+            this._updateAPICountDisplay();
+            const toolElapsed = PerfLogger.endOp(toolHandle);
+            this._resolveThinkingStep(toolStep, toolElapsed + 's');
+
+            if (this._debugMode) {
+              await this._debugPause(tu.name, tu.input, result);
+            }
+
+            toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: result });
+          }
         }
 
         this.messages.push({ role: 'user', content: toolResults });
