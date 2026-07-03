@@ -186,10 +186,11 @@ Query Expansionを行うのは「曖昧な表現」のみ：
 フロー（必ず全ステップを実行すること）：
 
 ステップ1【二次検索】条件に登場するPOIをsearch_nearby_poiで全件取得する
-   - search_nearby_poi(queries=["ローソン"], bbox=<エリアbbox>) → 全ローソンを取得
-   - search_nearby_poi(queries=["バス停"], bbox=<エリアbbox>) → 全バス停を取得
-   - search_nearby_poi(queries=["マンション"], bbox=<エリアbbox>) → 全マンションを取得
+   - search_nearby_poi(queries=["ローソン"], query_intent="specific", bbox=<エリアbbox>) → 全ローソンを取得
+   - search_nearby_poi(queries=["バス停"], query_intent="category_busstop", proximity=<中心座標>, radius_meters=200) → 全バス停を取得
+   - search_nearby_poi(queries=["マンション"], query_intent="category_building", proximity=<中心座標>, radius_meters=200) → 全マンションを取得
    ※ このステップを省略してはならない。ツールで取得していない候補は存在しないものとして扱う。
+   ※ query_intentを正しく指定すること（マンション系はcategory_building、バス停はcategory_busstop）。
 
 ステップ2【評価】ステップ1で取得した全マンション候補それぞれに対して条件を評価する
    - filter_by_isochrone(anchor=各マンション座標, radius_meters=60, candidates=ステップ1のローソン全件)
