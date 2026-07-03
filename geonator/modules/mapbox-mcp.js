@@ -644,15 +644,20 @@ class MapboxMCPClient {
     const EXPAND_FACTOR  = 1.2;
 
     // ── 信号・交差点クエリ: Tilequeryのみ（Search Box不可） ──
+    // bboxが渡されている場合（localityのbbox等）はそのbboxの外接円半径を使い全域をカバーする
     if (queryIntent === 'intersection' && proximity?.length >= 2) {
       const [lng, lat] = proximity;
-      const r = Math.min(radiusMeters ?? 150, 400);
+      const r = bbox?.length >= 4
+        ? Math.min(Math.ceil(this._bboxToRadius(bbox)), 400)
+        : Math.min(radiusMeters ?? 150, 400);
       const nameFilter = queries?.[0] || null;
       return await this._findIntersections(lat, lng, r, nameFilter);
     }
     if (queryIntent === 'signal' && proximity?.length >= 2) {
       const [lng, lat] = proximity;
-      const r = Math.min(radiusMeters ?? 150, 400);
+      const r = bbox?.length >= 4
+        ? Math.min(Math.ceil(this._bboxToRadius(bbox)), 400)
+        : Math.min(radiusMeters ?? 150, 400);
       return await this._findTrafficSignals(lat, lng, r);
     }
 
