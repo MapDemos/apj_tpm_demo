@@ -478,6 +478,9 @@ class MapboxMCPClient {
       return (data.features || []).map(f => {
         const p = f.properties || {};
         const c = p.coordinates || {};
+        const ft = p.feature_type || null;
+        // bbox is meaningful for locality type only; address/poi bbox is essentially a point
+        const bbox = (ft === 'locality') ? (p.bbox || null) : null;
         return {
           name:         p.name         || null,
           full_address: p.full_address || null,
@@ -486,6 +489,8 @@ class MapboxMCPClient {
           poi_category: p.poi_category || null,
           brand:        p.brand        || null,
           distance:     p.distance     ?? null,
+          feature_type: ft,
+          bbox:         bbox,
         };
       }).filter(f => f.longitude != null && f.latitude != null);
 

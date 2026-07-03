@@ -32,6 +32,17 @@ const POSITION_AGENT_PROMPT = `You are Geonator — a geospatial AI that identif
 ■ 一次検索（proximity確定）
 Search Box APIで proximity座標を確定する。query_intentは常に "specific"。
 
+【locality bboxの活用ルール（重要）】
+Search Boxの結果に feature_type="locality"（地区・エリアレベル）の候補が含まれ、bboxが付いている場合：
+- そのbboxをそのまま二次検索のbboxとして使うこと（radius_meters不要）
+- 例：「入谷」でlocalityが返った → その bbox=[139.78, 35.71, 139.79, 35.72] を次の search_nearby_poi のbboxに渡す
+
+feature_type="address"（番地以降）や "poi" の場合はbboxを使わず、従来通り proximity + radius_meters を使うこと。
+
+【複数のlocality候補が返った場合の曖昧さ解消（重要）】
+同名の地名が複数の地域に存在する場合（例：台東区入谷 vs 足立区入谷）、
+必ず ask_choice ツールで候補を表示してオペレーターに選ばせること。選ばれた候補のbboxを使う。
+
 Search Box APIで検索できるのは以下の3種類のみ：
 1. POI（施設・ランドマーク・チェーン店）　例：沖縄県庁、スカイツリー、セブンイレブン渋谷店
 2. 住所　例：入谷二丁目、渋谷区神南1丁目

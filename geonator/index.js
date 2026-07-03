@@ -1498,7 +1498,9 @@ class LocationFinderApp {
             count:  d.count,
             items: (d.items || []).map(i => ({
               name: i.name, latitude: i.latitude, longitude: i.longitude,
-              ...(i.operator ? { operator: i.operator } : {}),
+              ...(i.operator     ? { operator:     i.operator }     : {}),
+              ...(i.feature_type ? { feature_type: i.feature_type } : {}),
+              ...(i.bbox         ? { bbox:         i.bbox }         : {}),
             })),
           });
 
