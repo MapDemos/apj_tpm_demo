@@ -51,6 +51,9 @@ class LocationFinderApp {
     // Current agent loop turn (for layer metadata)
     this._currentTurn = 0;
 
+    // Flag: finalize_location_marker was called during the current loop
+    this._finalizedDuringLoop = false;
+
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -413,7 +416,7 @@ class LocationFinderApp {
 
     document.getElementById('mapStatus').textContent = `📍 ${address}`;
 
-    this._showResolutionPanel();
+    this._finalizedDuringLoop = true; // ループ終了後にパネルを表示するフラグ
     return `確定: ${address} [${lat}, ${lng}]`;
   }
 
@@ -1396,8 +1399,10 @@ class LocationFinderApp {
     const totalSec = PerfLogger.endQuery(turnCount);
     this.addMessage('tool-status', `⏱ 完了: ${totalSec}s / APIターン ${turnCount}回`);
 
-    // finalMarkerがあるのにパネルが出ていない場合は確実に表示
-    if (this.finalMarker && !document.getElementById('resolutionPanel')) {
+    // ループ中にfinalizeされた場合、全メッセージの後に確実にパネルを表示
+    if (this._finalizedDuringLoop) {
+      this._finalizedDuringLoop = false;
+      document.getElementById('resolutionPanel')?.remove();
       this._showResolutionPanel();
     }
   }
