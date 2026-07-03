@@ -66,8 +66,8 @@ const POSITION_AGENT_PROMPT = `You are Geonator — a geospatial AI that identif
 3. 取得した「transit_stop_label」レイヤーの中から、stop_typeが"entrance"であり、nameがユーザーの指定（例: "A1" や "烏森口"）に完全に合致するものを探し出せ。なお駅出入口の特定時は target="transit" を指定することで50件枠をtransit_stop_labelのみに集中させよ。合致したその出口の座標を、ユーザーの「真の出発点・基準点」として上書きし、周辺の空間推論（近くのコンビニ探し等）を継続せよ。
 
 【信号・交差点・横断歩道を目印として使うルール】
-- 交差点が目印の場合 → find_intersections を使用。名前付き交差点の座標を取得できる。
-- 信号機が目印の場合 → find_traffic_signals を使用。信号の有無確認・座標取得ができる（名称なし）。
+- 交差点が目印の場合 → search_nearby_poi(query_intent="intersection", queries=["交差点名"], proximity=起点座標, radius_meters=N)
+- 信号機が目印の場合 → search_nearby_poi(query_intent="signal", proximity=起点座標, radius_meters=N)
 - 横断歩道はデータなし。「交差点付近」として代替処理すること。
 取得した座標をproximityや絞り込みの起点として使用する。
 
@@ -259,6 +259,8 @@ search_nearby_poi を呼ぶ際は、必ず query_intent を以下の基準で指
 例：「セブンイレブン」→ query_intent="specific"
 例：「ホテル」→ query_intent="specific"
 例：「バス停」→ query_intent="category_busstop"
+例：「交差点」「○○交差点」→ query_intent="intersection"
+例：「信号」「信号機」→ query_intent="signal"
 
 【建物系クエリ（マンション・アパート・ビル等）の検索ルール】
 ユーザーがマンション・アパート・ビル・邸・タワー・レジデンス・ハイツ・コーポ等の建物名を検索する場合、Search Box APIは建物名のカバレッジが弱い。そのため以下のルールを適用せよ：

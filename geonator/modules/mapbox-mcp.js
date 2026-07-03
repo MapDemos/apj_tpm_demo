@@ -80,8 +80,8 @@ class MapboxMCPClient {
             bbox:          { type: 'array', items: { type: 'number' }, description: '[minX,minY,maxX,maxY]。get_midpoint_area結果等を直接渡す場合のみ使用。通常はradius_metersを使うこと。' },
             query_intent:  {
               type: 'string',
-              enum: ['specific', 'category_building', 'category_busstop'],
-              description: 'クエリの種別。specific=固有名・通常POI、category_building=マンション/アパート/ビルのカテゴリ検索、category_busstop=バス停カテゴリ検索',
+              enum: ['specific', 'category_building', 'category_busstop', 'intersection', 'signal'],
+              description: 'クエリの種別。specific=固有名・通常POI、category_building=マンション/アパート/ビルのカテゴリ検索、category_busstop=バス停、intersection=交差点（Tilequeryのみ）、signal=信号機（Tilequeryのみ）',
             },
           },
           required: ['queries'],
@@ -637,6 +637,19 @@ class MapboxMCPClient {
   async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null) {
     const MAX_EXPANSIONS = 3;
     const EXPAND_FACTOR  = 1.2;
+
+    // ── 信号・交差点クエリ: Tilequeryのみ（Search Box不可） ──
+    if (queryIntent === 'intersection' && proximity?.length >= 2) {
+      const [lng, lat] = proximity;
+      const r = Math.min(radiusMeters ?? 150, 400);
+      const nameFilter = queries?.[0] || null;
+      return await this._findIntersections(lat, lng, r, nameFilter);
+    }
+    if (queryIntent === 'signal' && proximity?.length >= 2) {
+      const [lng, lat] = proximity;
+      const r = Math.min(radiusMeters ?? 150, 400);
+      return await this._findTrafficSignals(lat, lng, r);
+    }
 
     // radius_meters → bbox 変換（Claudeの代わりにMCPが計算）
     if (radiusMeters != null && proximity?.length >= 2 && !bbox) {
