@@ -104,7 +104,6 @@ class MapboxMCPClient {
         },
       },
 
-      {
       // ── Tool: check_same_building ─────────────────────────────
       {
         name: 'check_same_building',
