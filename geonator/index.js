@@ -1384,6 +1384,13 @@ class LocationFinderApp {
         break;
       }
 
+      // ── max_tokens: 出力トークン上限に到達 ────────────────────
+      if (data.stop_reason === 'max_tokens') {
+        if (textContent) this.addMessage('assistant', textContent);
+        this.addMessage('error', '⚠️ 出力トークン上限に達しました。MAX_TOKENSを増やすか、クエリを分割してください。');
+        break;
+      }
+
       // ── tool_use ───────────────────────────────────────────────
       if (data.stop_reason === 'tool_use') {
         toolTurnCount++;
