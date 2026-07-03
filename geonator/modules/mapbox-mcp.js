@@ -186,8 +186,9 @@ class MapboxMCPClient {
           '【使用API】Mapbox Directions API（durationのみ取得・軽量版）\n' +
           '2点間の移動時間（秒・分）を取得する。「〜から歩いてn分」「〜から車でn分くらいのところ」という時間ベースの位置条件を検証する際に使用。\n' +
           '候補が複数ある場合は全候補に対して実行し、ユーザーのn分と一致（n×0.5〜n×1.5の範囲）するものを優先。duration_textを根拠としてオペレーターに提示。\n' +
-          '返却: {duration_seconds, duration_minutes, duration_text("約X分"), profile}\n' +
-          'get_route_poisとの違い: こちらは候補が正しい時間圏内にあるかの検証専用（POI絞り込みはしない）',
+          '返却: {duration_seconds, duration_minutes, duration_text("約X分"), distance_meters, distance_text, profile}\n' +
+          'get_route_poisとの違い: こちらは候補が正しい時間圏内にあるかの検証専用（POI絞り込みはしない）\n' +
+          '2点間の距離計算にも使用可（distance_metersを参照）',
         input_schema: {
           type: 'object',
           properties: {
@@ -231,6 +232,11 @@ class MapboxMCPClient {
             anchor_lng: { type: 'number', description: 'アンカー地点の経度' },
             minutes:    { type: 'number', enum: [3, 10, 20], description: '到達時間(分): 3/10/20から選択' },
             profile:    { type: 'string', enum: ['walking', 'driving'], description: 'デフォルト: walking' },
+            direction:  {
+              type: 'string',
+              enum: ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'],
+              description: '方向制約。「北に3分」→ north、「北東方向」→ northeast。省略可（全方向）。',
+            },
             candidates: {
               type: 'array',
               description: '判定する候補POIリスト',
@@ -318,7 +324,7 @@ class MapboxMCPClient {
           return await this._filterByIsochrone(
             args.anchor_lat, args.anchor_lng,
             args.minutes, args.profile || 'walking',
-            args.candidates || []
+            args.candidates || [], args.direction || null
           );
         case 'find_intersections':
           return await this._findIntersections(args.lat, args.lng, args.radius, args.name_filter || null);
@@ -1393,17 +1399,21 @@ class MapboxMCPClient {
         return JSON.stringify({ error: 'ルートが取得できませんでした', code: data.code });
       }
 
-      const secs    = data.routes[0].duration;           // seconds (float)
+      const secs    = data.routes[0].duration;
+      const meters  = data.routes[0].distance;
       const minutes = secs / 60;
       const rounded = Math.round(minutes);
-      const text    = rounded < 1 ? '約1分未満' : `約${rounded}分`;
+      const timeText = rounded < 1 ? '約1分未満' : `約${rounded}分`;
+      const distText = meters < 1000 ? `約${Math.round(meters)}m` : `約${(meters / 1000).toFixed(1)}km`;
 
       return this._minify({
         source:           'Mapbox Directions API',
         profile:          prof,
         duration_seconds: Math.round(secs),
-        duration_minutes: Math.round(minutes * 10) / 10,  // 1 decimal
-        duration_text:    text,
+        duration_minutes: Math.round(minutes * 10) / 10,
+        duration_text:    timeText,
+        distance_meters:  Math.round(meters),
+        distance_text:    distText,
       });
 
     } catch (err) {
@@ -1493,7 +1503,41 @@ class MapboxMCPClient {
   // Tool impl: filter_by_isochrone
   // ─────────────────────────────────────────────────────────────
 
-  async _filterByIsochrone(anchorLat, anchorLng, minutes, profile, candidates) {
+  _clipIsochroneToDirection(polygon, anchorLng, anchorLat, direction) {
+    const B = 1; // 約100km、十分大きい
+    const n = anchorLat + B, s = anchorLat - B, e = anchorLng + B, w = anchorLng - B;
+    const halfPlane = {
+      north: [w, anchorLat, e, anchorLat, e, n, w, n],
+      south: [w, s, e, s, e, anchorLat, w, anchorLat],
+      east:  [anchorLng, s, e, s, e, n, anchorLng, n],
+      west:  [w, s, anchorLng, s, anchorLng, n, w, n],
+    };
+    const makeBox = (x1, y1, x2, y2, x3, y3, x4, y4) =>
+      turf.polygon([[[x1,y1],[x2,y2],[x3,y3],[x4,y4],[x1,y1]]]);
+
+    const dirs = direction.split('').reduce((acc, _, i, arr) => {
+      // Parse 'north','south','east','west','northeast','northwest','southeast','southwest'
+      return acc;
+    }, null);
+
+    // Simple approach: decompose diagonal into two cardinal clips
+    const cards = [];
+    if (direction.includes('north')) cards.push('north');
+    if (direction.includes('south')) cards.push('south');
+    if (direction.includes('east'))  cards.push('east');
+    if (direction.includes('west'))  cards.push('west');
+
+    let clipped = polygon;
+    for (const card of cards) {
+      const [x1,y1,x2,y2,x3,y3,x4,y4] = halfPlane[card];
+      const box = makeBox(x1,y1,x2,y2,x3,y3,x4,y4);
+      const result = turf.intersect(turf.featureCollection([clipped, box]));
+      if (result) clipped = result;
+    }
+    return clipped;
+  }
+
+  async _filterByIsochrone(anchorLat, anchorLng, minutes, profile, candidates, direction = null) {
     const prof = profile === 'driving' ? 'driving' : 'walking';
     const url =
       `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${anchorLng},${anchorLat}` +
@@ -1504,10 +1548,14 @@ class MapboxMCPClient {
       if (!res.ok) return JSON.stringify({ error: `Isochrone API ${res.status}` });
       const data = await res.json();
 
-      const polygon = data.features?.[0];
+      let polygon = data.features?.[0];
       if (!polygon) return JSON.stringify({ error: 'isochrone polygon not returned' });
 
-      this._lastIsochroneData = { polygon, anchorLat, anchorLng, minutes, profile: prof };
+      if (direction) {
+        polygon = this._clipIsochroneToDirection(polygon, anchorLng, anchorLat, direction);
+      }
+
+      this._lastIsochroneData = { polygon, anchorLat, anchorLng, minutes, profile: prof, direction };
 
       const results = candidates.map(c => {
         const inside = c.longitude != null && c.latitude != null
