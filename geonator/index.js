@@ -1235,7 +1235,7 @@ class LocationFinderApp {
         name: 'log_flow_step',
         description:
           '各フローステップの完了を記録する。ステップの順序を監視し、スキップや余分な実行を検出する。' +
-          '必須ステップ: input_eval → primary_search → step1_main → step1_conditions → step2_eval → result_present。' +
+          '必須ステップ: input_eval → primary_search → step1_main → step1_type_check → step1_conditions → step2_eval → result_present。' +
           'Step1以降を繰り返す場合: step1_prime → step2_eval → result_present。' +
           '結果: {ok, error?, action?} — errorがあればその指示に従うこと。',
         input_schema: {
@@ -1243,7 +1243,7 @@ class LocationFinderApp {
           properties: {
             step: {
               type: 'string',
-              enum: ['input_eval', 'primary_search', 'step1_main', 'step1_conditions', 'step2_eval', 'result_present', 'step1_prime'],
+              enum: ['input_eval', 'primary_search', 'step1_main', 'step1_type_check', 'step1_conditions', 'step2_eval', 'result_present', 'step1_prime'],
               description: '完了したステップ名',
             },
             data: {
@@ -1693,9 +1693,11 @@ class LocationFinderApp {
             ...this.messages,
             {
               role: 'user',
-              content: '複数回の検索を行いましたが、まだ正確な位置を特定できていません。' +
-                       'オペレーターに追加情報を求めてください。' +
-                       '今の状況を1文で説明した上で、特定に役立つ具体的な質問を3点以内で列挙してください。' +
+              content: '複数回の検索を行いましたが、まだ結果を確定できていません。' +
+                       '重要: 候補が複数見つかっていてもそれは正常です。絞り込みを求めてはいけません。' +
+                       '追加情報が必要なのは「検索自体がうまくいっていない」場合のみです。' +
+                       'Step2（評価フェーズ）がまだなら追加情報ではなくStep2を実行してください。' +
+                       'もし本当に詰まっている場合のみ、今の状況を1文で説明した上で足りない情報を1点だけ聞いてください。' +
                        'ツールは呼ばず、オペレーターへのメッセージのみ返答してください。',
             },
           ],
@@ -1763,7 +1765,7 @@ class LocationFinderApp {
   _logFlowStep(step, data = {}) {
     if (!this._flowState) this._resetFlowState();
 
-    const VALID_SEQUENCE = ['input_eval', 'primary_search', 'step1_main', 'step1_conditions', 'step2_eval', 'result_present'];
+    const VALID_SEQUENCE = ['input_eval', 'primary_search', 'step1_main', 'step1_type_check', 'step1_conditions', 'step2_eval', 'result_present'];
 
     if (step !== 'step1_prime' && this._flowState.completed.includes(step)) {
       return JSON.stringify({

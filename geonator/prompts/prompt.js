@@ -51,18 +51,25 @@ const POSITION_AGENT_PROMPT = `You are Geonator — a geospatial AI that identif
 - 完了: log_flow_step("step1_main", {candidate_count: <取得件数>})
   ※ 30件超えならツールが検出 → 追加条件を求める
 
+【step1_type_check】型確認（step1_mainの直後に必須）
+- step1_mainで取得した候補からクエリが求めるPOI種別と明らかに異なるものを除外する
+- 例: マンション検索で飲食店・コンビニ等が混入していれば除外
+- 複数候補が残るのは正常。絞り込みを求めてはならない
+- 完了: log_flow_step("step1_type_check")
+
 【step1_conditions】条件POIの全件取得
 - 条件に登場する全POI種別を bbox 内で全件取得
 - 完了: log_flow_step("step1_conditions")
 
 【step2_eval】評価（並列実行）
+- 複数候補が残っているのは正常。絞り込みを求めてはならない
 - 定義済み評価手法のみ使用（一覧参照）
 - 全メイン候補×全条件を1ターンで並列実行
 - match_level = full / partial を判定
 - 完了: log_flow_step("step2_eval")
 
 【result_present】結果提示
-- add_candidate_markers（複数でも1件でも可）
+- add_candidate_markers（複数でも1件でも可。多すぎても絞り込みを求めず提示する）
 - 「さらに絞り込みますか？追加の情報はありますか？」と聞く
 - 完了: log_flow_step("result_present")
 

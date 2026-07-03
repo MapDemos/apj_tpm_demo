@@ -54,7 +54,7 @@ const CONFIG = {
   // HINT SYSTEM
   // ============================================
 
-  MAX_HINT_TURNS:  8,   // tool turns before asking user for hints
+  MAX_HINT_TURNS:  20,  // tool turns before asking user for hints
   HINT_EXTRA_TURNS: 5,  // extra turns allowed after hint received
 
   DEBUG: true,
