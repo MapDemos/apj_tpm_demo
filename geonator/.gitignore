@@ -1,5 +1,6 @@
 # Local-only files (not committed)
 memory/
+issue/
 
 # macOS
 .DS_Store

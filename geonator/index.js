@@ -1036,9 +1036,8 @@ class LocationFinderApp {
       {
         name: 'show_probable_area',
         description:
-          'ここだ！と言い切れない場合に、候補を包含するエリアポリゴン（赤系）を地図に表示する。' +
-          '「この辺にいると思われます」という表現に使用。finalize_location_markerとは異なり確定しない。' +
-          'add_candidate_markersと併用可能。',
+          '候補が2〜4件あり1点に絞れない場合、またはエリアは特定できるが具体的建物・住所が不明な場合に使用。候補を包含するエリアポリゴン（赤系）を地図に表示する。' +
+          'finalize_location_markerとは異なり確定しない。add_candidate_markersと併用可能。messageには根拠（「〇〇と□□の間にいると思われます」等）を含めること。',
         input_schema: {
           type: 'object',
           properties: {
@@ -1061,7 +1060,7 @@ class LocationFinderApp {
       },
       {
         name: 'finalize_location_marker',
-        description: '確定座標に赤ピンを立てポップアップと住所を表示しズームインする。',
+        description: '確定座標に赤ピンを立てポップアップと住所を表示しズームインする。候補1件のみ・オペレーター肯定応答・絞り込み根拠が揃った時点で即座にclear_map_elements→本ツールの順で実行すること（先延ばし禁止）。',
         input_schema: {
           type: 'object',
           properties: {

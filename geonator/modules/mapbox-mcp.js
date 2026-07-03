@@ -73,9 +73,14 @@ class MapboxMCPClient {
         input_schema: {
           type: 'object',
           properties: {
-            queries:   { type: 'array', items: { type: 'string' }, description: 'Query Expansion済みクエリ配列' },
-            proximity: { type: 'array', items: { type: 'number' }, description: '[lng,lat]' },
-            bbox:      { type: 'array', items: { type: 'number' }, description: '[minX,minY,maxX,maxY]' },
+            queries:      { type: 'array', items: { type: 'string' }, description: 'Query Expansion済みクエリ配列' },
+            proximity:    { type: 'array', items: { type: 'number' }, description: '[lng,lat]' },
+            bbox:         { type: 'array', items: { type: 'number' }, description: '[minX,minY,maxX,maxY]' },
+            query_intent: {
+              type: 'string',
+              enum: ['specific', 'category_building', 'category_busstop'],
+              description: 'クエリの種別。specific=固有名・通常POI、category_building=マンション/アパート/ビルのカテゴリ検索、category_busstop=バス停カテゴリ検索',
+            },
           },
           required: ['queries'],
         },
@@ -83,7 +88,7 @@ class MapboxMCPClient {
 
       {
         name: 'scan_street_features',
-        description: 'Tilequery (streets-v8) で道路・駅出入口をスキャン。同名道路は自動dedup。POI検索にはsearch_nearby_poiを使うこと。target: road=道路のみ / transit=駅出入口のみ(radius=300〜500推奨) / both=両方(デフォルト)',
+        description: 'Tilequery (streets-v8) で道路・駅出入口をスキャン。同名道路は自動dedup。POI検索にはsearch_nearby_poiを使うこと。target選択: 道路名・交差点・道路種別確認→road / 駅出入口番号・出口名特定→transit(radius=300〜500推奨) / 両方必要→both(デフォルト)。Tilequeryの上限は50件のため不要なレイヤーを除外して枠を有効活用すること。',
         input_schema: {
           type: 'object',
           properties: {
@@ -98,7 +103,7 @@ class MapboxMCPClient {
 
       {
         name: 'get_route_pois',
-        description: '【補助情報として使用】A→Bルートを取得し候補の経路沿い度を判定する。matching_poisを優先するがexcluded_poisも除外しない。主検索はget_midpoint_area+search_nearby_poiで行い、このツールは優先度付けの補助に使う。profile: driving/walking',
+        description: '【補助情報として使用】A→Bルートを取得し候補の経路沿い度を判定する。主検索はget_midpoint_area+search_nearby_poiで行うこと（ルートは複数存在するため本ツールだけで絞り込まない）。matching_poisは優先度を上げるがexcluded_poisも候補から除外しない。A・B両方明示されている場合のみ使用。profile: driving/walking',
         input_schema: {
           type: 'object',
           properties: {
@@ -131,7 +136,7 @@ class MapboxMCPClient {
         description:
           '「スカイツリーが左手に見える」などランドマークの相対方位（左/右）から、ユーザーが存在しうるエリアのbboxを計算する。\n' +
           'ランドマーク周囲を3×3グリッド（8セル）に分割し、各セルで「そこにいてランドマークが指定方向に見える進行方向」を返す。\n' +
-          'Claudeは地理的文脈（例: 隅田川沿い=南北移動）と照合して最適なセルのbboxを選びsearch_nearby_poiに渡すこと。\n' +
+          '手順: ①search_nearby_poiでランドマーク座標取得 → ②本ツール実行 → ③地理的文脈（川沿い=南北移動等）でimplied_travel_directionを照合して最適セルを選択 → ④そのbboxをsearch_nearby_poiに渡す。\n' +
           'travel_bearingが分かれば渡すと絞り込み精度が上がる（0=北,90=東,180=南,270=西）。',
         input_schema: {
           type: 'object',
@@ -153,6 +158,9 @@ class MapboxMCPClient {
           '【使用API】Mapbox Tilequery API（water/waterway/landuse/natural_labelレイヤー）\n' +
           '川・海・湖・公園・森など自然物・地物を周辺から取得する。\n' +
           '「川の近くにいる」「公園の前」「森の中」「隅田川沿い」などで使用。\n' +
+          '手順: ①search_nearby_poiで自然物名付近POIを取得→その座標でscan_natural_features(radius=1000〜2000)実行→natural_label.coordinatesを取得。\n' +
+          'フォールバック: 他のランドマーク座標を起点にradius=5000で広範囲スキャン。\n' +
+          '取得したcoordinatesをproximityに使ってsearch_nearby_poiを実行。\n' +
           '返却フィールド:\n' +
           '  water/waterway: {layer, dist}\n' +
           '  natural_label:  {layer, name, class, dist}  ← 隅田川・相模湾等の名称\n' +
@@ -174,6 +182,7 @@ class MapboxMCPClient {
         description:
           '【使用API】Mapbox Directions API（durationのみ取得・軽量版）\n' +
           '2点間の移動時間（秒・分）を取得する。「〜から歩いてn分」「〜から車でn分くらいのところ」という時間ベースの位置条件を検証する際に使用。\n' +
+          '候補が複数ある場合は全候補に対して実行し、ユーザーのn分と一致（n×0.5〜n×1.5の範囲）するものを優先。duration_textを根拠としてオペレーターに提示。\n' +
           '返却: {duration_seconds, duration_minutes, duration_text("約X分"), profile}\n' +
           'get_route_poisとの違い: こちらは候補が正しい時間圏内にあるかの検証専用（POI絞り込みはしない）',
         input_schema: {
@@ -218,11 +227,10 @@ class MapboxMCPClient {
         case 'get_midpoint_area':
           return await this._getMidpointArea(args.placeA, args.placeB);
         case 'search_nearby_poi': {
-          // Normalize queries: Claude may pass a string instead of an array
           const queries = Array.isArray(args.queries)
             ? args.queries
             : (args.queries ? [args.queries] : []);
-          return await this._searchNearbyPOI(queries, args.proximity || null, args.bbox || null);
+          return await this._searchNearbyPOI(queries, args.proximity || null, args.bbox || null, args.query_intent || null);
         }
         case 'scan_street_features':
           return await this._scanStreetFeatures(args.lat, args.lng, args.radius, args.target || 'both');
@@ -590,7 +598,7 @@ class MapboxMCPClient {
    * place クエリ:
    *   → Search Box のみ（streets-v8 に place データなし）
    */
-  async _searchNearbyPOI(queries, proximity, bbox) {
+  async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null) {
     const MAX_EXPANSIONS = 3;
     const EXPAND_FACTOR  = 1.2;
 
@@ -603,21 +611,30 @@ class MapboxMCPClient {
 
     const seen = new Map();
 
+    const _notBlocked = (name) => {
+      if (!name || typeof POI_BLOCKLIST_FLAT === 'undefined') return true;
+      const n = name.toLowerCase();
+      return !POI_BLOCKLIST_FLAT.some(b => n.startsWith(b.toLowerCase()));
+    };
+
+    const isBusStop = queryIntent === 'category_busstop' || (!queryIntent && this._isBusStopQuery(queries));
+    const isBuilding = queryIntent === 'category_building' || (!queryIntent && !isBusStop && this._isBuildingQuery(queries));
+
     // ── Bus stop: use bus stop tileset only when explicitly mentioned ──
-    if (this._isBusStopQuery(queries) && proximity?.length >= 2) {
+    if (isBusStop && proximity?.length >= 2) {
       const [lng, lat] = proximity;
       const radius = bbox ? Math.round(this._bboxToRadius(bbox)) : 500;
       if (this.config.DEBUG) console.log(`[MapboxMCP] バス停クエリ → バス停タイルセットのみ (r=${radius}m)`);
       const busStops = await this._busStopFallback(lat, lng, radius);
       busStops.forEach(item => { if (!seen.has(item.name)) seen.set(item.name, item); });
-      const items = [...seen.values()].slice(0, 50);
+      const items = [...seen.values()].slice(0, 150);
       return this._minify({ source: 'バス停タイルセット (10da032y.busstop_gov_0608)', count: items.length, items });
     }
 
     // ── Building priority: Grid Tilequery ONLY (マンション/アパート/ビル/ホテル) ──
     // streets-v8 poi_label has better building coverage than Search Box.
     // Grid search covers bbox with overlapping 100m circles.
-    if (this._isBuildingQuery(queries) && proximity?.length >= 2) {
+    if (isBuilding && proximity?.length >= 2) {
       const [lng, lat] = proximity;
       // If no bbox, create the default ±300m so expansion loop works correctly
       const DEG_LNG0 = 1 / (111320 * Math.cos(lat * Math.PI / 180));
@@ -630,8 +647,11 @@ class MapboxMCPClient {
         console.log(`[MapboxMCP] 建物系 → グリッドTilequery のみ (初期bbox幅=${Math.round((currentBbox[2]-currentBbox[0])*111320)}m)`);
 
       for (let exp = 0; exp <= MAX_EXPANSIONS; exp++) {
-        const items = await this._gridTilequeryPOI(lat, lng, currentBbox, 100);
-        items.forEach(item => { if (!seen.has(dedupKey(item))) seen.set(dedupKey(item), item); });
+        const tqItems = await this._gridTilequeryPOI(lat, lng, currentBbox, 100);
+        tqItems.forEach(item => {
+          if (!_notBlocked(item.name)) return;
+          if (!seen.has(dedupKey(item))) seen.set(dedupKey(item), item);
+        });
         if (seen.size > 0 || exp === MAX_EXPANSIONS) break;
         currentBbox = this._capBBox(this._expandBBox(currentBbox, EXPAND_FACTOR));
         if (this.config.DEBUG) {
@@ -659,7 +679,9 @@ class MapboxMCPClient {
         });
       }
 
-      const items = [...seen.values()].slice(0, 50);
+      const items = [...seen.values()]
+        .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
+        .slice(0, 150);
       const src = items.length
         ? (seen.size > 0 && items[0].full_address !== undefined
             ? 'Search Box (building fallback)' : 'Tilequery poi_label grid (buildings)')
@@ -733,7 +755,9 @@ class MapboxMCPClient {
       });
     }
 
-    const items = [...seen.values()].slice(0, 50);
+    const items = [...seen.values()]
+      .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
+      .slice(0, 150);
     const source = items.length
       ? (hasPOIQuery ? 'Search Box + Tilequery poi_label (parallel)' : 'Search Box API')
       : 'no results';
