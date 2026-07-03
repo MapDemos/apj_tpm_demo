@@ -348,7 +348,7 @@ class MapboxMCPClient {
    * Cap a bbox so neither half-width nor half-height exceeds maxHalfM meters.
    * Applied to all Search Box and Tilequery grid calls to prevent oversized searches.
    */
-  _capBBox(bbox, maxHalfM = 750) {
+  _capBBox(bbox, maxHalfM = 500) {
     const [minX, minY, maxX, maxY] = bbox;
     const cx   = (minX + maxX) / 2;
     const cy   = (minY + maxY) / 2;
