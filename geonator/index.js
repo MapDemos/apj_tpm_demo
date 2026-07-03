@@ -860,7 +860,7 @@ class LocationFinderApp {
     return `エリアをポリゴンで表示しました（${candidates.length}候補を包含）`;
   }
 
-  _drawIsochroneLayer({ polygon, anchorLat, anchorLng, minutes, profile }) {
+  _drawIsochroneLayer({ polygon, anchorLat, anchorLng, minutes, radiusMeters, profile }) {
     const idx = this._mapLayerRegistry.length;
     const p   = `iso-${idx}`;
 
