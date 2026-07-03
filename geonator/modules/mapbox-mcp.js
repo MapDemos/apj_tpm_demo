@@ -180,6 +180,37 @@ class MapboxMCPClient {
       },
 
 
+      // ── Tool: compute_bbox_from_points ────────────────────
+      {
+        name: 'compute_bbox_from_points',
+        description:
+          '複数の座標からbboxを計算する。駅の出口が指定されていない場合に全出口座標を渡してbboxを求め、' +
+          '二次検索の範囲として使用する。最小パディング150mで小さすぎるbboxを防ぐ。\n' +
+          '使い方: scan_street_features(target="transit")で全出口を取得 → 出口座標をpointsに渡す → bboxで二次検索',
+        input_schema: {
+          type: 'object',
+          properties: {
+            points: {
+              type: 'array',
+              description: '座標リスト',
+              items: {
+                type: 'object',
+                properties: {
+                  latitude:  { type: 'number' },
+                  longitude: { type: 'number' },
+                },
+                required: ['latitude', 'longitude'],
+              },
+            },
+            min_padding_meters: {
+              type: 'number',
+              description: '最小パディング(m)。デフォルト150m。点が集中していても最低この半径を確保。',
+            },
+          },
+          required: ['points'],
+        },
+      },
+
       // ── Tool: get_facing_road ──────────────────────────────
       {
         name: 'get_facing_road',
@@ -295,6 +326,8 @@ class MapboxMCPClient {
           );
         case 'scan_natural_features':
           return await this._scanNaturalFeatures(args.lat, args.lng, args.radius);
+        case 'compute_bbox_from_points':
+          return this._computeBboxFromPoints(args.points || [], args.min_padding_meters ?? 150);
         case 'get_facing_road':
           return await this._getFacingRoad(args.lat, args.lng);
         case 'filter_by_isochrone':
@@ -1401,6 +1434,45 @@ class MapboxMCPClient {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Tool impl: compute_bbox_from_points
+  // ─────────────────────────────────────────────────────────────
+
+  _computeBboxFromPoints(points, minPaddingM = 150) {
+    if (!points?.length) return JSON.stringify({ error: 'points is empty' });
+
+    const lngs = points.map(p => p.longitude);
+    const lats  = points.map(p => p.latitude);
+
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+
+    const centerLng = (minLng + maxLng) / 2;
+    const centerLat = (minLat + maxLat) / 2;
+
+    // 最小パディングを適用（点が集中していても最低minPaddingMを確保）
+    const padLng = minPaddingM / (111320 * Math.cos(centerLat * Math.PI / 180));
+    const padLat = minPaddingM / 110540;
+
+    const rawBbox = [
+      Math.min(minLng, centerLng - padLng),
+      Math.min(minLat, centerLat - padLat),
+      Math.max(maxLng, centerLng + padLng),
+      Math.max(maxLat, centerLat + padLat),
+    ];
+
+    const bbox = this._capBBox(rawBbox);
+
+    return this._minify({
+      source: 'compute_bbox_from_points',
+      count:  points.length,
+      bbox,
+      center: [+centerLng.toFixed(6), +centerLat.toFixed(6)],
+    });
+  }
+
   // Tool impl: get_facing_road
   // ─────────────────────────────────────────────────────────────
 

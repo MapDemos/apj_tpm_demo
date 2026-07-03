@@ -2088,6 +2088,7 @@ const LANG = {
       show_probable_area:              '🔴 候補エリアを表示中',
 
       filter_by_isochrone:             '🔵 到達圏フィルタ中',
+      compute_bbox_from_points:        '📐 出口カバレッジを計算中',
       compute_area_from_landmark_bearing: '🧭 ランドマーク方位からエリアを計算中',
     },
   },
@@ -2139,6 +2140,7 @@ const LANG = {
       show_probable_area:              '🔴 Showing probable area',
 
       filter_by_isochrone:             '🔵 Filtering by isochrone',
+      compute_bbox_from_points:        '📐 Computing exit coverage bbox',
       compute_area_from_landmark_bearing: '🧭 Computing bearing area',
     },
   },
