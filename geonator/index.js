@@ -857,7 +857,7 @@ class LocationFinderApp {
       if (args.bbox?.length === 4) {
         // Replicate _gridTilequeryPOI grid logic to show all actual scan circles
         const [minX, minY, maxX, maxY] = args.bbox;
-        const gridRadius = 100; // matches _gridTilequeryPOI's fixed radius
+        const gridRadius = 200; // matches _gridTilequeryPOI's fixed radius
         const spacingM   = gridRadius * 1.5;
         const DEG_LNG    = 1 / (111320 * Math.cos(pLat * Math.PI / 180));
         const DEG_LAT    = 1 / 110540;

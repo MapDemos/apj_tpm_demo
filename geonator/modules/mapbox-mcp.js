@@ -572,7 +572,6 @@ class MapboxMCPClient {
     'マンション', 'アパート', 'ビル', '邸', 'タワー', 'レジデンス',
     'ハイツ', 'コーポ', 'テラス', '荘', '館', 'プレイス', 'コート',
     'ガーデン', 'ヴィラ', 'パレス', 'ハウス',
-    'ホテル', 'hotel',
   ];
 
   /**
@@ -740,7 +739,7 @@ class MapboxMCPClient {
         currentBbox = this._capBBox(this._expandBBox(currentBbox, EXPAND_FACTOR));
         if (this.config.DEBUG) {
           const w = Math.round((currentBbox[2] - currentBbox[0]) * 111320);
-          console.log(`[MapboxMCP] 0件 → bbox ${w}m幅 + Tilequery radius ${Math.round(tqRadius * EXPAND_FACTOR)}mに拡張`);
+          console.log(`[MapboxMCP] 0件 → bbox ${w}m幅に拡張`);
         }
       }
     }
