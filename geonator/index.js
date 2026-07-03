@@ -1790,8 +1790,37 @@ class LocationFinderApp {
         return JSON.stringify({
           ok: false,
           error: `候補が多すぎます（${data.candidate_count}件）。`,
-          action: 'Step2評価を開始する前に、オペレーターに絞り込み条件の追加を求めること。例：「候補が多すぎます。近くの目印（駅・交差点・コンビニ等）を追加で教えていただけますか？」',
+          action: 'Step2評価を開始する前に、オペレーターに絞り込み条件の追加を求めること。',
         });
+      }
+      this._flowState.step1MainCount = data.candidate_count;
+    }
+
+    // ① type_checkのbefore/after整合性チェック
+    if (step === 'step1_type_check') {
+      const before = data.before_count;
+      const after  = data.after_count;
+      if (before != null && after != null) {
+        if (after > before) {
+          return JSON.stringify({ ok: false, error: `型確認後の候補数(${after})が型確認前(${before})より多くなっています。` });
+        }
+        this._flowState.typeCheckAfterCount = after;
+      }
+    }
+
+    // ② step2_evalの評価数がtype_checkのafterと一致するか
+    if (step === 'step2_eval') {
+      const evaluated   = data.evaluated_count;
+      const conditions  = data.conditions_checked;
+      const expected    = this._flowState.typeCheckAfterCount;
+      if (evaluated != null && expected != null && evaluated !== expected) {
+        return JSON.stringify({
+          ok: false,
+          error: `評価した候補数(${evaluated})が型確認後の候補数(${expected})と一致しません。全候補を評価してください。`,
+        });
+      }
+      if (conditions != null && conditions === 0) {
+        return JSON.stringify({ ok: false, error: '条件が1つも評価されていません。filter_by_isochroneを実行してください。' });
       }
     }
 
