@@ -1453,23 +1453,55 @@ class MapboxMCPClient {
   // ─────────────────────────────────────────────────────────────
 
   async _findIntersections(lat, lng, radius, nameFilter = null) {
-    const url =
-      `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
-      `?access_token=${this.token}&radius=${radius}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road`;
-    try {
-      const res  = await this._fetchTilequeryWithCache(url);
-      if (!res.ok) return JSON.stringify({ error: `Tilequery HTTP ${res.status}` });
-      const data = await res.json();
+    // グリッド方式: 小半径(100m)で複数点から検索し道路線分による50件枠の圧迫を回避
+    const GRID_RADIUS = 100;
+    const DEG_LNG = 1 / (111320 * Math.cos(lat * Math.PI / 180));
+    const DEG_LAT = 1 / 110540;
+    const spacingM = GRID_RADIUS * 1.5;
 
-      let items = (data.features || [])
-        .filter(f => f.properties?.class === 'intersection' && f.properties?.name)
-        .map(f => ({
-          name:      f.properties.name,
-          latitude:  f.geometry?.coordinates?.[1],
-          longitude: f.geometry?.coordinates?.[0],
-          distance:  Math.round(f.properties?.tilequery?.distance || 0),
-        }))
-        .filter(f => f.latitude != null && f.longitude != null);
+    // searchラジウスからグリッド点を生成
+    const gridPoints = [];
+    const steps = Math.max(1, Math.ceil(radius / spacingM));
+    for (let iy = -steps; iy <= steps; iy++) {
+      for (let ix = -steps; ix <= steps; ix++) {
+        const gLat = lat + iy * spacingM * DEG_LAT;
+        const gLng = lng + ix * spacingM * DEG_LNG;
+        // 元のsearch半径内の点だけ使う
+        const d = Math.sqrt((ix * spacingM) ** 2 + (iy * spacingM) ** 2);
+        if (d <= radius) gridPoints.push([gLng, gLat]);
+      }
+    }
+
+    try {
+      const results = await Promise.all(gridPoints.map(async ([gLng, gLat]) => {
+        const url =
+          `${this.config.TILEQUERY_API}/${gLng},${gLat}.json` +
+          `?access_token=${this.token}&radius=${GRID_RADIUS}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road`;
+        const res = await this._fetchTilequeryWithCache(url);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data.features || [])
+          .filter(f => f.properties?.class === 'intersection' && f.properties?.name)
+          .map(f => ({
+            name:      f.properties.name,
+            latitude:  f.geometry?.coordinates?.[1],
+            longitude: f.geometry?.coordinates?.[0],
+          }))
+          .filter(f => f.latitude != null && f.longitude != null);
+      }));
+
+      // dedup by name+coord, recalculate distance from original center
+      const center = turf.point([lng, lat]);
+      const seen = new Map();
+      results.flat().forEach(item => {
+        const key = `${item.name}|${Math.round(item.longitude * 1000)}|${Math.round(item.latitude * 1000)}`;
+        if (!seen.has(key)) seen.set(key, item);
+      });
+
+      let items = [...seen.values()].map(item => ({
+        ...item,
+        distance: Math.round(turf.distance(center, turf.point([item.longitude, item.latitude]), { units: 'meters' })),
+      }));
 
       if (nameFilter) {
         const filter = nameFilter.toLowerCase();
@@ -1479,7 +1511,7 @@ class MapboxMCPClient {
       items.sort((a, b) => a.distance - b.distance);
 
       return this._minify({
-        source: 'Tilequery API (road layer, class=intersection)',
+        source: 'Tilequery API (road layer, class=intersection, grid)',
         count:  items.length,
         items,
       });
@@ -1493,26 +1525,52 @@ class MapboxMCPClient {
   // ─────────────────────────────────────────────────────────────
 
   async _findTrafficSignals(lat, lng, radius) {
-    const url =
-      `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
-      `?access_token=${this.token}&radius=${radius}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road`;
-    try {
-      const res  = await this._fetchTilequeryWithCache(url);
-      if (!res.ok) return JSON.stringify({ error: `Tilequery HTTP ${res.status}` });
-      const data = await res.json();
+    // グリッド方式: 道路線分による50件枠圧迫を回避
+    const GRID_RADIUS = 100;
+    const DEG_LNG = 1 / (111320 * Math.cos(lat * Math.PI / 180));
+    const DEG_LAT = 1 / 110540;
+    const spacingM = GRID_RADIUS * 1.5;
 
-      const items = (data.features || [])
-        .filter(f => f.properties?.class === 'traffic_signals')
-        .map(f => ({
-          latitude:  f.geometry?.coordinates?.[1],
-          longitude: f.geometry?.coordinates?.[0],
-          distance:  Math.round(f.properties?.tilequery?.distance || 0),
-        }))
-        .filter(f => f.latitude != null && f.longitude != null)
-        .sort((a, b) => a.distance - b.distance);
+    const gridPoints = [];
+    const steps = Math.max(1, Math.ceil(radius / spacingM));
+    for (let iy = -steps; iy <= steps; iy++) {
+      for (let ix = -steps; ix <= steps; ix++) {
+        const d = Math.sqrt((ix * spacingM) ** 2 + (iy * spacingM) ** 2);
+        if (d <= radius) gridPoints.push([lng + ix * spacingM * DEG_LNG, lat + iy * spacingM * DEG_LAT]);
+      }
+    }
+
+    try {
+      const results = await Promise.all(gridPoints.map(async ([gLng, gLat]) => {
+        const url =
+          `${this.config.TILEQUERY_API}/${gLng},${gLat}.json` +
+          `?access_token=${this.token}&radius=${GRID_RADIUS}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road`;
+        const res = await this._fetchTilequeryWithCache(url);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data.features || [])
+          .filter(f => f.properties?.class === 'traffic_signals')
+          .map(f => ({
+            latitude:  f.geometry?.coordinates?.[1],
+            longitude: f.geometry?.coordinates?.[0],
+          }))
+          .filter(f => f.latitude != null && f.longitude != null);
+      }));
+
+      const center = turf.point([lng, lat]);
+      const seen = new Map();
+      results.flat().forEach(item => {
+        const key = `${Math.round(item.longitude * 1000)}|${Math.round(item.latitude * 1000)}`;
+        if (!seen.has(key)) seen.set(key, item);
+      });
+
+      const items = [...seen.values()].map(item => ({
+        ...item,
+        distance: Math.round(turf.distance(center, turf.point([item.longitude, item.latitude]), { units: 'meters' })),
+      })).sort((a, b) => a.distance - b.distance);
 
       return this._minify({
-        source: 'Tilequery API (road layer, class=traffic_signals)',
+        source: 'Tilequery API (road layer, class=traffic_signals, grid)',
         count:  items.length,
         items,
       });
