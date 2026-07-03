@@ -605,7 +605,7 @@ class MapboxMCPClient {
     // radius_meters → bbox 変換（Claudeの代わりにMCPが計算）
     if (radiusMeters != null && proximity?.length >= 2 && !bbox) {
       const [lng, lat] = proximity;
-      const r      = Math.min(radiusMeters, 250); // 250m上限
+      const r      = Math.min(radiusMeters, 400); // 400m上限
       const dLng   = r / (111320 * Math.cos(lat * Math.PI / 180));
       const dLat   = r / 110540;
       bbox = [lng - dLng, lat - dLat, lng + dLng, lat + dLat];

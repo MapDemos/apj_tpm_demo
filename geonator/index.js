@@ -870,7 +870,7 @@ class LocationFinderApp {
       // radius_metersからbboxを計算（MCP側と同じロジック）
       let vizBbox = args.bbox;
       if (args.radius_meters != null && !vizBbox) {
-        const r    = Math.min(args.radius_meters, 250);
+        const r    = Math.min(args.radius_meters, 400);
         const dLng = r / (111320 * Math.cos(pLat * Math.PI / 180));
         const dLat = r / 110540;
         vizBbox = [pLng - dLng, pLat - dLat, pLng + dLng, pLat + dLat];
