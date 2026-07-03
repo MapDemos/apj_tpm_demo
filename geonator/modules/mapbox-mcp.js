@@ -746,9 +746,14 @@ class MapboxMCPClient {
     const isBusStop = queryIntent === 'category_busstop' || (!queryIntent && this._isBusStopQuery(queries));
     const isBuilding = queryIntent === 'category_building' || (!queryIntent && !isBusStop && this._isBuildingQuery(queries));
 
+    // bboxのみ渡された場合（proximityなし）は中心点をfallback proximityとして使用
+    const effectiveProximity = proximity?.length >= 2
+      ? proximity
+      : (bbox?.length >= 4 ? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2] : null);
+
     // ── Bus stop: use bus stop tileset only when explicitly mentioned ──
-    if (isBusStop && proximity?.length >= 2) {
-      const [lng, lat] = proximity;
+    if (isBusStop && effectiveProximity) {
+      const [lng, lat] = effectiveProximity;
       const radius = bbox ? Math.round(this._bboxToRadius(bbox)) : 500;
       if (this.config.DEBUG) console.log(`[MapboxMCP] バス停クエリ → バス停タイルセットのみ (r=${radius}m)`);
       const busStops = await this._busStopFallback(lat, lng, radius);
@@ -760,8 +765,8 @@ class MapboxMCPClient {
     // ── Building priority: Grid Tilequery ONLY (マンション/アパート/ビル/ホテル) ──
     // streets-v8 poi_label has better building coverage than Search Box.
     // Grid search covers bbox with overlapping 100m circles.
-    if (isBuilding && proximity?.length >= 2) {
-      const [lng, lat] = proximity;
+    if (isBuilding && effectiveProximity) {
+      const [lng, lat] = effectiveProximity;
       // If no bbox, create the default ±300m so expansion loop works correctly
       const DEG_LNG0 = 1 / (111320 * Math.cos(lat * Math.PI / 180));
       const DEG_LAT0 = 1 / 110540;
@@ -828,18 +833,18 @@ class MapboxMCPClient {
       // ── Search Box requests (type-classified per query) ──
       const sbRequests = queries.flatMap(q => {
         const qt = MapboxMCPClient.classifyQueryType(q);
-        if (qt === 'place') return [this._searchBoxRequest(q, 'place,district,locality', proximity, currentBbox)];
-        if (qt === 'poi')   return [this._searchBoxRequest(q, 'poi',                     proximity, currentBbox)];
+        if (qt === 'place') return [this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, currentBbox)];
+        if (qt === 'poi')   return [this._searchBoxRequest(q, 'poi',                     effectiveProximity, currentBbox)];
         return [  // 'both'
-          this._searchBoxRequest(q, 'poi',                     proximity, currentBbox),
-          this._searchBoxRequest(q, 'place,district,locality', proximity, currentBbox),
+          this._searchBoxRequest(q, 'poi',                     effectiveProximity, currentBbox),
+          this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, currentBbox),
         ];
       });
 
       // ── Tilequery poi_label (streets-v8) — grid search for poi/both queries ──
       // Use grid (same as building path) so edge-of-bbox facilities are covered.
-      const tqPromise = (hasPOIQuery && proximity?.length >= 2)
-        ? this._gridTilequeryPOI(proximity[1], proximity[0], currentBbox, 200)
+      const tqPromise = (hasPOIQuery && effectiveProximity)
+        ? this._gridTilequeryPOI(effectiveProximity[1], effectiveProximity[0], currentBbox, 200)
         : Promise.resolve([]);
 
       // ── Run both in parallel ──
@@ -872,9 +877,9 @@ class MapboxMCPClient {
     }
 
     // ── Final fallback: bus stop tileset (non-bus-stop queries only) ──
-    if (seen.size === 0 && proximity?.length >= 2 && !this._isBusStopQuery(queries)) {
+    if (seen.size === 0 && effectiveProximity && !this._isBusStopQuery(queries)) {
       if (this.config.DEBUG) console.log('[MapboxMCP] 0件 → バス停フォールバック');
-      const [lng, lat] = proximity;
+      const [lng, lat] = effectiveProximity;
       const busStops = await this._busStopFallback(lat, lng, 500);
       busStops.forEach(item => {
         if (!seen.has(item.name)) seen.set(item.name, item);
