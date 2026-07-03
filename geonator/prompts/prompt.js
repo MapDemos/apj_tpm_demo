@@ -420,7 +420,7 @@ radius_meters vs minutes の使い分け：
 | 「かなり歩く」「相当先」（距離が大きすぎて曖昧） | 距離条件として使わない | 他のヒントを優先 |
 - radius_metersはAPIコールなし（turf.circle）。「隣接」「目の前」等の真近接に使用。
 - minutes（Isochrone API）: 真近接より遠い場合。[3, 10, 20]から選択。
-- 「かなり歩く」はevaluate_distanceを呼ばず、距離以外の条件で評価する。
+- 「かなり歩く」: evaluate_distance を呼ばず距離以外の条件で評価する（推奨）。やむを得ず呼んだ場合は proximity_level="far" を指定（全候補通過・フィルタなし）。
 
 【「AからBへの途中」の処理フロー】
 1. get_midpoint_area(A, B) → 矩形bbox・中点を取得（二次検索補助）

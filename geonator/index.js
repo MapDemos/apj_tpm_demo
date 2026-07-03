@@ -1845,12 +1845,17 @@ class LocationFinderApp {
     if (step === 'step1_type_check') {
       const before = data.before_count;
       const after  = data.after_count;
-      if (before != null && after != null) {
-        if (after > before) {
-          return JSON.stringify({ ok: false, error: `型確認後の候補数(${after})が型確認前(${before})より多くなっています。` });
-        }
-        this._flowState.typeCheckAfterCount = after;
+      if (before == null || after == null) {
+        return JSON.stringify({
+          ok: false,
+          error: 'step1_type_checkにはbefore_countとafter_countの指定が必須です。',
+          action: 'log_flow_step("step1_type_check", {before_count: <型確認前件数>, after_count: <型確認後件数>}) を呼ぶこと。',
+        });
       }
+      if (after > before) {
+        return JSON.stringify({ ok: false, error: `型確認後の候補数(${after})が型確認前(${before})より多くなっています。` });
+      }
+      this._flowState.typeCheckAfterCount = after;
     }
 
     // step2_eval開始時にconditionTrackerをリセット（ループ蓄積バグ防止）

@@ -137,7 +137,8 @@ class MapboxMCPClient {
           '  very_close    = すぐ近く・出てすぐ（~250m歩き）\n' +
           '  nearby        = 近く・付近・そば（~700m歩き）\n' +
           '  somewhat_nearby = 少し歩く（~1.4km歩き）\n' +
-          '  far           = かなり歩く（距離制約なし・全候補通過）',
+          '  far           = かなり歩く（距離が曖昧すぎて判定不可・全候補通過・実質フィルタなし）\n' +
+          '※ far は evaluate_distance を呼ばず他の条件で評価するのが推奨。呼ばれた場合は全候補を通過させる。',
         input_schema: {
           type: 'object',
           properties: {
@@ -1237,7 +1238,7 @@ class MapboxMCPClient {
       `?access_token=${this.token}&geometries=geojson&overview=full&steps=false&alternatives=true`;
 
     try {
-      const res  = await this._fetchTilequeryWithCache(url);
+      const res  = await this._fetchWithRetry(url);
       if (!res.ok) return JSON.stringify({ error: `Directions API HTTP ${res.status}` });
       const data = await res.json();
 
@@ -1769,7 +1770,7 @@ class MapboxMCPClient {
       const outsideItems = results.filter(r => !r.inside).map(({ name }) => ({ name }));
 
       return this._minify({
-        source:        'Mapbox Isochrone API',
+        source:        radiusMeters != null ? `turf.circle (${radiusMeters}m)` : 'Mapbox Isochrone API',
         profile:       prof,
         minutes,
         inside_count:  insideItems.length,
