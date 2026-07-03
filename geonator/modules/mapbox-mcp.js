@@ -105,18 +105,20 @@ class MapboxMCPClient {
       },
 
       {
-        name: 'get_route_pois',
-        description: '【評価フェーズ】A→Bのルート回廊ポリゴン（turf.buffer）を生成し、候補POIがポリゴン内にあるかをturf.booleanPointInPolygonで判定する。二次検索で洗い出した候補に対して「AからBへの途中にあるか」を評価する。matching_poisは条件合致、excluded_poisは条件外（除外しない・優先度を下げる）。A・B両方明示されている場合のみ使用。profile: driving/walking',
+      // ── Tool: check_same_building ─────────────────────────────
+      {
+        name: 'check_same_building',
+        description:
+          '「同じビルの中」「同じビルに入っている」条件の評価。アンカー地点と候補POIのbuildingレイヤーIDを比較し、同一建物かを判定する。\n' +
+          '注意: 六本木ヒルズ等の大型複合施設は複数建物IDに分かれる場合があり、同施設でも不一致になりうる（既知の制限）。',
         input_schema: {
           type: 'object',
           properties: {
-            from_lat:       { type: 'number' },
-            from_lng:       { type: 'number' },
-            to_lat:         { type: 'number' },
-            to_lng:         { type: 'number' },
-            profile:        { type: 'string', enum: ['driving', 'walking'] },
-            poi_candidates: {
+            anchor_lat: { type: 'number', description: '基準となる地点の緯度（コンビニ等）' },
+            anchor_lng: { type: 'number', description: '基準となる地点の経度' },
+            candidates: {
               type: 'array',
+              description: '同じビル内かチェックする候補',
               items: {
                 type: 'object',
                 properties: {
@@ -127,9 +129,8 @@ class MapboxMCPClient {
                 required: ['name', 'latitude', 'longitude'],
               },
             },
-            buffer_meters: { type: 'number', description: 'バッファ幅(m)。デフォルト30' },
           },
-          required: ['from_lat', 'from_lng', 'to_lat', 'to_lng', 'profile', 'poi_candidates'],
+          required: ['anchor_lat', 'anchor_lng', 'candidates'],
         },
       },
 
@@ -341,11 +342,8 @@ class MapboxMCPClient {
           return await this._findIntersections(args.lat, args.lng, args.radius, args.name_filter || null);
         case 'find_traffic_signals':
           return await this._findTrafficSignals(args.lat, args.lng, args.radius);
-        case 'get_route_pois':
-          return await this._getRoutePOIs(
-            args.from_lat, args.from_lng, args.to_lat, args.to_lng,
-            args.profile, args.poi_candidates, args.buffer_meters
-          );
+        case 'check_same_building':
+          return await this._checkSameBuilding(args.anchor_lat, args.anchor_lng, args.candidates || []);
         default:
           return JSON.stringify({ error: `Unknown tool: ${toolName}` });
       }
@@ -1511,6 +1509,50 @@ class MapboxMCPClient {
 
   // ─────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Tool impl: check_same_building
+  // ─────────────────────────────────────────────────────────────
+
+  async _getBuildingId(lat, lng) {
+    const url =
+      `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
+      `?access_token=${this.token}&radius=10&limit=10&layers=building`;
+    try {
+      const res  = await this._fetchTilequeryWithCache(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const building = (data.features || []).find(f => f.properties?.tilequery?.layer === 'building');
+      return building?.id ?? null;
+    } catch (_) { return null; }
+  }
+
+  async _checkSameBuilding(anchorLat, anchorLng, candidates) {
+    const anchorId = await this._getBuildingId(anchorLat, anchorLng);
+
+    if (!anchorId) {
+      return this._minify({
+        source:                'Tilequery API (building layer)',
+        anchor_building_found: false,
+        message:               'アンカー地点の建物データが見つかりませんでした',
+        same_building:         [],
+        other_building:        candidates.map(c => ({ name: c.name })),
+      });
+    }
+
+    const results = await Promise.all(candidates.map(async c => {
+      const id = await this._getBuildingId(c.latitude, c.longitude);
+      return { ...c, same_building: id !== null && id === anchorId };
+    }));
+
+    return this._minify({
+      source:               'Tilequery API (building layer)',
+      anchor_building_id:   anchorId,
+      same_building_count:  results.filter(r => r.same_building).length,
+      same_building:        results.filter(r => r.same_building).map(({ name, latitude, longitude }) => ({ name, latitude, longitude })),
+      other_building:       results.filter(r => !r.same_building).map(({ name }) => ({ name })),
+    });
+  }
+
   // Tool impl: compute_bbox_from_points
   // ─────────────────────────────────────────────────────────────
 
