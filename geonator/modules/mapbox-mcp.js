@@ -696,6 +696,9 @@ class MapboxMCPClient {
    *   → Search Box のみ（streets-v8 に place データなし）
    */
   _resolveResult(ids) {
+    // resolve済みのIDは一次検索の削除対象から除外する（駅等のproximity確定済みIDを保護）
+    ids.forEach(id => this._primarySearchIds.delete(id));
+
     const items = ids.map(id => {
       const item = this._resultBuffer.get(id);
       if (!item) return null;
