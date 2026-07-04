@@ -241,13 +241,15 @@ class QueryEngine {
       }
     }
 
-    // No exit specified → span all entrances
+    // No exit specified → span all entrances with minimum station radius (500m)
+    // so the bbox is large enough for building grid search even if exits are clustered.
+    const STATION_RADIUS_M = 500;
     if (entrances.length > 0) {
-      return entrances.map(e => ({ lng: e.lng, lat: e.lat }));
+      return entrances.map(e => ({ lng: e.lng, lat: e.lat, radiusM: STATION_RADIUS_M }));
     }
 
     // Fallback: use station representative coordinate
-    return [{ lng: stationCoord[0], lat: stationCoord[1], radiusM: DISTANCE_TABLE.nearby.radius_m }];
+    return [{ lng: stationCoord[0], lat: stationCoord[1], radiusM: STATION_RADIUS_M }];
   }
 
   async _resolveLocality(anchor) {
@@ -388,19 +390,12 @@ class QueryEngine {
   async _denoiseMain(target, candidates) {
     if (!candidates || candidates.length === 0) return [];
 
-    // 1. prefix filter for specific POI
-    let filtered = candidates;
-    if (target.query_intent === 'specific' && target.text) {
-      filtered = candidates.filter(c =>
-        !c.name || c.name.startsWith(target.text) || target.text.startsWith(c.name.slice(0, 4))
-      );
-    }
-
-    // 2. L2 negative filter (all candidates — B)
-    const slim = filtered.map(c => ({ id: c.id, name: c.name ?? '' }));
+    // L2 negative filter — target results are already scoped by the search query;
+    // prefix filter is intentionally NOT applied to the main target (only condition POIs).
+    const slim = candidates.map(c => ({ id: c.id, name: c.name ?? '' }));
     const excludeIds = await this.llm.filterCandidates(target, slim);
     const excludeSet = new Set(excludeIds.map(String));
-    return filtered.filter(c => !excludeSet.has(String(c.id)));
+    return candidates.filter(c => !excludeSet.has(String(c.id)));
   }
 
   // ─────────────────────────────────────────────

@@ -126,9 +126,9 @@ class LocationFinderApp {
       showResults(full, partial, none, unsupported, conditionLabels) {
         // Build combined candidate list with match metadata for marker display
         const allCandidates = [
-          ...full.map(c    => ({ ...c, _matchClass: 'full' })),
-          ...partial.map(c => ({ ...c, _matchClass: 'partial' })),
-          ...none.map(c    => ({ ...c, _matchClass: 'none' })),
+          ...full.map(c    => ({ ...c, match_level: 'full' })),
+          ...partial.map(c => ({ ...c, match_level: 'partial' })),
+          ...none.map(c    => ({ ...c, match_level: 'partial' })), // 'none' shown as partial pin
         ];
 
         // Use existing addCandidateMarkers (full=blue, partial=yellow, none=gray)

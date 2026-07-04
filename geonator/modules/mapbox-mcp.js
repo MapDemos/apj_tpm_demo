@@ -728,19 +728,22 @@ class MapboxMCPClient {
   async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null, isPrimary = false) {
     // ── 信号・交差点クエリ: Tilequeryのみ（Search Box不可） ──
     // bboxが渡されている場合（localityのbbox等）はそのbboxの外接円半径を使い全域をカバーする
+    // Condition search radius cap: cover the full condition bbox (§7-4 dual-bbox),
+    // bounded to CONDITION_SEARCH_MAX_R to keep grid cost sane.
+    const CONDITION_SEARCH_MAX_R = 1000;
     if (queryIntent === 'intersection' && proximity?.length >= 2) {
       const [lng, lat] = proximity;
       const r = bbox?.length >= 4
-        ? Math.min(Math.ceil(this._bboxToRadius(bbox)), 400)
-        : Math.min(radiusMeters ?? 150, 400);
+        ? Math.min(Math.ceil(this._bboxToRadius(bbox)), CONDITION_SEARCH_MAX_R)
+        : Math.min(radiusMeters ?? 150, CONDITION_SEARCH_MAX_R);
       const nameFilter = queries?.[0] || null;
       return await this._findIntersections(lat, lng, r, nameFilter);
     }
     if (queryIntent === 'signal' && proximity?.length >= 2) {
       const [lng, lat] = proximity;
       const r = bbox?.length >= 4
-        ? Math.min(Math.ceil(this._bboxToRadius(bbox)), 400)
-        : Math.min(radiusMeters ?? 150, 400);
+        ? Math.min(Math.ceil(this._bboxToRadius(bbox)), CONDITION_SEARCH_MAX_R)
+        : Math.min(radiusMeters ?? 150, CONDITION_SEARCH_MAX_R);
       return await this._findTrafficSignals(lat, lng, r);
     }
 
@@ -790,8 +793,8 @@ class MapboxMCPClient {
     if (queryIntent === 'category_busstop_location' && effectiveProximity) {
       const [lng, lat] = effectiveProximity;
       const r = bbox?.length >= 4
-        ? Math.min(Math.ceil(this._bboxToRadius(bbox)), 400)
-        : Math.min(radiusMeters ?? 200, 400);
+        ? Math.min(Math.ceil(this._bboxToRadius(bbox)), 1000)  // §7-4: cover condition bbox
+        : Math.min(radiusMeters ?? 200, 1000);
       return await this._busStopLocationSearch(lat, lng, r);
     }
 
@@ -817,8 +820,10 @@ class MapboxMCPClient {
       const DEG_LNG0 = 1 / (111320 * Math.cos(lat * Math.PI / 180));
       const DEG_LAT0 = 1 / 110540;
       const defM = 300;
+      // JS-driven arch passes pre-computed bbox — use as-is (no cap).
+      // Legacy agentic path may pass oversized bbox; _capBBox can be re-added there if needed.
       let currentBbox = bbox
-        ? this._capBBox([...bbox])
+        ? [...bbox]
         : [lng - defM*DEG_LNG0, lat - defM*DEG_LAT0, lng + defM*DEG_LNG0, lat + defM*DEG_LAT0];
       if (this.config.DEBUG)
         console.log(`[MapboxMCP] 建物系 → グリッドTilequery のみ (初期bbox幅=${Math.round((currentBbox[2]-currentBbox[0])*111320)}m)`);
@@ -860,7 +865,8 @@ class MapboxMCPClient {
       return result;
     }
 
-    let currentBbox = bbox ? this._capBBox([...bbox]) : null;
+    // JS-driven arch provides pre-validated bbox — use as-is.
+    let currentBbox = bbox ? [...bbox] : null;
 
     // Determine if any query should trigger Tilequery (poi or both = has POI intent)
     const hasPOIQuery = queries.some(q => MapboxMCPClient.classifyQueryType(q) !== 'place');
@@ -2109,14 +2115,19 @@ class MapboxMCPClient {
 
     for (const p of points) {
       if (p.bbox) {
-        // Pre-computed bbox (e.g. locality)
         lngs.push(p.bbox[0], p.bbox[2]);
         lats.push(p.bbox[1],  p.bbox[3]);
         continue;
       }
       lngs.push(p.lng);
       lats.push(p.lat);
-      if (points.length === 1 && p.radiusM) singleRadius = p.radiusM;
+      // Apply radiusM for ALL points (not just single-point case)
+      if (p.radiusM) {
+        const dLng = p.radiusM / (111320 * Math.cos(p.lat * Math.PI / 180));
+        const dLat = p.radiusM / 110540;
+        lngs.push(p.lng - dLng, p.lng + dLng);
+        lats.push(p.lat - dLat,  p.lat + dLat);
+      }
     }
 
     if (lngs.length === 0) return [0, 0, 0, 0];
@@ -2128,16 +2139,6 @@ class MapboxMCPClient {
 
     const centerLng = (minLng + maxLng) / 2;
     const centerLat  = (minLat + maxLat) / 2;
-
-    // For single point with radius, extend from center
-    if (singleRadius > 0) {
-      const dLng = singleRadius / (111320 * Math.cos(centerLat * Math.PI / 180));
-      const dLat  = singleRadius / 110540;
-      minLng = centerLng - dLng;
-      maxLng = centerLng + dLng;
-      minLat  = centerLat  - dLat;
-      maxLat  = centerLat  + dLat;
-    }
 
     // Apply minimum padding (150m) to avoid zero-size bbox
     const padM   = Math.max(marginM, 150);
@@ -2213,7 +2214,15 @@ class MapboxMCPClient {
   _parseItemsFromResult(resultStr) {
     try {
       const parsed = typeof resultStr === 'string' ? JSON.parse(resultStr) : resultStr;
-      return Array.isArray(parsed?.items) ? parsed.items : [];
+      const items  = Array.isArray(parsed?.items) ? parsed.items : [];
+      // Normalize: guarantee a unique `id` and lat/lng aliases for QueryEngine.
+      // Search results carry `_rid` (from _assignIds); bus-stop/intersection results carry none.
+      return items.map((it, i) => ({
+        ...it,
+        id:  it.id ?? it._rid ?? `${this._resultIdCounter++}`,
+        lat: it.lat ?? it.latitude,
+        lng: it.lng ?? it.longitude,
+      }));
     } catch {
       return [];
     }
@@ -2233,14 +2242,23 @@ class MapboxMCPClient {
     if (!conditionItems || conditionItems.length === 0) return false;
     if (distParams.pushback) return false;
 
-    const { lat, lng } = mainCandidate;
+    // Support both lat/lng and latitude/longitude field names
+    const lat = mainCandidate.latitude  ?? mainCandidate.lat;
+    const lng = mainCandidate.longitude ?? mainCandidate.lng;
+    if (lat == null || lng == null) return false;
+
+    const condLngLat = (c) => [
+      c.longitude ?? c.lng,
+      c.latitude  ?? c.lat,
+    ];
 
     // same_building: building-id comparison
     if (distParams.useBuildingId) {
       const mainBuildingId = await this._getBuildingId(lat, lng);
       if (!mainBuildingId) return false;
       for (const c of conditionItems) {
-        const cId = await this._getBuildingId(c.lat, c.lng);
+        const [cLng, cLat] = condLngLat(c);
+        const cId = await this._getBuildingId(cLat, cLng);
         if (cId && cId === mainBuildingId) return true;
       }
       return false;
@@ -2251,7 +2269,9 @@ class MapboxMCPClient {
       const radiusKm = (distParams.radiusM ?? 250) / 1000;
       const circle   = turf.circle(turf.point([lng, lat]), radiusKm, { units: 'kilometers', steps: 32 });
       for (const c of conditionItems) {
-        if (turf.booleanPointInPolygon(turf.point([c.lng, c.lat]), circle)) return true;
+        const [cLng, cLat] = condLngLat(c);
+        if (cLng != null && cLat != null &&
+            turf.booleanPointInPolygon(turf.point([cLng, cLat]), circle)) return true;
       }
       return false;
     }
@@ -2278,7 +2298,9 @@ class MapboxMCPClient {
     if (!polygon) return false;
 
     for (const c of conditionItems) {
-      if (turf.booleanPointInPolygon(turf.point([c.lng, c.lat]), polygon)) return true;
+      const [cLng, cLat] = condLngLat(c);
+      if (cLng != null && cLat != null &&
+          turf.booleanPointInPolygon(turf.point([cLng, cLat]), polygon)) return true;
     }
     return false;
   }

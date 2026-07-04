@@ -54,7 +54,7 @@ class LLMClient {
 
     const result = await this._callClaude(
       this._buildL2Prompt(target, candidates),
-      300
+      1024  // large enough for exclude_ids list even with ~150 candidates
     );
     try {
       const json = this._extractJSON(result);
