@@ -39,6 +39,8 @@ class QueryEngine {
     this._previousText = userText;
     this._clarifyCount = 0;
     this._dbgReport = { schema: null, proximity: null, target: null, conditions: [], evaluation: null };
+    this.llm.resetStats?.();
+    this._runStart = Date.now();
     this.ui.clearResults();
 
     const schema = await this._parseAndValidate(userText, null);
@@ -202,6 +204,8 @@ class QueryEngine {
     // [4] show results
     this._showResults(results, schema);
     this.ui.refreshCounts?.();
+    // Token/time telemetry for this search cycle
+    this.ui.showRunStats?.({ ms: Date.now() - (this._runStart || Date.now()), llm: this.llm.stats });
     this.ui.showDebugReport?.(this._dbgReport);
 
     // [5] feedback
@@ -665,6 +669,10 @@ class QueryEngine {
         // [6-2a] ask for hint
         const hint = await this.ui.showHintInput(UI_TEXT.ask_hint);
         if (!hint) break;
+
+        // reset telemetry for this new search cycle
+        this.llm.resetStats?.();
+        this._runStart = Date.now();
 
         // [6-2b] re-parse (K)
         const newSchema = await this._reparseMerged(hint);

@@ -25,6 +25,10 @@ const CONFIG = {
   TEMPERATURE:     0,
   MAX_TOOL_TURNS:  20,   // max agentic loop iterations
 
+  // Per-role models (JS-driven arch). Changeable from the ⚙️ settings modal.
+  L1_MODEL:        'claude-sonnet-4-6',        // query parsing (needs stronger reasoning)
+  L2_MODEL:        'claude-haiku-4-5-20251001', // candidate filter (cheap/fast, high volume)
+
   // ============================================
   // MAP SETTINGS
   // ============================================

@@ -320,6 +320,24 @@ html, body {
   border: 1px solid rgba(239,68,68,.3);
   color: #fca5a5;
 }
+/* Settings modal */
+.settings-modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+.settings-panel {
+  background: var(--bg-card, #1a2234); color: var(--text-1, #e5e7eb);
+  border: 1px solid var(--border, #334155); border-radius: 12px;
+  padding: 20px 24px; min-width: 320px; box-shadow: 0 8px 40px rgba(0,0,0,.6);
+}
+.settings-title { font-size: 15px; font-weight: 700; margin-bottom: 16px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; font-size: 13px; }
+.settings-row select {
+  background: var(--bg-1, #0f172a); color: var(--text-1, #e5e7eb);
+  border: 1px solid var(--border, #334155); border-radius: 6px; padding: 5px 8px; font-size: 13px;
+}
+.settings-actions { margin-top: 16px; text-align: right; }
+
 /* Tier markers — outer wrapper is positioned by Mapbox (no transform here!).
    Inner .tier-dot carries all styling + animation so it never fights Mapbox. */
 .tier-marker-wrap { line-height: 0; }

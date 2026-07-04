@@ -7,6 +7,15 @@
 class LLMClient {
   constructor(config) {
     this.config = config;
+    this.resetStats();
+  }
+
+  /** Reset per-run stats (tokens, time, calls) keyed by role. */
+  resetStats() {
+    this.stats = {
+      L1: { model: this.config.L1_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
+      L2: { model: this.config.L2_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
+    };
   }
 
   // ─────────────────────────────────────────────
@@ -27,7 +36,9 @@ class LLMClient {
       try {
         const result = await this._callClaude(
           this._buildL1Prompt(fullText),
-          400
+          400,
+          this.config.L1_MODEL,
+          'L1'
         );
         const json = this._extractJSON(result);
         if (json) return json;
@@ -56,7 +67,9 @@ class LLMClient {
 
     const result = await this._callClaude(
       this._buildL2Prompt(intentLabel, candidates),
-      1024  // large enough for id list even with ~150 candidates
+      1024,  // large enough for id list even with ~150 candidates
+      this.config.L2_MODEL,
+      'L2'
     );
     try {
       const json = this._extractJSON(result);
@@ -70,9 +83,11 @@ class LLMClient {
   // Internal
   // ─────────────────────────────────────────────
 
-  async _callClaude(prompt, maxTokens = 400) {
+  async _callClaude(prompt, maxTokens = 400, model = null, role = null) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.API_TIMEOUT_MS);
+    const useModel = model || this.config.CLAUDE_MODEL;
+    const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
     try {
       const resp = await fetch(this.config.CLAUDE_API_PROXY, {
@@ -80,7 +95,7 @@ class LLMClient {
         headers: { 'Content-Type': 'application/json' },
         signal:  controller.signal,
         body: JSON.stringify({
-          model:      this.config.CLAUDE_MODEL,
+          model:      useModel,
           max_tokens: maxTokens,
           temperature: 0,
           system: prompt.system,
@@ -89,6 +104,15 @@ class LLMClient {
       });
       if (!resp.ok) throw new Error(`LLM HTTP ${resp.status}`);
       const data = await resp.json();
+      // Accumulate stats by role
+      const s = role && this.stats?.[role];
+      if (s) {
+        s.model = useModel;
+        s.inTok  += data?.usage?.input_tokens  || 0;
+        s.outTok += data?.usage?.output_tokens || 0;
+        s.ms     += (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+        s.calls  += 1;
+      }
       return data?.content?.[0]?.text ?? '';
     } finally {
       clearTimeout(timeout);

@@ -76,9 +76,8 @@ class LocationFinderApp {
       // 3. Wire up UI event listeners
       this._setupEventListeners();
 
-      // 4. Show model name in header
-      const modelEl = document.getElementById('model-badge');
-      if (modelEl) modelEl.textContent = this.config.CLAUDE_MODEL;
+      // 4. Restore saved model prefs + wire settings modal + badge
+      this._initSettings();
 
       // 5. Init JS-driven QueryEngine (new architecture)
       this._initQueryEngine();
@@ -96,6 +95,46 @@ class LocationFinderApp {
     const llm = new LLMClient(this.config);
     const ui  = this._buildUICallbacks();
     this.queryEngine = new QueryEngine({ mcp: this.mapboxMCP, llm, ui, config: this.config });
+  }
+
+  /** Wire the ⚙️ settings modal (per-role model selection) + restore saved prefs. */
+  _initSettings() {
+    // Restore saved prefs
+    try {
+      const saved = JSON.parse(localStorage.getItem('geonator_models') || '{}');
+      if (saved.L1) this.config.L1_MODEL = saved.L1;
+      if (saved.L2) this.config.L2_MODEL = saved.L2;
+    } catch (_) {}
+
+    const l1Sel = document.getElementById('l1ModelSelect');
+    const l2Sel = document.getElementById('l2ModelSelect');
+    const modal = document.getElementById('settingsModal');
+    if (l1Sel) l1Sel.value = this.config.L1_MODEL;
+    if (l2Sel) l2Sel.value = this.config.L2_MODEL;
+
+    const persist = () => {
+      try { localStorage.setItem('geonator_models', JSON.stringify({ L1: this.config.L1_MODEL, L2: this.config.L2_MODEL })); } catch (_) {}
+      this._updateModelBadge();
+    };
+    l1Sel?.addEventListener('change', e => { this.config.L1_MODEL = e.target.value; persist(); });
+    l2Sel?.addEventListener('change', e => { this.config.L2_MODEL = e.target.value; persist(); });
+
+    document.getElementById('settingsBtn')?.addEventListener('click', () => {
+      if (modal) modal.style.display = 'flex';
+    });
+    document.getElementById('settingsCloseBtn')?.addEventListener('click', () => {
+      if (modal) modal.style.display = 'none';
+    });
+    modal?.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+
+    this._updateModelBadge();
+  }
+
+  _updateModelBadge() {
+    const el = document.getElementById('model-badge');
+    if (!el) return;
+    const s = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
+    el.textContent = `L1:${s(this.config.L1_MODEL)} / L2:${s(this.config.L2_MODEL)}`;
   }
 
   /**
@@ -193,6 +232,27 @@ class LocationFinderApp {
       showDebugReport(report) {
         if (!self._debugMode || !report) return;
         self.addMessage('debug', self._renderDebugReport(report));
+      },
+      showRunStats(stats) {
+        if (!stats) return;
+        const fmt = n => (n || 0).toLocaleString('ja-JP');
+        const secs = (stats.ms / 1000).toFixed(1);
+        const l1 = stats.llm?.L1, l2 = stats.llm?.L2;
+        const shortModel = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
+        const parts = [`⏱ 処理時間 ${secs}s`];
+        let totIn = 0, totOut = 0;
+        for (const [role, s] of [['L1', l1], ['L2', l2]]) {
+          if (s && s.calls > 0) {
+            parts.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
+            totIn += s.inTok; totOut += s.outTok;
+          }
+        }
+        parts.push(`API: SB ${self.mapboxMCP?._sbRequests ?? 0} / TQ ${self.mapboxMCP?._tqRequests ?? 0}`);
+        self.addMessage('tool-status', parts.join('\n'));
+        // header cumulative token display
+        self._tokens.input  += totIn;
+        self._tokens.output += totOut;
+        self._updateTokenDisplay();
       },
     };
   }
