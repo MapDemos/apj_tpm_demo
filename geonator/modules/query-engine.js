@@ -36,6 +36,11 @@ class QueryEngine {
   /** Localized message bundle for the current UI language. */
   _m() { return MESSAGES[this.ui.getLang?.() === 'en' ? 'en' : 'ja']; }
 
+  /** Debug-mode step gate: pause until the operator clicks "next" (no-op otherwise). */
+  async _step(stepId, label, lines) {
+    if (this.ui.isDebug?.()) await this.ui.debugStep?.(stepId, label, lines || []);
+  }
+
   // ─────────────────────────────────────────────
   // Entry point
   // ─────────────────────────────────────────────
@@ -199,6 +204,12 @@ class QueryEngine {
     this.ui.fitToBBox?.(bboxes.condBbox);
     this.ui.refreshCounts?.();
 
+    // [STEP] proximity解決
+    await this._step('step-proximity', '① 一次検索: proximity解決', [
+      `アンカー: ${this._dbgReport.proximity.anchors.join(', ')}`,
+      `target収集bbox 約${this._dbgReport.proximity.targetBboxM}m / condition収集bbox 約${this._dbgReport.proximity.condBboxM}m`,
+    ]);
+
     // [3-B] collect candidates (unless cached)
     if (cacheInvalid.candidates) {
       const collected = await this._collectCandidates(schema, bboxes);
@@ -210,6 +221,12 @@ class QueryEngine {
       Object.values(collected.conditions).forEach(items => this.ui.drawConditionHits?.(items));
       this.ui.refreshCounts?.();
     }
+
+    // [STEP] Step1 収集
+    await this._step('step-collect', '② Step1: 候補収集', [
+      `target「${this._dbgReport.target?.intent}」: 取得${this._dbgReport.target?.raw} → 除外${this._dbgReport.target?.excluded} → 残${this._dbgReport.target?.kept}`,
+      ...(this._dbgReport.conditions || []).map(c => `条件 ${c.label}[${c.type}]: ${c.found}`),
+    ]);
 
     // [3-C] evaluate (collect reach polygons for visualization)
     this.mcp._evalPolygons = [];
@@ -223,6 +240,11 @@ class QueryEngine {
       partial: results.partial.map(dbgRow),
       noneCount: results.none.length,
     };
+
+    // [STEP] Step2 評価
+    await this._step('step-eval', '③ Step2: 距離評価', [
+      `全一致 ${results.full.length} / 部分一致 ${results.partial.length} / 参考 ${results.none.length}`,
+    ]);
 
     // [4] show results
     this._showResults(results, schema);

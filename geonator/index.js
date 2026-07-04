@@ -163,6 +163,11 @@ class LocationFinderApp {
         });
       },
       getLang() { return self._lang; },
+      isDebug() { return self._debugMode; },
+      debugStep(stepId, label, lines) {
+        if (!self._debugMode) return Promise.resolve();
+        return new Promise(resolve => self._showStepPanel(stepId, label, lines, resolve));
+      },
       showResults(full, partial, none, unsupported, conditionLabels) {
         // Tier-aware markers (gold/silver/match/bronze). QueryEngine set _tier + _matchInfo.score.
         self._renderTierMarkers([...full, ...partial, ...none]);
@@ -356,6 +361,45 @@ class LocationFinderApp {
 
     const chatMessages = document.getElementById('chatMessages');
     if (chatMessages) chatMessages.appendChild(container);
+  }
+
+  /**
+   * Debug step panel: shows the stage summary + a "▶ 次へ" button and waits.
+   * Tagged with data-step so map elements can highlight it on click.
+   */
+  _showStepPanel(stepId, label, lines, onNext) {
+    const container = document.getElementById('chatMessages');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message debug-step';
+    wrapper.dataset.step = stepId;
+    const body = (lines || []).map(l => _esc(l)).join('<br>');
+    wrapper.innerHTML =
+      `<div class="msg-label">🪜 ${_esc(label)}</div>` +
+      `<div class="message-bubble">${body}<div style="margin-top:8px">` +
+      `<button class="choice-btn step-next-btn">▶ 次へ</button></div></div>`;
+    container.appendChild(wrapper);
+    container.scrollTop = container.scrollHeight;
+    const btn = wrapper.querySelector('.step-next-btn');
+    // Register so toggling debug off (or reset) can release a pending step.
+    const done = () => {
+      if (this._debugStepResolve !== done) return; // already released
+      this._debugStepResolve = null;
+      btn.disabled = true;
+      onNext();
+    };
+    this._debugStepResolve = done;
+    btn.addEventListener('click', done);
+  }
+
+  /** Highlight the chat step message a clicked map element belongs to. */
+  _highlightStep(stepId) {
+    if (!stepId) return;
+    document.querySelectorAll('.step-highlight').forEach(el => el.classList.remove('step-highlight'));
+    const el = document.querySelector(`[data-step="${stepId}"]`);
+    if (el) {
+      el.classList.add('step-highlight');
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -568,6 +612,7 @@ class LocationFinderApp {
         `cursor:pointer;display:flex;align-items:center;justify-content:center;` +
         `font-size:${Math.round(tier.size*0.5)}px;color:#1a1000;font-weight:700;line-height:1;`;
       if (place._tier === 'gold') { goldNum++; dot.textContent = String(goldNum); }
+      el.title = `${tier.label}: ${place.name || '(名前なし)'}（クリックで評価ステップを表示）`;
       el.appendChild(dot);
 
       const mi = place._matchInfo || {};
@@ -581,7 +626,10 @@ class LocationFinderApp {
         .setLngLat(_safeLL(lng, lat))
         .setPopup(new mapboxgl.Popup({ offset: tier.size / 2 + 6, closeButton: false }).setHTML(popupHTML))
         .addTo(this.map);
-      dot.addEventListener('click', () => marker.togglePopup());
+      dot.addEventListener('click', () => {
+        marker.togglePopup();
+        if (this._debugMode) this._highlightStep('step-eval');
+      });
       this.candidateMarkers.push(marker);
     }
 
@@ -1027,6 +1075,33 @@ class LocationFinderApp {
         },
       },
     ]);
+
+    this._wireDebugInteractions();
+  }
+
+  /**
+   * Hover → tooltip explaining what the element is; click → highlight the
+   * corresponding step in the chat panel.
+   */
+  _wireDebugInteractions() {
+    const specs = [
+      { layer: 'dbg-proximity-c',    step: 'step-proximity', label: () => 'proximityアンカー（基準点）' },
+      { layer: 'dbg-bboxes-l',       step: 'step-proximity', label: f => `検索範囲 bbox（${f?.properties?.label || ''}）` },
+      { layer: 'dbg-eval-polys-fill',step: 'step-eval',      label: () => '評価範囲（isochrone/半径）' },
+      { layer: 'dbg-search-hits-c',  step: 'step-collect',   label: f => `target候補: ${f?.properties?.name || ''}` },
+      { layer: 'dbg-tq-hits-c',      step: 'step-collect',   label: f => `条件候補: ${f?.properties?.name || ''}` },
+    ];
+    const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 8 });
+    for (const { layer, step, label } of specs) {
+      if (!this.map.getLayer(layer)) continue;
+      this.map.on('mouseenter', layer, () => { this.map.getCanvas().style.cursor = 'pointer'; });
+      this.map.on('mousemove', layer, (e) => {
+        const f = e.features?.[0];
+        popup.setLngLat(e.lngLat).setHTML(`<div class="dbg-tip">${_esc(label(f))}</div>`).addTo(this.map);
+      });
+      this.map.on('mouseleave', layer, () => { this.map.getCanvas().style.cursor = ''; popup.remove(); });
+      this.map.on('click', layer, () => this._highlightStep(step));
+    }
   }
 
   /** Reset all debug layers to empty. */
