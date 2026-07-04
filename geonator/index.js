@@ -2302,7 +2302,9 @@ class LocationFinderApp {
             }
           });
           this.addMessage('user', choice);
-          resolve(`選択: ${choice}`);
+          // Return the RAW choice string (QueryEngine matches it by index).
+          // (Old agentic loop used a "選択: " prefix; that broke index matching.)
+          resolve(choice);
         });
       });
     });
