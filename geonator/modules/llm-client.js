@@ -39,28 +39,29 @@ class LLMClient {
   }
 
   // ─────────────────────────────────────────────
-  // L2: Negative filter on candidates
+  // L2: Intent-match check on candidates
   // ─────────────────────────────────────────────
 
   /**
-   * Given a target and candidate list, return IDs to exclude.
-   * Conservative: only exclude obvious mismatches (R).
-   * @param {object} target - QuerySchema.target
+   * Given an intent label and candidate list, return the IDs that match the intent.
+   * Inclusive: keep candidates that match OR could plausibly match the intent.
+   * Returns null on parse failure so the caller can keep all (conservative).
+   * @param {string} intentLabel - human-readable description of what is being searched
    * @param {Array<{id: number|string, name: string}>} candidates
-   * @returns {Promise<Array<number|string>>} exclude_ids
+   * @returns {Promise<Array<number|string>|null>} matched_ids, or null on failure
    */
-  async filterCandidates(target, candidates) {
+  async checkIntentMatch(intentLabel, candidates) {
     if (!candidates || candidates.length === 0) return [];
 
     const result = await this._callClaude(
-      this._buildL2Prompt(target, candidates),
-      1024  // large enough for exclude_ids list even with ~150 candidates
+      this._buildL2Prompt(intentLabel, candidates),
+      1024  // large enough for id list even with ~150 candidates
     );
     try {
       const json = this._extractJSON(result);
-      return Array.isArray(json?.exclude_ids) ? json.exclude_ids : [];
+      return Array.isArray(json?.matched_ids) ? json.matched_ids : null;
     } catch {
-      return []; // on failure, keep all candidates (conservative)
+      return null; // parse failure → caller keeps all
     }
   }
 
@@ -110,12 +111,12 @@ class LLMClient {
     };
   }
 
-  _buildL2Prompt(target, candidates) {
+  _buildL2Prompt(intentLabel, candidates) {
     if (typeof PROMPT_L2 === 'undefined') throw new Error('PROMPT_L2 not loaded');
     const list = candidates.map(c => `{"id":${JSON.stringify(c.id)},"name":${JSON.stringify(c.name ?? '')}}`).join('\n');
     return {
       system: PROMPT_L2,
-      user:   `探索対象：${target.text}（${target.type}）\n\n候補:\n${list}\n\n明らかに対象外のIDを{"exclude_ids":[...]}形式で返してください。`,
+      user:   `探しているもの（意図）：${intentLabel}\n\n候補:\n${list}\n\nこの意図に合致する（またはその可能性がある）候補のIDを{"matched_ids":[...]}形式で返してください。`,
     };
   }
 }

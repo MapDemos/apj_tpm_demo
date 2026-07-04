@@ -144,10 +144,18 @@ class QueryEngine {
       const bboxResult = await this._resolveProximity(schema);
       if (!bboxResult) return;
       this._cache.bbox = bboxResult;
+      // Visualize resolved anchor points
+      this.ui.drawProximityPoints?.(bboxResult.resolvedPoints);
     }
 
     // [3-A4] compute dual bbox (C-2)
     const bboxes = this._computeDualBbox(this._cache.bbox, schema);
+
+    // Visualize search area (target = tight, condition = wide) + fit map
+    this.ui.drawBBox?.(bboxes.condBbox);
+    this.ui.drawBBox?.(bboxes.targetBbox);
+    this.ui.fitToBBox?.(bboxes.condBbox);
+    this.ui.refreshCounts?.();
 
     // [3-B] collect candidates (unless cached)
     if (cacheInvalid.candidates) {
@@ -155,6 +163,10 @@ class QueryEngine {
       if (!collected) return;
       this._cache.mainCandidates = collected.main;
       this._cache.condCandidates = collected.conditions;
+      // Visualize hits
+      this.ui.drawHits?.(collected.main);
+      Object.values(collected.conditions).forEach(items => this.ui.drawConditionHits?.(items));
+      this.ui.refreshCounts?.();
     }
 
     // [3-C] evaluate
@@ -162,6 +174,7 @@ class QueryEngine {
 
     // [4] show results
     this._showResults(results, schema);
+    this.ui.refreshCounts?.();
 
     // [5] feedback
     await this._handleFeedback(schema, originalText);
@@ -390,12 +403,25 @@ class QueryEngine {
   async _denoiseMain(target, candidates) {
     if (!candidates || candidates.length === 0) return [];
 
-    // L2 negative filter — target results are already scoped by the search query;
-    // prefix filter is intentionally NOT applied to the main target (only condition POIs).
-    const slim = candidates.map(c => ({ id: c.id, name: c.name ?? '' }));
-    const excludeIds = await this.llm.filterCandidates(target, slim);
-    const excludeSet = new Set(excludeIds.map(String));
-    return candidates.filter(c => !excludeSet.has(String(c.id)));
+    // L2 intent-match check (positive framing): keep candidates that match the
+    // query intent. Per building type (マンション/アパート/ビル) the intent label
+    // differs so the LLM judges each precisely.
+    const intentLabel = this._buildIntentLabel(target);
+    const slim   = candidates.map(c => ({ id: c.id, name: c.name ?? '' }));
+    const matched = await this.llm.checkIntentMatch(intentLabel, slim);
+
+    if (matched === null) return candidates; // parse failure → keep all (conservative)
+    const keep = new Set(matched.map(String));
+    return candidates.filter(c => keep.has(String(c.id)));
+  }
+
+  _buildIntentLabel(target) {
+    switch (target.query_intent) {
+      case 'category_mansion':   return 'マンション（分譲・賃貸マンション等の中高層集合住宅）';
+      case 'category_apartment': return 'アパート（木造・軽量鉄骨等の低層集合住宅。ハイツ・コーポ・荘・メゾン等を含む）';
+      case 'category_building':  return 'ビル（オフィスビル・商業ビル・雑居ビル等の建物）';
+      default:                   return target.text;
+    }
   }
 
   // ─────────────────────────────────────────────

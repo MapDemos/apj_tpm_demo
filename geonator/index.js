@@ -151,6 +151,46 @@ class LocationFinderApp {
         self._clearDebugLayers();
         if (self.finalMarker) { self.finalMarker.remove(); self.finalMarker = null; }
       },
+
+      // ── Visualization / telemetry callbacks (always on, not debug-gated) ──
+      refreshCounts() {
+        self._updateAPICountDisplay();
+      },
+      drawProximityPoints(points) {
+        (points || []).forEach(p => {
+          if (p.bbox) { self._dbgAddBbox(p.bbox); return; }
+          if (p.lng != null && p.lat != null) {
+            self._dbgAddPoint('dbg-proximity', 'proximity', p.lng, p.lat, { type: 'proximity' });
+          }
+        });
+      },
+      drawBBox(bbox) {
+        if (bbox) self._dbgAddBbox(bbox);
+      },
+      drawHits(items) {
+        (items || []).forEach(it => {
+          const lng = it.longitude ?? it.lng;
+          const lat = it.latitude  ?? it.lat;
+          if (lng != null && lat != null) {
+            self._dbgAddPoint('dbg-search-hits', 'searchHits', lng, lat, { name: it.name || '' });
+          }
+        });
+      },
+      drawConditionHits(items) {
+        (items || []).forEach(it => {
+          const lng = it.longitude ?? it.lng;
+          const lat = it.latitude  ?? it.lat;
+          if (lng != null && lat != null) {
+            self._dbgAddPoint('dbg-tq-hits', 'tqHits', lng, lat, { name: it.name || '' });
+          }
+        });
+      },
+      fitToBBox(bbox) {
+        if (!bbox) return;
+        try {
+          self.map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 80, duration: 900, maxZoom: 16 });
+        } catch(_) {}
+      },
     };
   }
 

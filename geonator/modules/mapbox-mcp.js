@@ -782,7 +782,9 @@ class MapboxMCPClient {
     };
 
     const isBusStop = queryIntent === 'category_busstop' || (!queryIntent && this._isBusStopQuery(queries));
-    const isBuilding = queryIntent === 'category_building' || (!queryIntent && !isBusStop && this._isBuildingQuery(queries));
+    // Building category is split into 3 intents (マンション/アパート/ビル); all share the same grid search.
+    const BUILDING_INTENTS = ['category_building', 'category_mansion', 'category_apartment'];
+    const isBuilding = BUILDING_INTENTS.includes(queryIntent) || (!queryIntent && !isBusStop && this._isBuildingQuery(queries));
 
     // bboxのみ渡された場合（proximityなし）は中心点をfallback proximityとして使用
     const effectiveProximity = proximity?.length >= 2

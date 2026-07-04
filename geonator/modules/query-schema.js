@@ -7,7 +7,7 @@ const SCHEMA_ENUMS = {
   anchor_type:    ['station', 'poi', 'address', 'locality'],
   specificity:    ['specific', 'generic'],
   target_type:    ['residential_building', 'commercial_building', 'general_poi'],
-  query_intent:   ['category_building', 'specific', 'category_busstop', 'category_busstop_location', 'intersection', 'signal'],
+  query_intent:   ['category_mansion', 'category_apartment', 'category_building', 'specific', 'category_busstop', 'category_busstop_location', 'intersection', 'signal'],
   condition_type: ['poi', 'road', 'water', 'intersection', 'signal', 'transit_entrance', 'category_busstop'],
   distance_method: ['radius', 'isochrone'],
   distance_level: ['same_building', 'adjacent', 'very_close', 'nearby', 'somewhat_nearby', 'far'],
