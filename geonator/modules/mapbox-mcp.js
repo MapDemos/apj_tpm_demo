@@ -831,7 +831,13 @@ class MapboxMCPClient {
         console.log(`[MapboxMCP] 建物系 → グリッドTilequery のみ (初期bbox幅=${Math.round((currentBbox[2]-currentBbox[0])*111320)}m)`);
 
       const tqItems = await this._gridTilequeryPOI(lat, lng, currentBbox, 200);
-      tqItems.forEach(item => {
+      // Building-category targets: keep only poi_label class=building (reliably drops
+      // restaurants/shops/medical/etc. without name-guessing). Items with no class
+      // (e.g. Search Box fallback) are kept.
+      const buildingOnly = tqItems.filter(item => !item.cls || item.cls === 'building');
+      if (this.config.DEBUG)
+        console.log(`[MapboxMCP] 建物クラスフィルタ: ${tqItems.length}件 → ${buildingOnly.length}件 (class=building)`);
+      buildingOnly.forEach(item => {
         if (!_notBlocked(item.name)) return;
         if (!seen.has(dedupKey(item))) seen.set(dedupKey(item), item);
       });
@@ -1060,6 +1066,7 @@ class MapboxMCPClient {
           longitude: f.geometry?.coordinates?.[0],
           latitude:  f.geometry?.coordinates?.[1],
           distance:  Math.round(f.properties?.tilequery?.distance || 0),
+          cls:       f.properties?.class || null,   // streets-v8 poi_label class
         }))
         .filter(f => f.longitude != null && f.latitude != null);
     } catch (_) { return []; }
