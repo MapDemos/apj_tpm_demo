@@ -32,6 +32,9 @@ class QueryEngine {
     this._awaitingClarify = false; // last run ended asking for more info (main-input answer merges)
   }
 
+  /** Localized message bundle for the current UI language. */
+  _m() { return MESSAGES[this.ui.getLang?.() === 'en' ? 'en' : 'ja']; }
+
   // ─────────────────────────────────────────────
   // Entry point
   // ─────────────────────────────────────────────
@@ -67,14 +70,14 @@ class QueryEngine {
     try {
       schema = await this.llm.parseQuery(userText, previousText);
     } catch (e) {
-      this.ui.showMessage(UI_TEXT.error_communication);
+      this.ui.showMessage(this._m().error_communication);
       return null;
     }
 
     // Not a location query (greeting / chit-chat / no location clue) → guide the user
     const noLocationClue = !schema?.proximity?.anchors?.length && !schema?.target?.text;
     if (schema?.not_a_query || noLocationClue) {
-      this.ui.showMessage(UI_TEXT.not_a_query);
+      this.ui.showMessage(this._m().not_a_query);
       return null;
     }
 
@@ -84,9 +87,9 @@ class QueryEngine {
       console.warn('[QueryEngine] L1 schema invalid:', validation.errors);
       // If it lacks the essentials, it's more likely a non-query than a comm error.
       if (!schema?.proximity?.anchors?.length || !schema?.target?.text) {
-        this.ui.showMessage(UI_TEXT.not_a_query);
+        this.ui.showMessage(this._m().not_a_query);
       } else {
-        this.ui.showMessage(UI_TEXT.error_communication);
+        this.ui.showMessage(this._m().error_communication);
       }
       return null;
     }
@@ -105,7 +108,7 @@ class QueryEngine {
 
   async _handleStructuralIssue(issue, schema) {
     if (this._clarifyCount >= this.config.MAX_CLARIFY_TURNS) {
-      this.ui.showMessage(UI_TEXT.clarify_limit);
+      this.ui.showMessage(this._m().clarify_limit);
       return false;
     }
     this._clarifyCount++;
@@ -113,7 +116,7 @@ class QueryEngine {
     switch (issue.kind) {
       case 'proximity_missing': {
         // [DD] Mode2 — ask for location
-        const answer = await this.ui.showHintInput(UI_TEXT.ask_proximity);
+        const answer = await this.ui.showHintInput(this._m().ask_proximity);
         if (!answer) return false;
         const newSchema = await this._reparseMerged(answer);
         if (!newSchema) return false;
@@ -121,7 +124,7 @@ class QueryEngine {
         return true;
       }
       case 'target_missing': {
-        const answer = await this.ui.showHintInput(UI_TEXT.ask_target);
+        const answer = await this.ui.showHintInput(this._m().ask_target);
         if (!answer) return false;
         const newSchema = await this._reparseMerged(answer);
         if (!newSchema) return false;
@@ -130,7 +133,7 @@ class QueryEngine {
       }
       case 'distance_too_far': {
         // [4] level=far → pushback
-        this.ui.showMessage(UI_TEXT.distance_too_far);
+        this.ui.showMessage(this._m().distance_too_far);
         return false;
       }
       default:
@@ -149,7 +152,7 @@ class QueryEngine {
       fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL);
       return schema;
     } catch {
-      this.ui.showMessage(UI_TEXT.error_communication);
+      this.ui.showMessage(this._m().error_communication);
       return null;
     }
   }
@@ -169,7 +172,7 @@ class QueryEngine {
 
     // [3-A] resolve proximity → bbox (unless cached)
     if (cacheInvalid.bbox) {
-      this.ui.showSearching(UI_TEXT.searching);
+      this.ui.showSearching(this._m().searching);
       const bboxResult = await this._resolveProximity(schema);
       if (!bboxResult) return;
       this._cache.bbox = bboxResult;
@@ -262,7 +265,7 @@ class QueryEngine {
       const points = await this._resolveAnchor(anchor, scopeBbox);
       if (points === null) return null; // clarification/disambiguation in progress or aborted
       if (points.length === 0) {
-        this.ui.showMessage(`${anchor.text}が見つかりませんでした。別の地名や駅名をお試しください。`);
+        this.ui.showMessage(this._m().anchorNotFound(anchor.text));
         this._awaitingClarify = true; // next answer merges with this query
         return null;
       }
@@ -279,7 +282,7 @@ class QueryEngine {
       const buildingTarget = ['category_mansion', 'category_apartment', 'category_building']
         .includes(schema.target?.query_intent);
       if (buildingTarget) {
-        this.ui.showMessage(UI_TEXT.bbox_too_large);
+        this.ui.showMessage(this._m().bbox_too_large);
         return null;
       }
       // else: allow — collectTarget will rely on Search Box (grid is skipped for big bbox)
@@ -382,7 +385,7 @@ class QueryEngine {
     if (reps.length > 1 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
       this._clarifyCount++;
       const choices = reps.map(f => f.properties.full_address || f.properties.name);
-      const chosen = await this.ui.showChoices(`「${anchor.text}」はどちらですか？`, choices.slice(0, 4));
+      const chosen = await this.ui.showChoices(this._m().whichArea(anchor.text), choices.slice(0, 4));
       const idx = choices.indexOf(chosen);
       return [this._featureToBboxPoint(reps[idx >= 0 ? idx : 0])];
     }
@@ -405,7 +408,7 @@ class QueryEngine {
     // 2. Find intersections whose name matches (road layer, class=intersection)
     const items = await this.mcp.collectCondition({ type: 'intersection', text: anchor.text }, areaBbox);
     if (!items || items.length === 0) {
-      this.ui.showMessage(`「${anchor.text}」という名前の交差点が見つかりませんでした。`);
+      this.ui.showMessage(this._m().intersectionNotFound(anchor.text));
       return null;
     }
 
@@ -446,7 +449,7 @@ class QueryEngine {
       const choices = distinct.slice(0, 4).map(f =>
         `${f.properties.name}${f.properties.full_address ? '（' + f.properties.full_address + '）' : ''}`
       );
-      const chosen = await this.ui.showChoices(`「${anchor.text}」はどれですか？`, choices);
+      const chosen = await this.ui.showChoices(this._m().whichPoi(anchor.text), choices);
       const idx = choices.indexOf(chosen);
       const f = distinct[idx >= 0 ? idx : 0];
       return [{ lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], radiusM }];
@@ -457,7 +460,7 @@ class QueryEngine {
     // Only reject genuinely huge admin areas; a place (市/区) is acceptable as a
     // broad proximity (its bbox is used when available).
     if (['region', 'country'].includes(ftype)) {
-      this.ui.showMessage(UI_TEXT.proximity_too_broad);
+      this.ui.showMessage(this._m().proximity_too_broad);
       this._awaitingClarify = true;
       return null;
     }
@@ -505,11 +508,11 @@ class QueryEngine {
 
   async _clarifyGenericAnchor(anchor) {
     if (this._clarifyCount >= this.config.MAX_CLARIFY_TURNS) {
-      this.ui.showMessage(UI_TEXT.clarify_limit);
+      this.ui.showMessage(this._m().clarify_limit);
       return;
     }
     this._clarifyCount++;
-    this.ui.showMessage(`「${anchor.text}」は複数あります。地名や駅名も一緒に教えてください。`);
+    this.ui.showMessage(this._m().genericMulti(anchor.text));
     this._awaitingClarify = true; // next main-input answer merges with this query
   }
 
@@ -591,7 +594,7 @@ class QueryEngine {
         condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
         // [S] note if condition returned 0 items
         if (!items || items.length === 0) {
-          this.ui.showMessage(`「${key}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`);
+          this.ui.showMessage(this._m().condNotFound(key));
         }
       }));
     }
@@ -802,7 +805,7 @@ class QueryEngine {
 
     if (totalMain === 0) {
       // [L] main 0 → ask for more info
-      this.ui.showMessage(`${schema.target.text}の近くに候補は見つかりませんでした。追加の情報を教えていただけますか？`);
+      this.ui.showMessage(this._m().mainZero(schema.target.text));
       return;
     }
 
@@ -810,7 +813,7 @@ class QueryEngine {
 
     if (!hasMatch && none.length > 0) {
       // [L] main exists but 0 conditions matched → show 参考 as fallback
-      this.ui.showMessage(UI_TEXT.no_condition_match);
+      this.ui.showMessage(this._m().no_condition_match);
     }
 
     // 参考(none) is only shown when there is NO full/partial match (else too many).
@@ -819,19 +822,16 @@ class QueryEngine {
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
     this.ui.showResults(full, partial, displayNone, schema.unsupported, conditionLabels);
 
+    const M = this._m();
     let msg;
     if (!hasMatch) {
-      msg = `条件に一致する候補はありませんでしたが、範囲内の候補${displayNone.length}件を参考として表示します。`;
+      msg = M.resultRefOnly(displayNone.length);
     } else {
       const goldCount = full.filter(c => c._tier === 'gold').length;
       const isFlat    = full.length > 0 && full[0]._tier === 'match';
-      if (goldCount > 0) {
-        msg = `最有力${goldCount}件を特定しました（全マッチ：${full.length}件、部分マッチ：${partial.length}件）。金色マーカーが最も条件に近い候補です。`;
-      } else if (isFlat) {
-        msg = `${full.length}件が同程度に条件を満たしています（部分マッチ：${partial.length}件）。甲乙つけがたいため全て同格で表示します。`;
-      } else {
-        msg = `${full.length + partial.length}件見つかりました（全マッチ：${full.length}件、部分マッチ：${partial.length}件）`;
-      }
+      if (goldCount > 0)      msg = M.resultGold(goldCount, full.length, partial.length);
+      else if (isFlat)        msg = M.resultFlat(full.length, partial.length);
+      else                    msg = M.resultPlain(full.length, partial.length);
     }
     this.ui.showMessage(msg);
   }
@@ -845,13 +845,13 @@ class QueryEngine {
 
     switch (action) {
       case 'done':
-        this.ui.showMessage(UI_TEXT.confirmed);
+        this.ui.showMessage(this._m().confirmed);
         this._resetCache();
         break;
 
       case 'continue': {
         // [6-2a] ask for hint
-        const hint = await this.ui.showHintInput(UI_TEXT.ask_hint);
+        const hint = await this.ui.showHintInput(this._m().ask_hint);
         if (!hint) break;
 
         // reset telemetry for this new search cycle
@@ -873,7 +873,7 @@ class QueryEngine {
 
       case 'restart':
         this._resetCache();
-        this.ui.showMessage(UI_TEXT.welcome);
+        this.ui.showMessage(this._m().welcome);
         break;
     }
   }
@@ -907,18 +907,57 @@ class QueryEngine {
 // Fixed UI text (systemdesign §5-3)
 // ─────────────────────────────────────────────
 
-const UI_TEXT = {
-  welcome:              '探している場所を教えてください。近くの駅名・施設名・住所と、条件（近くのお店・道路など）を一緒に伝えていただくと絞り込めます。',
-  searching:            '候補を検索しています…',
-  ask_proximity:        'どのあたりをお探しですか？地名や駅名を教えてください。',
-  ask_target:           '何をお探しですか？',
-  ask_hint:             'さらに絞り込む情報を教えてください（例：出口番号、近くの交差点名、建物の特徴など）。',
-  confirmed:            'ありがとうございました。またお気軽にご相談ください。',
-  no_condition_match:   '条件に完全一致する候補はありませんでしたが、候補を参考として地図に表示しています。',
-  distance_too_far:     'その範囲は広すぎます。もっと近い目印を教えてください。',
-  bbox_too_large:       'その範囲は広すぎます。もっと絞れる情報を教えてください。',
-  proximity_too_broad:  'もう少し具体的な地名（町名・丁目等）か駅名を教えてください。',
-  error_communication:  '通信エラーが発生しました。もう一度お試しください。',
-  clarify_limit:        '情報が不足しています。分かる範囲で場所を教えてください。',
-  not_a_query:          '場所の情報が読み取れませんでした。駅名・施設名・住所などと、探しているものを教えてください。（例：西大島駅の近くのマンション、バス停が目の前）',
+const MESSAGES = {
+  ja: {
+    searching:            '候補を検索しています…',
+    ask_proximity:        'どのあたりをお探しですか？地名や駅名を教えてください。',
+    ask_target:           '何をお探しですか？',
+    ask_hint:             'さらに絞り込む情報を教えてください（例：出口番号、近くの交差点名、建物の特徴など）。',
+    confirmed:            'ありがとうございました。またお気軽にご相談ください。',
+    welcome:              '探している場所を教えてください。近くの駅名・施設名・住所と、条件（近くのお店・道路など）を一緒に伝えていただくと絞り込めます。',
+    no_condition_match:   '条件に完全一致する候補はありませんでしたが、候補を参考として地図に表示しています。',
+    distance_too_far:     'その範囲は広すぎます。もっと近い目印を教えてください。',
+    bbox_too_large:       'その範囲は広すぎます。もっと絞れる情報を教えてください。',
+    proximity_too_broad:  'もう少し具体的な地名（町名・丁目等）か駅名を教えてください。',
+    error_communication:  '通信エラーが発生しました。もう一度お試しください。',
+    clarify_limit:        '情報が不足しています。分かる範囲で場所を教えてください。',
+    not_a_query:          '場所の情報が読み取れませんでした。駅名・施設名・住所などと、探しているものを教えてください。（例：西大島駅の近くのマンション、バス停が目の前）',
+    anchorNotFound:  t => `${t}が見つかりませんでした。別の地名や駅名をお試しください。`,
+    whichArea:       t => `「${t}」はどちらですか？`,
+    whichPoi:        t => `「${t}」はどれですか？`,
+    genericMulti:    t => `「${t}」は複数あります。地名や駅名も一緒に教えてください。`,
+    intersectionNotFound: t => `「${t}」という名前の交差点が見つかりませんでした。`,
+    condNotFound:    k => `「${k}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`,
+    mainZero:        t => `${t}の近くに候補は見つかりませんでした。追加の情報を教えていただけますか？`,
+    resultGold:  (g, f, p) => `最有力${g}件を特定しました（全マッチ：${f}件、部分マッチ：${p}件）。金色マーカーが最も条件に近い候補です。`,
+    resultFlat:  (f, p)    => `${f}件が同程度に条件を満たしています（部分マッチ：${p}件）。甲乙つけがたいため全て同格で表示します。`,
+    resultPlain: (f, p)    => `${f + p}件見つかりました（全マッチ：${f}件、部分マッチ：${p}件）`,
+    resultRefOnly: n       => `条件に一致する候補はありませんでしたが、範囲内の候補${n}件を参考として表示します。`,
+  },
+  en: {
+    searching:            'Searching for candidates…',
+    ask_proximity:        'Where should I look? Please give a place or station name.',
+    ask_target:           'What are you looking for?',
+    ask_hint:             'Add details to narrow it down (e.g. exit number, nearby intersection, building features).',
+    confirmed:            'Thank you. Feel free to ask anytime.',
+    welcome:              'Tell me the location you are looking for. Share a nearby station, facility, or address, plus conditions (nearby stores, roads, etc.).',
+    no_condition_match:   'No candidate fully matched the conditions, but candidates are shown on the map for reference.',
+    distance_too_far:     'That range is too wide. Please give a closer landmark.',
+    bbox_too_large:       'That area is too large. Please provide something more specific.',
+    proximity_too_broad:  'Please give a more specific place (town/block) or a station name.',
+    error_communication:  'A communication error occurred. Please try again.',
+    clarify_limit:        'Not enough information. Please tell me the location as best you can.',
+    not_a_query:          "I couldn't read a location. Please give a station/facility/address and what you are looking for (e.g. a condo near Nishi-ojima station with a bus stop right in front).",
+    anchorNotFound:  t => `Couldn't find "${t}". Please try another place or station name.`,
+    whichArea:       t => `Which "${t}" do you mean?`,
+    whichPoi:        t => `Which "${t}"?`,
+    genericMulti:    t => `There are several "${t}". Please add a place or station name.`,
+    intersectionNotFound: t => `No intersection named "${t}" was found.`,
+    condNotFound:    k => `"${k}" wasn't found in this area (it may not be in the map data).`,
+    mainZero:        t => `No "${t}" found nearby. Could you give more information?`,
+    resultGold:  (g, f, p) => `Identified ${g} top candidate(s) (full match: ${f}, partial: ${p}). The gold markers best fit the conditions.`,
+    resultFlat:  (f, p)    => `${f} candidates match the conditions about equally (partial: ${p}). Shown as equals since none clearly stands out.`,
+    resultPlain: (f, p)    => `Found ${f + p} (full match: ${f}, partial: ${p}).`,
+    resultRefOnly: n       => `No candidate matched the conditions; showing ${n} in-area candidate(s) for reference.`,
+  },
 };

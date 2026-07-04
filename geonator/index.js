@@ -82,8 +82,8 @@ class LocationFinderApp {
       // 5. Init JS-driven QueryEngine (new architecture)
       this._initQueryEngine();
 
-      // 6. Welcome message
-      this.addMessage('assistant', UI_TEXT.welcome);
+      // 6. Welcome message (bilingual via LANG)
+      this.addMessage('assistant', LANG[this._lang].welcome);
 
     } catch (err) {
       console.error('[App] initialize() failed:', err);
@@ -162,6 +162,7 @@ class LocationFinderApp {
           self._showHintPanel(prompt, (text) => resolve(text));
         });
       },
+      getLang() { return self._lang; },
       showResults(full, partial, none, unsupported, conditionLabels) {
         // Tier-aware markers (gold/silver/match/bronze). QueryEngine set _tier + _matchInfo.score.
         self._renderTierMarkers([...full, ...partial, ...none]);
@@ -329,11 +330,17 @@ class LocationFinderApp {
     container.className = 'feedback-buttons';
     container.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;';
 
-    const buttons = [
-      { label: '✅ これで確定', value: 'done' },
-      { label: '🔄 続けて絞り込む', value: 'continue' },
-      { label: '🔁 最初からやり直す', value: 'restart' },
-    ];
+    const buttons = this._lang === 'en'
+      ? [
+          { label: '✅ Confirm',         value: 'done' },
+          { label: '🔄 Refine further',  value: 'continue' },
+          { label: '🔁 Start over',      value: 'restart' },
+        ]
+      : [
+          { label: '✅ これで確定',       value: 'done' },
+          { label: '🔄 続けて絞り込む',   value: 'continue' },
+          { label: '🔁 最初からやり直す', value: 'restart' },
+        ];
 
     for (const { label, value } of buttons) {
       const btn = document.createElement('button');
