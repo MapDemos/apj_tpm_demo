@@ -320,9 +320,11 @@ html, body {
   border: 1px solid rgba(239,68,68,.3);
   color: #fca5a5;
 }
-/* Tier markers — gold stands out dramatically via pulsing halo */
-.tier-marker { transition: transform .15s ease; }
-.tier-marker:hover { transform: scale(1.15); }
+/* Tier markers — outer wrapper is positioned by Mapbox (no transform here!).
+   Inner .tier-dot carries all styling + animation so it never fights Mapbox. */
+.tier-marker-wrap { line-height: 0; }
+.tier-dot { transition: transform .15s ease; }
+.tier-dot:hover { transform: scale(1.15); }
 .tier-glow { animation: goldPulse 1.6s ease-in-out infinite; }
 @keyframes goldPulse {
   0%, 100% { box-shadow: 0 0 0 3px rgba(245,158,11,.35), 0 0 14px 3px rgba(245,158,11,.55); }

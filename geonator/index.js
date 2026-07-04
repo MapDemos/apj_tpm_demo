@@ -485,15 +485,23 @@ class LocationFinderApp {
       const lat = place.latitude  ?? place.lat;
       if (lng == null || lat == null) continue;
 
+      // Outer element: Mapbox controls its `transform` for positioning — do NOT
+      // apply any CSS transform here (would fight Mapbox and make markers jump).
       const el = document.createElement('div');
-      el.className = `tier-marker tier-${place._tier}${tier.glow ? ' tier-glow' : ''}`;
-      el.style.cssText =
+      el.className = `tier-marker-wrap tier-${place._tier}`;
+      el.style.zIndex = String(tier.z);
+
+      // Inner element: all visual styling + hover/pulse animation live here.
+      const dot = document.createElement('div');
+      dot.className = `tier-dot${tier.glow ? ' tier-glow' : ''}`;
+      dot.style.cssText =
         `width:${tier.size}px;height:${tier.size}px;background:${tier.color};` +
-        `border:2px solid ${tier.ring};border-radius:50%;z-index:${tier.z};` +
+        `border:2px solid ${tier.ring};border-radius:50%;` +
         `box-shadow:${tier.glow ? '0 0 0 4px rgba(245,158,11,.35), 0 0 16px 4px rgba(245,158,11,.6)' : '0 1px 4px rgba(0,0,0,.4)'};` +
         `cursor:pointer;display:flex;align-items:center;justify-content:center;` +
-        `font-size:${Math.round(tier.size*0.5)}px;color:#1a1000;font-weight:700;`;
-      if (place._tier === 'gold') { goldNum++; el.textContent = String(goldNum); }
+        `font-size:${Math.round(tier.size*0.5)}px;color:#1a1000;font-weight:700;line-height:1;`;
+      if (place._tier === 'gold') { goldNum++; dot.textContent = String(goldNum); }
+      el.appendChild(dot);
 
       const mi = place._matchInfo || {};
       const scorePct = mi.score != null ? Math.round(mi.score * 100) : null;
@@ -506,7 +514,7 @@ class LocationFinderApp {
         .setLngLat(_safeLL(lng, lat))
         .setPopup(new mapboxgl.Popup({ offset: tier.size / 2 + 6, closeButton: false }).setHTML(popupHTML))
         .addTo(this.map);
-      el.addEventListener('click', () => marker.togglePopup());
+      dot.addEventListener('click', () => marker.togglePopup());
       this.candidateMarkers.push(marker);
     }
 
