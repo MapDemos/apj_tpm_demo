@@ -169,8 +169,10 @@ class QueryEngine {
       this.ui.refreshCounts?.();
     }
 
-    // [3-C] evaluate
+    // [3-C] evaluate (collect reach polygons for visualization)
+    this.mcp._evalPolygons = [];
     const results = await this._evaluate(schema, this._cache.mainCandidates, this._cache.condCandidates);
+    this.ui.drawPolygons?.(this.mcp._evalPolygons);
 
     // [4] show results
     this._showResults(results, schema);
@@ -403,16 +405,16 @@ class QueryEngine {
   async _denoiseMain(target, candidates) {
     if (!candidates || candidates.length === 0) return [];
 
-    // L2 intent-match check (positive framing): keep candidates that match the
-    // query intent. Per building type (マンション/アパート/ビル) the intent label
-    // differs so the LLM judges each precisely.
+    // L2 intent check: judge by query intent, but only remove candidates that
+    // CLEARLY don't match (ambiguous kept — recall priority). Per building type
+    // (マンション/アパート/ビル) the intent label differs so judgment is precise.
     const intentLabel = this._buildIntentLabel(target);
-    const slim   = candidates.map(c => ({ id: c.id, name: c.name ?? '' }));
-    const matched = await this.llm.checkIntentMatch(intentLabel, slim);
+    const slim     = candidates.map(c => ({ id: c.id, name: c.name ?? '' }));
+    const mismatch = await this.llm.findIntentMismatches(intentLabel, slim);
 
-    if (matched === null) return candidates; // parse failure → keep all (conservative)
-    const keep = new Set(matched.map(String));
-    return candidates.filter(c => keep.has(String(c.id)));
+    if (mismatch === null) return candidates; // parse failure → keep all (conservative)
+    const drop = new Set(mismatch.map(String));
+    return candidates.filter(c => !drop.has(String(c.id)));
   }
 
   _buildIntentLabel(target) {

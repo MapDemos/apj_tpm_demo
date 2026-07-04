@@ -35,6 +35,7 @@ class MapboxMCPClient {
     this._resultIdCounter      = 0;        // auto-increment across all searches
     this._primarySearchIds     = new Set(); // IDs from primary_search (cleared at step1_main)
     this._lastIsochroneData = null; // visualization用
+    this._evalPolygons      = []; // Step2 evaluation reach polygons (circle/isochrone) for map drawing
   }
 
   /**
@@ -2270,6 +2271,7 @@ class MapboxMCPClient {
     if (!distParams.useIsochrone) {
       const radiusKm = (distParams.radiusM ?? 250) / 1000;
       const circle   = turf.circle(turf.point([lng, lat]), radiusKm, { units: 'kilometers', steps: 32 });
+      this._evalPolygons.push(circle);  // for visualization
       for (const c of conditionItems) {
         const [cLng, cLat] = condLngLat(c);
         if (cLng != null && cLat != null &&
@@ -2298,6 +2300,7 @@ class MapboxMCPClient {
       }
     }
     if (!polygon) return false;
+    this._evalPolygons.push(polygon);  // for visualization
 
     for (const c of conditionItems) {
       const [cLng, cLat] = condLngLat(c);

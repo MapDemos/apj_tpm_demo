@@ -43,14 +43,15 @@ class LLMClient {
   // ─────────────────────────────────────────────
 
   /**
-   * Given an intent label and candidate list, return the IDs that match the intent.
-   * Inclusive: keep candidates that match OR could plausibly match the intent.
+   * Given an intent label and candidate list, return the IDs that CLEARLY do NOT
+   * match the intent (to be removed). Judgment is intent-based, but only clear
+   * mismatches are returned — ambiguous candidates are kept (recall priority, R).
    * Returns null on parse failure so the caller can keep all (conservative).
    * @param {string} intentLabel - human-readable description of what is being searched
    * @param {Array<{id: number|string, name: string}>} candidates
-   * @returns {Promise<Array<number|string>|null>} matched_ids, or null on failure
+   * @returns {Promise<Array<number|string>|null>} mismatch_ids, or null on failure
    */
-  async checkIntentMatch(intentLabel, candidates) {
+  async findIntentMismatches(intentLabel, candidates) {
     if (!candidates || candidates.length === 0) return [];
 
     const result = await this._callClaude(
@@ -59,7 +60,7 @@ class LLMClient {
     );
     try {
       const json = this._extractJSON(result);
-      return Array.isArray(json?.matched_ids) ? json.matched_ids : null;
+      return Array.isArray(json?.mismatch_ids) ? json.mismatch_ids : null;
     } catch {
       return null; // parse failure → caller keeps all
     }
@@ -116,7 +117,7 @@ class LLMClient {
     const list = candidates.map(c => `{"id":${JSON.stringify(c.id)},"name":${JSON.stringify(c.name ?? '')}}`).join('\n');
     return {
       system: PROMPT_L2,
-      user:   `探しているもの（意図）：${intentLabel}\n\n候補:\n${list}\n\nこの意図に合致する（またはその可能性がある）候補のIDを{"matched_ids":[...]}形式で返してください。`,
+      user:   `探しているもの（意図）：${intentLabel}\n\n候補:\n${list}\n\nこの意図に【明らかに】合致しない候補のIDだけを{"mismatch_ids":[...]}形式で返してください。判断が曖昧なものは含めないでください（残します）。`,
     };
   }
 }

@@ -185,6 +185,14 @@ class LocationFinderApp {
           }
         });
       },
+      drawPolygons(features) {
+        if (!self._dbg || !features?.length) return;
+        // Cap to keep the map readable / performant
+        const capped = features.slice(0, 200);
+        capped.forEach(f => { if (f?.geometry) self._dbg.evalPolys.features.push(f); });
+        try { self.map.getSource('dbg-eval-polys')?.setData(self._dbg.evalPolys); } catch(_) {}
+        document.getElementById('mapLegend').style.display = 'block';
+      },
       fitToBBox(bbox) {
         if (!bbox) return;
         try {
@@ -657,6 +665,7 @@ class LocationFinderApp {
       tqHits:      { type: 'FeatureCollection', features: [] },
       bboxes:      { type: 'FeatureCollection', features: [] },
       bboxLabels:  { type: 'FeatureCollection', features: [] },
+      evalPolys:   { type: 'FeatureCollection', features: [] },  // Step2 isochrone/radius reach polygons
       clusters:    { type: 'FeatureCollection', features: [] },  // DBSCAN cluster centers
       routeBuf:    { type: 'FeatureCollection', features: [] },
       routeLine:   { type: 'FeatureCollection', features: [] },
@@ -681,6 +690,15 @@ class LocationFinderApp {
       paint: { 'line-color': '#f97316', 'line-width': 1.5,
                'line-dasharray': ['literal', [3, 2]], 'line-opacity': 0.75 },
     }]);
+
+    // Purple: Step2 evaluation reach polygons (isochrone / radius circle)
+    add('dbg-eval-polys', this._dbg.evalPolys, [
+      { id: 'dbg-eval-polys-fill', type: 'fill',
+        paint: { 'fill-color': '#8b5cf6', 'fill-opacity': 0.07 } },
+      { id: 'dbg-eval-polys-line', type: 'line',
+        paint: { 'line-color': '#a78bfa', 'line-width': 1, 'line-opacity': 0.5,
+                 'line-dasharray': ['literal', [2, 2]] } },
+    ]);
 
     // Teal: Search Box hit points + labels
     add('dbg-search-hits', this._dbg.searchHits, [
@@ -819,7 +837,7 @@ class LocationFinderApp {
   _clearDebugLayers() {
     if (!this._dbg) return;
     Object.keys(this._dbg).forEach(k => { this._dbg[k].features = []; });
-    ['dbg-proximity','dbg-bboxes','dbg-bbox-labels','dbg-search-hits','dbg-clusters','dbg-tq-hits','dbg-route-buf','dbg-route-line','dbg-route-labels'].forEach(id => {
+    ['dbg-proximity','dbg-bboxes','dbg-bbox-labels','dbg-eval-polys','dbg-search-hits','dbg-clusters','dbg-tq-hits','dbg-route-buf','dbg-route-line','dbg-route-labels'].forEach(id => {
       try { this.map.getSource(id)?.setData({ type: 'FeatureCollection', features: [] }); } catch(_){}
     });
     document.getElementById('mapLegend').style.display = 'none';
