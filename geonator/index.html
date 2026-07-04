@@ -132,16 +132,26 @@
   <script src="./config.js"></script>
   <script src="data/poi-blocklist.js"></script>
 
-  <!-- 2. System prompt -->
+  <!-- 2. Prompts (L1/L2 for JS-driven arch + legacy) -->
   <script src="./prompts/prompt.js"></script>
+  <script src="./prompts/prompt-l1.js"></script>
+  <script src="./prompts/prompt-l2.js"></script>
 
   <!-- 3. Spatial utilities (Turf.js wrappers) -->
   <script src="./modules/spatial-utils.js"></script>
 
-  <!-- 4. Mapbox MCP client (depends on SpatialUtils + CONFIG) -->
+  <!-- 4. JS-driven architecture modules (load order matters) -->
+  <script src="./modules/distance-table.js"></script>
+  <script src="./modules/query-schema.js"></script>
+  <script src="./modules/llm-client.js"></script>
+
+  <!-- 5. Mapbox MCP client (depends on SpatialUtils + CONFIG) -->
   <script src="./modules/mapbox-mcp.js"></script>
 
-  <!-- 5. Main application (depends on everything above) -->
+  <!-- 6. Query engine (depends on distance-table, query-schema, llm-client, mapbox-mcp) -->
+  <script src="./modules/query-engine.js"></script>
+
+  <!-- 7. Main application (depends on everything above) -->
   <script src="./index.js"></script>
 
 </body>

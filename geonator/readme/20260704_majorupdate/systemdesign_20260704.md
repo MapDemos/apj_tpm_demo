@@ -1,18 +1,21 @@
 # Geonator JS主導アーキテクチャ 概要設計書
 
-**作成日**: 2026-07-04  
-**バージョン**: 1.0 (概要設計フェーズ)
+**作成日**: 2026-07-04
+**バージョン**: 2.0（設計確定フェーズ）
+**位置づけ**: ステップ①（概要設計）の最終成果物。この文書と `flowdetail_20260704.md` が仕様の正（source of truth）。実装は `implementation_instructions_20260704.md` に従う。
 
 ---
 
 ## 1. ツールの目的
 
-Geonatorは、曖昧な自然言語の説明（「西大島駅近くのマンション、バス停が目の前、ローソンがすぐ隣」等）から位置を特定するAIエージェントツールである。緊急通報オペレーター支援デモとして使用される。
+Geonatorは、曖昧な自然言語の説明（「西大島駅近くのマンション、バス停が目の前、ローソンがすぐ隣」等）から位置を特定するAIエージェントツールである。緊急通報オペレーター支援・配車支援デモとして使用される。
 
-**優先事項**:
-- 精度・網羅性（候補の見逃しは過検出より危険）
-- 安定性・再現性（同じ入力には同じ結果）
-- コスト効率（不要なLLM呼び出しを排除）
+**優先事項（この順で優先）**:
+1. **精度・網羅性** — 候補の見逃しは過検出より危険。**広く拾ってオペレーターに見せる**。
+2. **安定性・再現性** — 同じ入力には同じ結果。
+3. **コスト効率** — 不要なLLM呼び出しを排除。
+
+**思想の根幹**: ユーザーが見ている世界と地図データベースは常にわずかにズレる（例：新しくできた店がまだDBに無い）。これは技術的に完全解決できない。したがって「条件で絞り込む」のではなく「一致しそうな候補をできるだけ広く提示する」設計とする（→ conditionsはOR評価、§5-4）。
 
 ---
 
@@ -22,400 +25,386 @@ Geonatorは、曖昧な自然言語の説明（「西大島駅近くのマンシ
 
 | 担当 | 役割 |
 |---|---|
-| **JS** | フロー制御、APIコール実行、計算処理、UI制御、固定テキスト表示 |
-| **LLM** | 意味解釈のみ（3箇所のみ呼び出し） |
+| **JS** | フロー制御、APIコール実行、計算処理、UI制御、固定テキスト表示、全ての数値・しきい値・分岐判定 |
+| **LLM** | 意味解釈のみ（**L1・L2の2箇所だけ**） |
 
-**LLMは以下の3箇所でのみ呼ばれる：**
-- **L1**: ユーザー入力 → QuerySchema（構造化データ）への変換
-- **L2**: Step1取得候補 → 探索対象に明らかに合わないIDの除外
-- **L3**: 一次検索で複数候補（例：台東区入谷 vs 足立区入谷）→ 選択（ボタンUIで表示、ユーザーが選ぶ）
+**LLMが呼ばれるのは以下の2箇所のみ：**
+- **L1**: ユーザー入力 → QuerySchema（構造化データ）への変換（＋Query Expansion＋specificity分類）
+- **L2**: Step1で取得した候補 → 探索対象に明らかに合わないIDの除外（ネガティブフィルタ）
+
+**L3（曖昧さ解消）はLLMではない**: Search Boxが返した有限候補をボタンUIで提示し、**ユーザーが選ぶ**。LLM不関与。
 
 ### 2-2. 設計原則
 
-- **JSがフロー主導**: 現アーキテクチャと逆。LLMはJSから問いかけられたときのみ応答する
-- **ユーザーインタラクションの制限**: 自由記入は探索依頼と追加ヒントのみ。その他はボタン選択
-- **固定テキスト**: 対話パネルのシステムメッセージはJSが事前定義。LLM生成なし
-- **スキーマ駆動**: ユーザー入力はあらかじめ定義されたQuerySchemaに当てはめる。対応外はunsupportedに格納
-- **Step1で全候補を網羅**: 探索対象も条件POIも道路も水域も、すべてStep1でbbox内を検索する
-- **Step2は純粋な距離評価**: evaluate_distanceのみ。get_facing_roadやscan_natural_featuresは不要
+- **JSがフロー主導**: 現アーキテクチャ（LLMがツールを自律ループ）と真逆。LLMはJSから問われたときだけ応答する。
+- **数値はすべてJS所有**: 距離・半径・分数・しきい値・上限は全てJS定数（§6の距離テーブル等）。LLMには「どのlevel/methodか」を選ばせるだけで、生の数値（メートル・分）を発明させない。
+- **固定テキスト**: 対話パネルのシステムメッセージはJSが事前定義。LLM生成は一切なし（§5-3の一覧が全て）。
+- **スキーマ駆動**: ユーザー入力はQuerySchemaに当てはめる。当てはまらない条件は `unsupported` に格納。
+- **ユーザーインタラクションの制限**: 自由記入は「探索依頼」と「追加ヒント」のみ。それ以外はボタン選択。
+- **二段検索**: 一次検索（proximity → bbox確定）→ 二次検索（Step1候補洗い出し → Step2距離評価）。
+
+### 2-3. このバージョンで廃止した概念（実装者は作らないこと）
+
+| 廃止対象 | 理由 | 代替 |
+|---|---|---|
+| `route_between` を独立typeにする | proximityを複数アンカーのリストにすれば N≥2 の自然な帰結として吸収できる | `proximity.anchors[]` が2点以上（§4-1, §7-2） |
+| `landmark_bearing`（〜が左手に見える） | スカイツリー等は遠方から見え、一次検索bbox外になり情報として無意味 | 「どれぐらい近いですか？」と聞き返し、通常のconditionに読み替え（§5-2） |
+| `visible`（見える系の独立level） | 定義が対象依存で発散する。不要な複雑さ | method（radius/isochrone）をLLMが言葉で振り分ける方式に一本化（§6） |
+| 複合proximity（scope+anchor / 入谷駅のセブンをproximityにする） | 「proximity=最も一意な場所、他はcondition降格」ルール（§4-2）で統一する方が単純かつ一貫 | セブン等は condition に降格 |
+| Step2の個別評価ツール群 | Step1のTilequery取得で代替可能 | `evaluate_distance` に一本化（§8） |
 
 ---
 
-## 3. QuerySchema定義
+## 3. アーキテクチャ全体像
 
-LLMがユーザー入力を変換する構造化データ。JSはこれを元に処理を実行する。
+```
+┌─────────────────────────────────────────────────────────────┐
+│ JS オーケストレーター（フロー主導）                              │
+│                                                              │
+│  [1] 自由入力 ──► [L1: LLM] ──► QuerySchema                   │
+│                                    │                          │
+│                    [A: JS構造検証] ◄┘                          │
+│                        │ 不備 ──► 明確化（Mode1/2）             │
+│                        ▼                                      │
+│  [一次検索: JS] proximity解決 → base bbox                     │
+│        ├─ [B1: LLM分類結果を見て] genericなら明確化            │
+│        ├─ [B2: JS] 同名地名 → ボタン（L3）                     │
+│        └─ 方角修飾子/駅出口/複数アンカー span                  │
+│                        ▼                                      │
+│  [二次検索 Step1: JS] target/conditions を並列収集             │
+│        ├─ ノイズ除去: 前方一致 + [L2: LLM] + dedup            │
+│                        ▼                                      │
+│  [二次検索 Step2: JS] evaluate_distance × conditionTracker    │
+│                        ▼                                      │
+│  [結果表示: JS] 全マッチ/部分マッチ/マッチなし + 固定文         │
+│                        ▼                                      │
+│  [フィードバック: JS] 確定 / 継続 / やり直し                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 4. QuerySchema定義
+
+L1がユーザー入力を変換する構造化データ。JSはこれを元に全処理を駆動する。
 
 ```json
 {
   "proximity": {
-    "type": "station | poi | address | locality | route_between | landmark_bearing",
-    "text": "西大島駅",
-    "subtype": {
-      "exit": null,
-      "from": null,
-      "to": null,
-      "landmark": null,
-      "side": null
-    }
+    "anchors": [
+      {
+        "type": "station | poi | address | locality",
+        "text": "西大島駅",
+        "specificity": "specific | generic",
+        "subtype": { "exit": null }
+      }
+    ],
+    "bearing_filter": null
   },
   "target": {
     "type": "residential_building | commercial_building | general_poi",
     "text": "マンション",
-    "query_intent": "category_building"
+    "query_intent": "category_building | specific"
   },
   "conditions": [
     {
-      "type": "poi | road | water | intersection | signal | transit_entrance",
+      "type": "poi | road | water | intersection | signal | transit_entrance | category_busstop",
       "text": "ローソン",
       "query_intent": "specific",
-      "level": "adjacent | very_close | nearby | somewhat_nearby | far | same_building"
-    },
-    {
-      "type": "water",
-      "text": null,
-      "query_intent": null,
-      "level": "nearby"
+      "distance": {
+        "method": "radius | isochrone",
+        "level": "adjacent | very_close | nearby | somewhat_nearby | same_building",
+        "profile": null,
+        "minutes": null,
+        "meters": null
+      }
     }
   ],
   "unsupported": []
 }
 ```
 
-### 3-1. proximity サブタイプ
+### 4-1. proximity（必須・アンカーのリスト）
+
+- **必ず1つ以上のアンカーが必要**。proximityが解決できないと処理は進めない（§7-1、DDで確定）。
+- `anchors.length == 1` → そのアンカーを中心に bbox を描く。
+- `anchors.length >= 2` → 全アンカーを内包する span bbox を描く（「AとBの間」「AとBとCの間」）。
+- span が bbox 上限（§6-2）を超える → ユーザーにpushback（「範囲が広すぎます」）。
+- **アンカーになれるのは「一意に特定できる場所」だけ**（駅・住所・地名・一意なランドマーク）。generic（コンビニ・モール等の一般カテゴリ）はアンカーにならず condition に降格する（§4-2）。
+
+**anchor.type と bbox確定方法:**
 
 | type | 意味 | bbox確定方法 |
 |---|---|---|
-| `station` | 駅名（出口あり/なし） | 出口あり→出口座標、出口なし→全出口からcompute_bbox_from_points |
-| `poi` | 施設・ランドマーク等 | Search Box → 座標 + radius_meters |
-| `address` | 丁目・番地レベル | Search Box → 座標 + radius_meters |
-| `locality` | 地名・エリア（入谷等） | Search Box → bboxをそのまま使用 |
-| `route_between` | AとBの間 | get_midpoint_area → bbox |
-| `landmark_bearing` | ランドマークが左手/右手に見える | compute_area_from_landmark_bearing → bbox |
+| `station` | 駅名（出口あり/なし） | 出口あり→出口座標＋radius、出口なし→全出口から span bbox（§7-2） |
+| `poi` | 一意な施設・ランドマーク（渋谷109等） | Search Box → 座標＋radius（§6の距離） |
+| `address` | 丁目・番地レベル | Search Box → 座標＋radius |
+| `locality` | 地名・エリア（入谷等） | Search Box → bboxをそのまま使用（同名複数ならL3ボタン） |
 
-### 3-2. target の query_intent
+- `specificity`: L1が付与。`generic`（一般カテゴリ）のアンカーは B1 の対象（§5-1）。**唯一のアンカーがgenericなら明確化**、他に一意なアンカーがあればそちらを使う。
+- `bearing_filter`: `"north" | "south" | "east" | "west" | null`。「駅の北側」等。方角は北西→北・北東→北・南西→南・南東→南と**4方位に丸める**（L1が標準化）。base bbox（circle/isochrone/span）を中心線で半分にカットする修飾子（§7-3）。
 
-| type | query_intent | 使用API |
-|---|---|---|
-| `residential_building` | `category_building` | Tilequeryグリッド (poi_label) |
-| `commercial_building` | `category_building` | Tilequeryグリッド (poi_label) |
-| `general_poi` | `specific` | Search Box + Tilequery (poi_label) |
+### 4-2. L1のproximity/condition役割分担ルール（最重要）
 
-### 3-3. conditions の type と level
+> **proximity には、クエリ中で最も一意に特定できる場所を1つ（または同格複数）選ぶ。それ以外の場所言及はすべて condition に降格する。**
 
-**type:**
-- `poi`: コンビニ・飲食店・バス停（名称）等
-- `road`: 大通り・国道等（road layer）
-- `water`: 川・海・湖等（water/waterway layer）
-- `intersection`: 交差点（road layer, class=intersection）
-- `signal`: 信号機（road layer, class=traffic_signals）
-- `transit_entrance`: 駅出口（transit_stop_label, stop_type=entrance）
-- `category_busstop`: バス停カテゴリ（transit_stop_label, mode=bus）
+例:
+- 「入谷駅のイオンモールの中のスタバ、近くにセブン」
+  → proximity: 入谷駅 / target: スターバックス / conditions: イオンモール(same_building), セブン(very_close)
+- 「入谷駅近くのマンション、バス停が目の前、ローソンがすぐ隣」
+  → proximity: 入谷駅 / target: マンション / conditions: バス停(adjacent), ローソン(adjacent)
+- 「渋谷109と東京タワーの間のホテル」
+  → proximity.anchors: [渋谷109, 東京タワー]（span bbox）/ target: ホテル
 
-**level（evaluate_distanceに渡す）:**
-- `same_building`: 同じビルの中（buildingレイヤーID一致）
-- `adjacent`: 隣接・目の前・すぐ隣（~50m、turf.circle）
-- `very_close`: すぐ近く・出てすぐ（~250m歩き、isochrone 3分）
-- `nearby`: 近く・付近・そば（~700m歩き、isochrone 10分）
-- `somewhat_nearby`: 少し歩く（~1.4km歩き、isochrone 20分）
-- `far`: かなり歩く（距離条件として使わない）
+このルールにより generic（イオンモール等）は自然に condition へ流れ、genericでも問題なくなる（same_building等で評価するだけ）。B1が発動するのは「**唯一の手がかりがgeneric**」なとき（例：「イオンモールの近くのマンション」で他に地名なし）だけ。
 
-### 3-4. unsupported
+### 4-3. target（必須・1つ）
 
-LLMがいずれのcondition typeにも当てはめられなかった条件を自由記述で格納する（事前定義なし）。
+- `type`: `residential_building`（マンション/アパート等）/ `commercial_building`（ビル等）/ `general_poi`（ホテル/飲食店/コンビニ等）
+- `query_intent`: `category_building`（建物カテゴリ）/ `specific`（固有名・通常POI）
+- **必ず1つに絞る**。L1が複数候補を出したらJSが「どちらをお探しですか？」でボタン明確化。
+- **targetがgenericでもOK**（「コンビニ」を探す＝大量ヒットが正常）。B1のgenericチェックは **proximityアンカーにのみ**適用し、targetには適用しない（非対称性）。
+
+### 4-4. conditions[]（任意・複数可・OR評価）
+
+- `type`: `poi`（コンビニ・飲食店等）/ `road`（大通り・国道）/ `water`（川・海・湖）/ `intersection`（交差点）/ `signal`（信号機）/ `transit_entrance`（駅出口）/ `category_busstop`（バス停カテゴリ）
+- `query_intent`: `specific` 等（poiのみ）
+- `distance`: §6の距離オブジェクト。
+- **OR評価**: どれだけ絞るかではなく、どれだけ一致しそうな候補を出すか。全conditionクリア＝全マッチ、一部＝部分マッチ、0＝マッチなし（いずれも表示する。§5-4）。
+
+### 4-5. unsupported[]
+
+L1がどのtype/conditionにも当てはめられなかった条件を自由記述で格納（事前定義なし）。
 
 ```json
 "unsupported": ["建物の3階にある", "壁が赤い"]
 ```
 
-JSはunsupportedが空でなければ固定テキストで「以下の条件は現在対応していませんが、他の情報で検索を進めます」と表示する。
+JSは空でなければ固定テキスト「以下の条件は現在対応していませんが、他の情報で検索を進めます：〜」を表示する。
 
 ---
 
-## 4. 処理フロー
+## 5. 検証・明確化
 
-```
-[1] ユーザー自由入力（探索依頼テキスト）
-     │
-     ▼
-[2] L1: クエリ解析（LLM）
-     テキスト → QuerySchema
-     │
-     ▼
-[3] 一次検索（JS）
-     ├─ proximity.type に応じたbbox確定
-     ├─ L3: 複数locality候補 → ボタンUI → ユーザーが選択
-     └─ bbox確定完了
-     │
-     ▼
-[3] 二次検索: Step1 候補洗い出し（JS）
-     ├─ target のクエリ実行 → メイン候補取得
-     ├─ conditions[] の各クエリ実行（並列）→ 条件候補取得
-     └─ L2: メイン候補をLLMに渡し、探索対象に合わないIDを除外
-     │
-     ▼
-[3] 二次検索: Step2 候補評価（JS）
-     ├─ conditions[] × メイン候補を並列でevaluate_distance実行
-     ├─ conditionTrackerでfull/partial/除外を機械的に決定
-     └─ 評価完了
-     │
-     ▼
-[4] 結果表示（JS）
-     ├─ add_candidate_markers（全一致/部分一致）
-     ├─ unsupportedがあれば固定テキスト表示
-     └─ フィードバックボタン表示
-     │
-     ▼
-[5] ユーザーフィードバック（ボタン選択）
-     ├─ 終了 → [6]-1
-     ├─ 探索継続 → [6]-2
-     └─ やり直し → [6]-3
-     │
-     ├─ [6]-1: 「ありがとうございました」→ [1]に戻る
-     │
-     ├─ [6]-2: 追加ヒント要求（固定テキスト）
-     │           ↓ ユーザー入力
-     │         L1: （元クエリ + 追加ヒント）→ 新QuerySchema
-     │           ↓
-     │         新しいproximitiが確定している場合、[3]一次検索からやり直し
-     │         proximityが同じ場合、[3]二次検索からやり直し
-     │         ※キャッシュは使わない（常にやり直し）
-     │
-     └─ [6]-3: 最初に戻る → [1]に戻る（[6]-1と同じ）
-```
+### 5-1. 検証の三層（A / B1 / B2）
 
----
+| 層 | 内容 | 判定者 | タイミング | 例 |
+|---|---|---|---|---|
+| **A. 構造検証** | schema自体の整合（target個数、必須欠落、enum違反、distanceの整合） | **JS**（決定論・無料） | L1直後（API前） | targetが複数 / proximity欠落 |
+| **B1. 汎用性検証** | proximityアンカーが一般カテゴリで一意特定不能 | **LLM**（L1の`specificity`を見てJSが判定） | API前 | 「イオンモール」が唯一の手がかり |
+| **B2. 同名解決** | 実在する別々の場所が同名 | **JS**（Search Boxの`context`/region差で判別）→ **ボタン** | 一次検索中（API後） | 台東区入谷 vs 足立区入谷 |
 
-## 5. ユーザーインタラクション定義
+**多層防御の原則**: B1は「早期・安価な足切り」、B2は「最終防衛線」。B1が漏れてもB2（Search Box複数→ボタン）が拾う。**B1の誤爆（弾きすぎ）だけは実害が大きい**ので、B1は明確な一般名詞（コンビニ・スーパー・モール等）に限定し、固有名っぽいものは触らずB2に流す。
 
-### 5-1. 入力種別
+### 5-2. 明確化の2モード
 
-| 入力種別 | タイミング | 形式 |
+| | Mode 1：ボタン（JS完結・再L1なし） | Mode 2：自由記入（L1再実行） |
 |---|---|---|
-| 探索依頼 | [1] 初回 | 自由記入テキスト |
-| 候補選択 | 一次検索で複数候補 | ボタン（最大4件） |
-| フィードバック | [5] 結果表示後 | ボタン3種 |
-| 追加ヒント | [6]-2 継続時 | 自由記入テキスト |
+| **使う条件** | 決定時点で**有限の選択肢が手元にある** | ユーザーから**新情報**が要る |
+| **例** | 台東区入谷 vs 足立区入谷（Search Boxが2件返した） | 「どこからの距離ですか？」「出口番号は？」「どのイオンモール？地名も」「スカイツリーはどれぐらい近い？」 |
+| **処理** | JSがボタン描画→クリック→その結果のbboxを直接採用 | ユーザー入力→元クエリに連結→L1再実行→新schema→再検証 |
 
-### 5-2. フィードバックボタン
+**上限（HH）**: 明確化は最大 **3回**（`MAX_CLARIFY_TURNS`）。超えたら「情報が不足しています。分かる範囲で場所を教えてください」でベストエフォート検索に進むか打ち切る。
 
-| ボタン | アクション |
-|---|---|
-| ✅ これで確定 | [6]-1: 探索終了 |
-| 🔄 続けて絞り込む | [6]-2: 追加ヒント入力 |
-| 🔁 最初からやり直す | [6]-3: 全リセット |
-
-### 5-3. 固定テキスト一覧
+### 5-3. 固定テキスト一覧（LLM生成禁止・これが全て）
 
 | タイミング | テキスト |
 |---|---|
-| 起動時 | 「探している場所を教えてください。近くの駅名、施設名、または住所と、条件（近くにあるお店や道路など）を一緒に伝えていただくと絞り込めます。」 |
-| 一次検索・曖昧さ | 「〇〇はどちらをお探しですか？」+ ボタン |
-| 候補洗い出し中 | 「候補を検索しています...」 |
-| 対応不可ヒント | 「以下の条件は現在対応していませんが、他の情報で検索を進めます：〇〇」 |
-| 候補表示 | 「〇件見つかりました（全一致：N件、部分一致：M件）」 |
-| 0件 | 「条件に合う候補が見つかりませんでした。追加の情報や別の条件をお試しください。」 |
-| 継続時 | 「さらに絞り込むための情報を教えてください。（例：出口番号、近くの交差点名、建物の特徴など）」 |
+| 起動時 | 「探している場所を教えてください。近くの駅名・施設名・住所と、条件（近くのお店・道路など）を一緒に伝えていただくと絞り込めます。」 |
+| target複数 | 「〇〇と〇〇、どちらをお探しですか？」＋ボタン |
+| proximity同名（B2） | 「〇〇はどちらですか？」＋ボタン |
+| proximity generic（B1） | 「〇〇は複数あります。地名や駅名も一緒に教えてください。」 |
+| proximity欠落 | 「どのあたりをお探しですか？地名や駅名を教えてください。」 |
+| 距離だけで対象不明 | 「〇〇とありますが、どこからの距離ですか？」 |
+| 遠すぎ（level=far/上限超過） | 「その範囲は広すぎます。もっと近い目印を教えてください。」 |
+| 範囲広すぎ（span上限超過） | 「その範囲は広すぎます。もっと絞れる情報を教えてください。」 |
+| 候補検索中 | 「候補を検索しています…」 |
+| 対応不可条件あり | 「以下の条件は現在対応していませんが、他の情報で検索を進めます：〇〇」 |
+| 条件がエリア内に0件（S） | 「〇〇はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。」 |
+| 結果あり | 「〇件見つかりました（全マッチ：N件、部分マッチ：M件、参考：K件）」 |
+| メイン0件（L） | 「〇〇の近くに〇〇は見つかりませんでした。追加の情報を教えていただけますか？」 |
+| メインあり条件0（L） | 「条件に完全一致する候補はありませんでしたが、〇件を参考として地図に表示しています。」 |
+| 通信エラー（GG） | 「通信エラーが発生しました。もう一度お試しください。」 |
+| 継続時 | 「さらに絞り込む情報を教えてください（例：出口番号、近くの交差点名、建物の特徴など）。」 |
 | 確定 | 「ありがとうございました。またお気軽にご相談ください。」 |
 
----
+### 5-4. 結果の分類（E / I）
 
-## 6. LLM呼び出し仕様
+- **全マッチ（full）**: 全conditionをクリア
+- **部分マッチ（partial）**: 一部conditionをクリア
+- **参考（none）**: 0condition（メイン候補ではあるが条件に当たらない）
 
-### L1: クエリ解析
-
-**タイミング**: [2] ユーザー入力受信後、および [6]-2 追加ヒント受信後
-
-**入力プロンプト（概要）**:
-```
-ユーザーの説明から以下のJSONを生成してください。
-- proximity: だいたいどの辺か（駅・施設・住所・地名等、1つ）
-- target: 探したいもの（1つ）
-- conditions: 近くにあるもの（複数可）とそれぞれの距離感
-- unsupported: 対応できない条件（建物の色等）
-
-[スキーマ定義をここに挿入]
-
-ユーザー入力: 「{入力テキスト}」
-```
-
-**出力**: QuerySchema JSON
-
-**特徴**: コンテキスト不要。毎回独立した呼び出し。
+3分類すべて地図に表示する（O：マーカー上限なし。地図は表示専用でロジック非関与）。ランキング・番号は不要（ランダム順でよい）。各マーカーには「どのconditionにどれだけ一致したか」を表示する。分類はJSの `conditionTracker` が機械的に決定する。
 
 ---
 
-### L2: 型確認（メイン候補の絞り込み）
+## 6. 距離テーブル（single source of truth）
 
-**タイミング**: [3] Step1でメイン候補取得後
+**全ての距離・近接評価はこの1テーブルを参照する**（proximityの"近く"にも、conditionの距離にも同一適用）。数値は全てJS定数。
 
-**入力プロンプト（概要）**:
-```
-探している対象: {target.text}（{target.type}）
-以下の候補のうち、明らかに対象外のIDを列挙してください。
-判断が曖昧なものは残してください（見逃しの方が過検出より危険）。
+### 6-1. levelテーブル（数値をロック）
 
-候補:
-{id: 1, name: "春樹"}
-{id: 2, name: "felice西大島"}
-...
-```
+| level | 表現例 | 半径（radius method） | isochrone等価（isochrone method・徒歩） |
+|---|---|---|---|
+| `same_building` | 同じビルの中 | building-id比較（距離ではない） | — |
+| `adjacent` | 目の前・すぐ隣・すぐ横 | **50m**（circle固定） | —（常にcircle） |
+| `very_close` | すぐ近く・出てすぐ | **250m** | 約3分 |
+| `nearby` | 近く・付近・そば | **700m** | 約10分 |
+| `somewhat_nearby` | 少し歩く | **1400m** | 約20分 |
+| `far` | かなり遠い | 距離条件として使わない（→ pushback） | — |
 
-**出力**:
-```json
-{ "exclude_ids": [1, 5, 12] }
-```
+（徒歩≒80m/分。3分≒240m / 10分≒800m / 20分≒1600m で半径とほぼ同サイズになるよう定義。）
 
-**特徴**:
-- コンテキスト不要（候補リストと探索対象だけで判断）
-- ネガティブフィルタのみ（ポジティブ選択しない）
-- クエリ種別により使い分け：
-  - 居住系建物・商業系建物・通常POI → L2を使う
-  - バス停・交差点・信号・水域・道路 → L2不要（APIフィルタで十分）
+### 6-2. method の振り分け（LLMが言葉で選ぶ・JSが数値を引く）
 
----
+- **isochrone を使うケース**: 「歩いて」「自転車で」「車で」など移動手段を含む、または「x分」など時間指定がある、つまり半径では断定できないケース。
+  - `method="isochrone"`, `profile ∈ {walking, cycling, driving}`（未指定なら walking）, `minutes`（明示時間があれば。無ければlevelの等価分数）。
+- **radius を使うケース**: 上記以外の曖昧語（近く・すぐ近く等）や明示距離（「500m以内」）。
+  - `method="radius"`, level から半径を引く。明示距離があれば `meters` を直接使う。
+- **距離語なし**: JSがデフォルト `level=very_close` / `method=radius`（250m）で埋める（M・DEFAULT_LEVEL）。
+- `same_building` / `adjacent` は特別扱い（id比較 / 50m circle固定）。
 
-### L3: 曖昧さ解消（複数locality候補）
+### 6-3. bbox上限
 
-**タイミング**: 一次検索でSearch Boxが複数のlocalityを返した場合のみ
-
-**実装**: `ask_choice` ツールでボタンUIをレンダリング → **ユーザー**が選択 → LLMは不関与
-
-**特徴**: L3は「LLM呼び出し」ではなく「ユーザーへのボタン提示」で解決する。LLMは使わない。
+一次検索bboxには面積上限がある。`far`（level上限超過）や span超過を検出したらpushback（§5-3）。**上限判定は target(span) bbox に対して行い、conditionマージン拡張（§7-4）は上限判定の対象外**（conditionのはみ出しは許容・EE）。
 
 ---
 
-## 7. 一次検索詳細（proximityサブタイプ）
+## 7. 一次検索（proximity → bbox）
 
-### 7-1. station（駅）
+### 7-1. 全体
 
-**出口指定あり**:
-1. Search Box → 駅の代表座標取得
-2. Tilequery(streets-v8, transit_stop_label, radius=400) → 出入口取得
-3. stop_type="entrance" かつ name が一致 → 出口座標確定
-4. 出口座標 + radius_meters → bbox
+proximity.anchors[] を解決して base bbox を確定する。**proximityが1つも解決できなければ処理を進めない**（固定文で場所を聞く）。
 
-**出口指定なし**:
-1. Search Box → 駅の代表座標取得
-2. Tilequery(streets-v8, transit_stop_label, radius=500) → 全出入口取得
-3. stop_type="entrance" の全座標 → compute_bbox_from_points → bbox
+### 7-2. アンカー数による分岐（AA）
 
-### 7-2. poi / address
+```
+anchors を全て Search Box 等で座標解決
+  │
+  ├─ 1点  → 中心 + radius（§6の距離。距離語なければ既定extent）で bbox
+  └─ N≥2点 → 全点を内包する span bbox（compute_bbox_from_points 相当）
+                └─ span が上限超過 → pushback
+```
 
-1. Search Box → 座標取得
-2. feature_type が place/region/country/district → 広すぎる → 追加情報要求
-3. feature_type が locality → bboxをそのまま使用
-4. それ以外 → 座標 + radius_meters → bbox
+**station（駅）の特別処理（C-2）:**
+- 出口指定なし: Search Box→駅座標 → Tilequery(streets-v8, transit_stop_label, stop_type=entrance) で全出口取得 → 全出口から span bbox。
+- 出口指定あり: 全出口取得 → 名称一致の出口座標を確定 → その座標 + radius。
+- これは一次検索の中でJSがオーケストレーションする。
 
-### 7-3. locality（地名・エリア）
+### 7-3. bearing_filter（方角修飾子）
 
-1. Search Box → bboxを取得
-2. 同名地名が複数 → ボタンUI（L3）→ ユーザー選択 → bboxを使用
+base bbox（circle/isochrone/span いずれか）を確定後、`bearing_filter` があれば中心を通る線で半分にカットする（「北側」→北半分を残す）。処理順は §7-4 の末尾。
 
-### 7-4. route_between（AとBの間）
+### 7-4. 二重bbox（C(2)・target厳守／condition広め）
 
-1. AとBそれぞれSearch Box → 座標取得
-2. get_midpoint_area(A, B) → 中間bbox確定
+**targetとconditionで収集bboxを分ける**：
 
-### 7-5. landmark_bearing（ランドマーク方位）
+```
+① proximity解決 → base bbox
+② bearing_filter があれば base bbox を方角カット
+③ target収集bbox   = ②の bbox（タイト・"近く"の前提を厳守）
+④ condition収集bbox = ②の bbox を max(全conditionの距離) だけ四方に拡張
+```
 
-1. Search Box → ランドマーク座標取得
-2. compute_area_from_landmark_bearing(landmark, side) → bbox確定
+- target候補は③のタイトなbboxで収集（proximity前提を守る）。
+- condition候補は④の広いbboxで収集（端のtarget候補の隣にある条件物を取りこぼさない）。
+- 拡張量は**倍率ではなく絶対マージン = max(condition距離)**。
+- 方角カット後にconditionマージンで拡張すると南側が少し戻るが、conditionのはみ出しとして許容（U）。target収集は方角限定を守る。
 
 ---
 
-## 8. 候補探索（クエリ種別）詳細
+## 8. 二次検索
 
-Step1でbbox内の全対象を取得する。LLM絞り込み（L2）が必要かどうかで2グループに分かれる。
+### 8-1. Step1: 候補洗い出し（JS）
 
-### 8-1. クエリ種別一覧
+- target を target収集bbox（§7-4③）で収集。
+- conditions[] を condition収集bbox（§7-4④）で並列収集。
+- **クエリ種別ごとのAPI**は §8-3。
+- **ノイズ除去は全クエリ結果に一律適用（B）**：
+  1. **前方一致フィルタ**（JS）: specific POI（ローソン等）は名前が condition/target の text に前方一致するものだけ残す。ブランド系の負引きは `data/poi-blocklist.js`（建物カテゴリ）。
+  2. **L2ネガティブフィルタ**（LLM）: 全候補リストを渡し、明らかに対象外のIDを除外。**保守的に**（曖昧なものは残す。見逃し回避優先・R）。
+  3. **dedup**（JS）: 既存の座標ベースdedup（`dedupKey`/`seen`）を継続（F）。
+- カテゴリ系（バス停 mode=bus・交差点 class=intersection 等）は元々均質なのでL2は空振りになるが、実装単純化のため一律適用でよい（B）。
 
-| クエリ種別 | API | タイルセット | レイヤー/フィルタ | L2絞り込み |
+### 8-2. Step2: 距離評価（JS）
+
+- 各メイン候補 × 各condition を `evaluate_distance` で評価。
+- `distance.method` により内部実装を切替：`same_building`→building-id比較、`adjacent`→turf.circle(50m)、`method=radius`→turf.circle、`method=isochrone`→Isochrone API。
+- **isochroneコスト最適化（FF）**: 「アンカー×level」単位でisochroneを1回だけ計算し、そのポリゴンに対して同levelの全conditionを point-in-polygon 判定する（condition数ぶんAPIを叩かない）。
+- `conditionTracker` が各メイン候補のクリア数を記録 → full/partial/none を機械決定（§5-4）。
+- **conditionがエリア内に0件だった場合（S）**: そのconditionは全候補がmiss扱い（OR評価で自然に吸収）。加えて「〇〇はエリア内に見つからず」を固定文で注記。
+
+### 8-3. クエリ種別一覧
+
+| クエリ種別 | API | タイルセット | レイヤー/フィルタ | L2 |
 |---|---|---|---|---|
-| 居住系建物（マンション/アパート等） | Tilequery | streets-v8 | poi_label | 必要 |
-| 商業系建物（ビル等） | Tilequery | streets-v8 | poi_label | 必要 |
-| 通常POI（ホテル/飲食店/コンビニ等） | Search Box + Tilequery | — / streets-v8 | — / poi_label | 必要 |
-| バス停（カテゴリ） | Tilequery | streets-v8 | transit_stop_label, mode=bus | 不要 |
-| バス停（名称指定） | Tilequery | 10da032y.busstop_gov_0608 | — | 不要 |
-| 交差点 | Tilequery | streets-v8 | road, class=intersection | 不要 |
-| 信号 | Tilequery | streets-v8 | road, class=traffic_signals | 不要 |
-| 駅出口 | Tilequery | streets-v8 | transit_stop_label, stop_type=entrance | 不要 |
-| 道路（条件として） | Tilequery | streets-v8 | road, class=primary/secondary等 | 不要 |
-| 水域・自然地物 | Tilequery | streets-v8 | water, waterway | 不要 |
-| 建物ID確認 | Tilequery | streets-v8 | building | 不要 |
-
-### 8-2. クエリ種別の決定フロー
-
-JSはQuerySchemaの各フィールドを見てクエリ種別を決定する：
-
-```
-target.text / target.type → クエリ種別決定
-conditions[].type → 各条件のクエリ種別決定
-  - type="poi" かつ query_intent → specific/category_busstop等
-  - type="road" → road layer
-  - type="water" → water layer
-  - type="intersection" → road layer, class=intersection
-  - type="signal" → road layer, class=traffic_signals
-  - type="transit_entrance" → transit_stop_label, stop_type=entrance
-  - type="category_busstop" → transit_stop_label, mode=bus
-```
+| 居住系建物（マンション/アパート） | Tilequery | streets-v8 | poi_label（グリッド） | 適用 |
+| 商業系建物（ビル） | Tilequery | streets-v8 | poi_label（グリッド） | 適用 |
+| 通常POI（ホテル/飲食店/コンビニ） | Search Box + Tilequery | — / streets-v8 | — / poi_label | 適用 |
+| バス停（名称指定） | Tilequery | 10da032y.busstop_gov_0608 | — | 一律適用（空振り可） |
+| バス停（カテゴリ・位置） | Tilequery | streets-v8 | transit_stop_label, mode=bus | 一律適用 |
+| 交差点 | Tilequery | streets-v8 | road, class=intersection | 一律適用 |
+| 信号 | Tilequery | streets-v8 | road, class=traffic_signals | 一律適用 |
+| 駅出口 | Tilequery | streets-v8 | transit_stop_label, stop_type=entrance | 一律適用 |
+| 道路（条件） | Tilequery | streets-v8 | road, class=primary/secondary等 | 一律適用 |
+| 水域 | Tilequery | streets-v8 | water, waterway | 一律適用 |
+| 建物ID確認 | Tilequery | streets-v8 | building | — |
 
 ---
 
-## 9. 候補評価（ツール）詳細
+## 9. ツール（内部関数）体系
 
-### 9-1. 評価ツール一覧
-
-Step2では **evaluate_distance のみ** を使う。他の評価ツールはStep1で取得した候補を渡すことで不要になった。
+### 9-1. 評価ツール
 
 | ツール | 役割 |
 |---|---|
-| `evaluate_distance` | アンカー候補から探索対象候補が指定距離以内かを判定。proximity_levelに応じてturf.circle（≤50m）またはMapbox Isochrone API（>50m）を内部で使い分ける |
+| `evaluate_distance` | アンカーから候補が指定距離/時間以内かを判定。`distance` の method/level/profile/minutes/meters に応じて circle / isochrone / building-id を内部で使い分ける（§8-2）。 |
 
-**廃止ツール（Step1でのTilequeryクエリに統合）**:
-- `get_facing_road` → 道路をStep1でroadレイヤーから取得、evaluate_distanceで評価
-- `scan_natural_features` → 水域をStep1でwaterレイヤーから取得、evaluate_distanceで評価
-- `find_intersections` → Step1でroad layer(class=intersection)から取得
-- `find_traffic_signals` → Step1でroad layer(class=traffic_signals)から取得
+### 9-2. bbox計算ユーティリティ（統一・C-3）
 
-**bbox計算ツール（一次検索用・evaluate_distanceとは別）**:
-- `compute_bbox_from_points` → 複数座標（駅出口等）からbboxを計算
-- `get_midpoint_area` → AとBの中間bboxを計算
-- `compute_area_from_landmark_bearing` → ランドマーク方位からbboxを計算
-- これら3つは将来的に1つのbbox計算ツールに統合可能
+**現状3箇所に散らばっているbbox計算を1つの `resolveBBox` に集約する**：
+- `radius_meters → bbox`（現 `_searchNearbyPOI` 内インライン）
+- `compute_bbox_from_points`（点群 → bbox）
+- `calculateMidpointBBOX`（2点 → bbox, spatial-utils.js）
 
-### 9-2. evaluate_distance の proximity_level マッピング
+→ 入力「点群 / 中心+半径 / 複数点span」を吸収する単一関数にし、**一次検索も二次検索も同じ関数を通す**（isochrone/radius/span/方角カットは「領域外を候補から外す」同一ファミリーとして仕様を揃える）。
 
-| ユーザーの表現 | proximity_level | 内部実装 |
-|---|---|---|
-| 同じビルの中 | same_building | buildingレイヤーID比較 |
-| 隣・目の前・すぐ隣 | adjacent | turf.circle(50m) |
-| すぐ近く・出てすぐ | very_close | Isochrone 3分 |
-| 近く・付近・そば | nearby | Isochrone 10分 |
-| 少し歩く | somewhat_nearby | Isochrone 20分 |
-| かなり歩く | far | 距離条件として使わない |
+### 9-3. 廃止するツール（削除）
 
-### 9-3. match_level の決定（JS機械処理）
-
-```
-全conditions[] に対してevaluate_distanceを実行
-  ↓
-conditionTracker: 各候補が何条件クリアしたかを記録
-  ↓
-全条件クリア → match_level = "full"
-一部クリア → match_level = "partial"
-0条件クリア → 除外（表示しない）
-```
+`get_facing_road` / `scan_natural_features` / `find_intersections` / `find_traffic_signals`（→Step1 Tilequery取得で代替）、`compute_area_from_landmark_bearing`（landmark_bearing廃止）、`get_midpoint_area`（→`resolveBBox`のN≥2に統合）。
 
 ---
 
-## 10. 未解決事項（ステップ②で確認）
+## 10. キャッシュ方針（K・3+1粒度）
 
-- QuerySchemaのLLMプロンプト詳細設計
-- L2型確認のプロンプト詳細設計
-- クエリ種別の条件分岐コード設計（JSロジック）
-- 既存MapboxMCPClientの流用範囲
-- 新旧アーキテクチャの移行計画
+追加ヒント（Mode2）でL1を再実行しschemaを作り直した後、**変更箇所の依存先だけを破棄**する：
+
+| 変更 | 破棄範囲 |
+|---|---|
+| proximity が変化 | 一次bbox含め**全破棄・再解決** |
+| proximity不変・target変化（マンション→ビル） | bbox保持、**メイン候補だけ再検索** |
+| proximity不変・condition変化のみ（追加/削除） | bbox＆メイン候補保持、**二次評価だけ再実行** |
+| 変化なし（「もう一回調べて」） | そのまま or 全再実行 |
+
+一次検索bboxは proximity前提が崩れない限り保持する（一貫性・H）。
 
 ---
 
-*このドキュメントはステップ①概要設計の成果物です。ステップ②（実装不明点確認）に進む前に合意を取ること。*
+## 11. 運用・堅牢性
+
+- **API失敗・タイムアウト（GG）**: 各API呼び出しに **タイムアウト＋1回リトライ**。それでも失敗なら固定文「通信エラー…」でループ先頭へ。
+- **L1不正出力（II）**: L1のJSON出力を **JS側のschemaバリデータ**（enum・必須・型）で検証。失敗ならL1を1回リトライ、それでもダメなら固定文。
+- **明確化ループ上限（HH）**: `MAX_CLARIFY_TURNS=3`。
+- **回帰テスト（P）**: 代表クエリのゴールデンセット＋自動実行ハーネスを持つ。特にL1のschema出力を固定（fixture）してJSパイプラインの決定性を検証する（§実装指示のテスト章）。
+
+---
+
+## 12. 未確定・将来課題（このバージョンでは扱わない）
+
+- 数量条件（「ローソンが2つ見える」等）
+- 過度にネストした制約（「XのAにいて、AはCとDの間」）— L1が最も信頼できる制約を採ってanchors化し、残りはbest-effort。
+- 英語・多言語入力（当面日本語のみ想定）。
+
+---
+
+*本書はステップ①（概要設計）の確定版。実装は `implementation_instructions_20260704.md` に従い、`flowdetail_20260704.md` のステップ表を併用すること。*

@@ -51,11 +51,23 @@ const CONFIG = {
   // ============================================
 
   // ============================================
-  // HINT SYSTEM
+  // HINT SYSTEM (deprecated — agentic loop removed)
   // ============================================
 
-  MAX_HINT_TURNS:  20,  // tool turns before asking user for hints
-  HINT_EXTRA_TURNS: 5,  // extra turns allowed after hint received
+  MAX_HINT_TURNS:   20, // deprecated
+  HINT_EXTRA_TURNS:  5, // deprecated
+
+  // ============================================
+  // JS-DRIVEN ARCHITECTURE (systemdesign v2.0)
+  // ============================================
+
+  DEFAULT_LEVEL:       'very_close', // distance level when user gives no distance expression
+  MAX_CLARIFY_TURNS:   3,            // max clarification loops before best-effort (HH)
+  API_TIMEOUT_MS:      8000,         // per-API-call timeout in ms (GG)
+  API_MAX_RETRY:       1,            // retries on timeout (GG)
+  L1_MAX_RETRY:        1,            // L1 JSON invalid → retry count (II)
+  CANDIDATE_LIMIT:     150,          // max candidates collected per query
+  BBOX_MAX_HALF_M:     2000,         // max half-width of primary search bbox in meters (§6-3)
 
   DEBUG: true,
 };
