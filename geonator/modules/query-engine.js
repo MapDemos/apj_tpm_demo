@@ -226,15 +226,23 @@ class QueryEngine {
     const anchors = schema.proximity.anchors;
     const resolvedPoints = [];
 
+    // Optional scope (broad area to locate/disambiguate a POI anchor within):
+    // 「鎌倉市のコメダの前の…」→ scope=鎌倉市, anchor=コメダ.
+    let scopeBbox = null;
+    if (schema.proximity.scope?.text) {
+      scopeBbox = await this._resolveScopeBbox(schema.proximity.scope);
+    }
+
     for (const anchor of anchors) {
       // [B1] generic check — only for anchor, not target (§4-3)
-      if (anchor.specificity === 'generic' && anchors.length === 1) {
+      if (anchor.specificity === 'generic' && anchors.length === 1 && !scopeBbox) {
         await this._clarifyGenericAnchor(anchor);
         return null; // re-entry will happen from feedback loop
       }
 
-      const points = await this._resolveAnchor(anchor);
-      if (!points || points.length === 0) {
+      const points = await this._resolveAnchor(anchor, scopeBbox);
+      if (points === null) return null; // clarification/disambiguation in progress or aborted
+      if (points.length === 0) {
         this.ui.showMessage(`${anchor.text}が見つかりませんでした。別の地名や駅名をお試しください。`);
         return null;
       }
@@ -265,7 +273,7 @@ class QueryEngine {
     return { bbox, resolvedPoints };
   }
 
-  async _resolveAnchor(anchor) {
+  async _resolveAnchor(anchor, scopeBbox = null) {
     switch (anchor.type) {
       case 'station':
         return await this._resolveStation(anchor);
@@ -273,10 +281,24 @@ class QueryEngine {
         return await this._resolveLocality(anchor);
       case 'poi':
       case 'address':
-        return await this._resolvePoiOrAddress(anchor);
+        return await this._resolvePoiOrAddress(anchor, scopeBbox);
       default:
         return null;
     }
+  }
+
+  /** Resolve a scope place/locality to a bbox (used to constrain POI anchor search). */
+  async _resolveScopeBbox(scope) {
+    const sb = await this.mcp.searchBox(scope.text, { types: 'place,locality,district' });
+    const f = sb?.features?.[0];
+    if (!f) return null;
+    const bbox = f.properties?.bbox;
+    if (bbox) return bbox;
+    // no bbox → build a generous box around the point
+    const [lng, lat] = f.geometry.coordinates;
+    const r = 5000; // ~city-ish
+    const dLng = r / (111320 * Math.cos(lat * Math.PI / 180)), dLat = r / 110540;
+    return [lng - dLng, lat - dLat, lng + dLng, lat + dLat];
   }
 
   async _resolveStation(anchor) {
@@ -343,22 +365,65 @@ class QueryEngine {
     return [this._featureToBboxPoint(reps[0])];
   }
 
-  async _resolvePoiOrAddress(anchor) {
-    const sbResult = await this.mcp.searchBox(anchor.text, { types: 'poi,address,place,locality' });
-    if (!sbResult?.features?.length) return null;
+  async _resolvePoiOrAddress(anchor, scopeBbox = null) {
+    // If a scope is given (「鎌倉市のコメダ…」), BIAS by its center but do NOT pass
+    // bbox as a hard filter (Search Box bbox-filtering silently drops valid hits).
+    // Then filter results to the scope in JS.
+    const opts = { types: 'poi,address,place,locality' };
+    if (scopeBbox) {
+      opts.proximity = [(scopeBbox[0] + scopeBbox[2]) / 2, (scopeBbox[1] + scopeBbox[3]) / 2];
+    }
+    const sbResult = await this.mcp.searchBox(anchor.text, opts);
+    let features = sbResult?.features || [];
+    if (scopeBbox) features = features.filter(f => this._pointInBbox(f.geometry?.coordinates, scopeBbox));
+    if (!features.length) return null;
 
-    const feature = sbResult.features[0];
-    const coord   = feature.geometry.coordinates;
-    const radiusM = DISTANCE_TABLE.nearby.radius_m; // default extent
+    const radiusM = DISTANCE_TABLE.nearby.radius_m; // default extent around the anchor
 
-    // guard: too broad (place/region/country) → ask for more detail
+    // Distinct candidate locations (a POI anchor can resolve to several — e.g. 3
+    // コメダ). proximity MUST be a single point → disambiguate to 1 via buttons.
+    const distinct = this._dedupByCoord(features);
+
+    if (distinct.length > 1 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
+      this._clarifyCount++;
+      const choices = distinct.slice(0, 4).map(f =>
+        `${f.properties.name}${f.properties.full_address ? '（' + f.properties.full_address + '）' : ''}`
+      );
+      const chosen = await this.ui.showChoices(`「${anchor.text}」はどれですか？`, choices);
+      const idx = choices.indexOf(chosen);
+      const f = distinct[idx >= 0 ? idx : 0];
+      return [{ lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], radiusM }];
+    }
+
+    const feature = distinct[0];
     const ftype = feature.properties?.feature_type;
-    if (['region', 'country', 'district'].includes(ftype)) {
+    // Only reject genuinely huge admin areas; a place (市/区) is acceptable as a
+    // broad proximity (its bbox is used when available).
+    if (['region', 'country'].includes(ftype)) {
       this.ui.showMessage(UI_TEXT.proximity_too_broad);
       return null;
     }
-
+    if (feature.properties?.bbox) return [this._featureToBboxPoint(feature)];
+    const coord = feature.geometry.coordinates;
     return [{ lng: coord[0], lat: coord[1], radiusM }];
+  }
+
+  _pointInBbox(coord, bbox) {
+    if (!coord || !bbox) return false;
+    return coord[0] >= bbox[0] && coord[0] <= bbox[2] && coord[1] >= bbox[1] && coord[1] <= bbox[3];
+  }
+
+  /** Dedup Search Box features by coordinate (~30m) — distinct physical locations. */
+  _dedupByCoord(features) {
+    const seen = new Map();
+    const out = [];
+    for (const f of features) {
+      const c = f.geometry?.coordinates;
+      if (!c) continue;
+      const key = `${Math.round(c[0] * 3000)}|${Math.round(c[1] * 3000)}`; // ~30m grid
+      if (!seen.has(key)) { seen.set(key, true); out.push(f); }
+    }
+    return out;
   }
 
   _featureToBboxPoint(feature) {
@@ -417,6 +482,19 @@ class QueryEngine {
     }
   }
 
+  /**
+   * Deterministic JS name rules for building-category targets.
+   * マンション/アパート（居住系）は「〜ビル」で終わる名前を除外する
+   * （ビル＝オフィス/雑居/商業。居住系が「〜ビル」で終わることはほぼ無い。
+   *  後方一致なので名前途中に"ビル"を含む居住系は残る）。
+   * category_building（ビル探し）には適用しない。
+   */
+  _applyBuildingNameRules(target, candidates) {
+    if (!['category_mansion', 'category_apartment'].includes(target?.query_intent)) return candidates;
+    const BUILDING_SUFFIX = /(ビル|ビルヂング|ビルディング)$/;
+    return candidates.filter(c => !(c.name && BUILDING_SUFFIX.test(c.name.trim())));
+  }
+
   _bboxExceedsLimit(bbox) {
     if (!bbox) return false;
     const [minX, minY, maxX, maxY] = bbox;
@@ -434,7 +512,8 @@ class QueryEngine {
     const { target, conditions } = schema;
 
     // Target collection (tight bbox)
-    const mainRaw = await this.mcp.collectTarget(target, targetBbox);
+    let mainRaw = await this.mcp.collectTarget(target, targetBbox);
+    mainRaw = this._applyBuildingNameRules(target, mainRaw);
 
     // Conditions collection (wide bbox) — parallel
     const condResults = {};

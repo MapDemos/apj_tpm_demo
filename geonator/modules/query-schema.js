@@ -98,6 +98,9 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close') {
   if (schema.proximity && schema.proximity.bearing_filter === undefined) {
     schema.proximity.bearing_filter = null;
   }
+  if (schema.proximity && schema.proximity.scope === undefined) {
+    schema.proximity.scope = null;
+  }
 
   // condition distance defaults
   if (schema.conditions) {
