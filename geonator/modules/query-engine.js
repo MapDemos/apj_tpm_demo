@@ -780,11 +780,14 @@ class QueryEngine {
     const EPS = 0.2;        // score range below which we do NOT crown a winner
     const GOLD_BAND = 0.34; // top fraction of the range that earns gold
 
-    if (full.length > 0) {
+    if (full.length === 1) {
+      // Single full match = the clear answer → gold (no "同程度" tie framing).
+      full[0]._tier = 'gold';
+    } else if (full.length > 1) {
       const scores = full.map(c => c._matchInfo.score);
       const max = Math.max(...scores), min = Math.min(...scores);
       const range = max - min;
-      if (range < EPS || full.length === 1) {
+      if (range < EPS) {
         // Flat: no meaningful winner → all equal (no dramatic gold)
         full.forEach(c => { c._tier = 'match'; c._flatTier = true; });
       } else {
@@ -826,9 +829,11 @@ class QueryEngine {
     let msg;
     if (!hasMatch) {
       msg = M.resultRefOnly(displayNone.length);
+    } else if (full.length === 1) {
+      msg = M.resultSingle(partial.length);
     } else {
       const goldCount = full.filter(c => c._tier === 'gold').length;
-      const isFlat    = full.length > 0 && full[0]._tier === 'match';
+      const isFlat    = full.length > 1 && full[0]._tier === 'match';
       if (goldCount > 0)      msg = M.resultGold(goldCount, full.length, partial.length);
       else if (isFlat)        msg = M.resultFlat(full.length, partial.length);
       else                    msg = M.resultPlain(full.length, partial.length);
@@ -929,6 +934,7 @@ const MESSAGES = {
     intersectionNotFound: t => `「${t}」という名前の交差点が見つかりませんでした。`,
     condNotFound:    k => `「${k}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`,
     mainZero:        t => `${t}の近くに候補は見つかりませんでした。追加の情報を教えていただけますか？`,
+    resultSingle: p => `条件に合う候補を1件特定しました${p > 0 ? `（部分マッチ：${p}件）` : ''}。`,
     resultGold:  (g, f, p) => `最有力${g}件を特定しました（全マッチ：${f}件、部分マッチ：${p}件）。金色マーカーが最も条件に近い候補です。`,
     resultFlat:  (f, p)    => `${f}件が同程度に条件を満たしています（部分マッチ：${p}件）。甲乙つけがたいため全て同格で表示します。`,
     resultPlain: (f, p)    => `${f + p}件見つかりました（全マッチ：${f}件、部分マッチ：${p}件）`,
@@ -955,6 +961,7 @@ const MESSAGES = {
     intersectionNotFound: t => `No intersection named "${t}" was found.`,
     condNotFound:    k => `"${k}" wasn't found in this area (it may not be in the map data).`,
     mainZero:        t => `No "${t}" found nearby. Could you give more information?`,
+    resultSingle: p => `Found 1 matching candidate${p > 0 ? ` (partial: ${p})` : ''}.`,
     resultGold:  (g, f, p) => `Identified ${g} top candidate(s) (full match: ${f}, partial: ${p}). The gold markers best fit the conditions.`,
     resultFlat:  (f, p)    => `${f} candidates match the conditions about equally (partial: ${p}). Shown as equals since none clearly stands out.`,
     resultPlain: (f, p)    => `Found ${f + p} (full match: ${f}, partial: ${p}).`,
