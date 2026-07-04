@@ -36,7 +36,7 @@ class LLMClient {
       try {
         const result = await this._callClaude(
           this._buildL1Prompt(fullText),
-          400,
+          1500,  // QuerySchema with QE queries[] + multiple conditions can be long
           this.config.L1_MODEL,
           'L1'
         );
