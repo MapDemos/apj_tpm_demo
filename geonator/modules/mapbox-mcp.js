@@ -2200,7 +2200,8 @@ class MapboxMCPClient {
    */
   async collectTarget(target, bbox) {
     const proximity = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
-    const queries   = [target.text];
+    // Query Expansion: general-POI targets carry synonyms (寿司屋→寿司/鮨/すし).
+    const queries   = (target.queries?.length ? target.queries : [target.text]);
     const resultStr = await this._searchNearbyPOI(
       queries, proximity, bbox, target.query_intent, null, false
     );
@@ -2229,7 +2230,15 @@ class MapboxMCPClient {
     ];
     let text = condition.text || null;
     if (text && GENERIC_WORDS.includes(text.trim())) text = null;
-    const queries = text ? [text] : [];
+
+    // Query Expansion for poi conditions only (ローソン stays [ローソン], but a
+    // category like 寿司 would expand). Non-poi types use the single name/nothing.
+    let queries;
+    if (condition.type === 'poi' && condition.queries?.length) {
+      queries = condition.queries.filter(q => !GENERIC_WORDS.includes(q.trim()));
+    } else {
+      queries = text ? [text] : [];
+    }
 
     const resultStr = await this._searchNearbyPOI(
       queries, proximity, bbox, intent, null, false

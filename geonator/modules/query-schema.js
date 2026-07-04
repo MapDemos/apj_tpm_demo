@@ -102,7 +102,16 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close') {
     schema.proximity.scope = null;
   }
 
-  // condition distance defaults
+  // target queries default (QE) → fall back to [text]
+  if (schema.target) {
+    if (!Array.isArray(schema.target.queries) || schema.target.queries.length === 0) {
+      schema.target.queries = schema.target.text ? [schema.target.text] : [];
+    } else if (schema.target.text && !schema.target.queries.includes(schema.target.text)) {
+      schema.target.queries.unshift(schema.target.text); // ensure original is present
+    }
+  }
+
+  // condition distance + queries defaults
   if (schema.conditions) {
     for (const c of schema.conditions) {
       if (!c.distance) {
@@ -113,6 +122,12 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close') {
         c.distance.profile  = c.distance.profile  ?? null;
         c.distance.minutes  = c.distance.minutes  ?? null;
         c.distance.meters   = c.distance.meters   ?? null;
+      }
+      // QE queries only for poi conditions; others use [text]
+      if (!Array.isArray(c.queries) || c.queries.length === 0) {
+        c.queries = c.text ? [c.text] : [];
+      } else if (c.text && !c.queries.includes(c.text)) {
+        c.queries.unshift(c.text);
       }
     }
   }
