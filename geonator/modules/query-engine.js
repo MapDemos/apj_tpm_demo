@@ -281,9 +281,9 @@ class QueryEngine {
       }
     }
 
-    // No exit specified → span all entrances with minimum station radius (500m)
-    // so the bbox is large enough for building grid search even if exits are clustered.
-    const STATION_RADIUS_M = 500;
+    // No exit specified → span all entrances with a modest station radius so the
+    // "駅の近く" area stays reasonable (also bounds the dense building-grid cost).
+    const STATION_RADIUS_M = 400;
     if (entrances.length > 0) {
       return entrances.map(e => ({ lng: e.lng, lat: e.lat, radiusM: STATION_RADIUS_M }));
     }

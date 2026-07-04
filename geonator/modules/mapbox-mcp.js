@@ -830,7 +830,10 @@ class MapboxMCPClient {
       if (this.config.DEBUG)
         console.log(`[MapboxMCP] 建物系 → グリッドTilequery のみ (初期bbox幅=${Math.round((currentBbox[2]-currentBbox[0])*111320)}m)`);
 
-      const tqItems = await this._gridTilequeryPOI(lat, lng, currentBbox, 200);
+      // radius=65m keeps each grid point's result under Tilequery's 50-cap in dense
+      // urban areas (radius 200 truncated to nearest-50 and dropped buildings like
+      // マンション). Denser grid = complete coverage.
+      const tqItems = await this._gridTilequeryPOI(lat, lng, currentBbox, 65);
       // Building-category targets: keep only poi_label class=building (reliably drops
       // restaurants/shops/medical/etc. without name-guessing). Items with no class
       // (e.g. Search Box fallback) are kept.
@@ -969,7 +972,10 @@ class MapboxMCPClient {
     }
     const DEG_LNG = 1 / (111320 * Math.cos(centerLat * Math.PI / 180));
     const DEG_LAT = 1 / 110540;
-    const spacingM = radius * 1.5; // 50% overlap between adjacent circles
+    // spacing ≤ radius×√2 for full corner coverage. Tilequery caps at 50 results
+    // per point, so radius must be small enough to stay under the cap in dense
+    // areas (otherwise nearest-50 truncation leaves gaps and drops buildings).
+    const spacingM = radius * 1.3;
 
     // Default bbox when none provided: ±300m square around center
     if (!bbox) {
