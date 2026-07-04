@@ -537,8 +537,12 @@ class MapboxMCPClient {
         const p = f.properties || {};
         const c = p.coordinates || {};
         const ft = p.feature_type || null;
-        // bbox is meaningful for locality type only; address/poi bbox is essentially a point
-        const bbox = (ft === 'locality') ? (p.bbox || null) : null;
+        const fullName = p.full_address || p.name || '';
+        // bbox is meaningful for area types (place/locality/district); point types have none useful
+        const bbox = ['place', 'locality', 'district'].includes(ft) ? (p.bbox || null) : null;
+        // Prefecture (都道府県) parsed from the name — used to detect true homonyms
+        // (Search Box context.region is often null for JP addresses).
+        const prefMatch = fullName.match(/([^\s〒0-9-]+?[都道府県])/);
         return {
           name:         p.name         || null,
           full_address: p.full_address || null,
@@ -549,6 +553,7 @@ class MapboxMCPClient {
           distance:     p.distance     ?? null,
           feature_type: ft,
           bbox:         bbox,
+          prefecture:   prefMatch ? prefMatch[1] : null,
         };
       }).filter(f => f.longitude != null && f.latitude != null);
 
@@ -897,10 +902,13 @@ class MapboxMCPClient {
     });
 
     // ── Tilequery poi_label (streets-v8) — grid search for poi/both queries ──
-    // Use grid (same as building path) so edge-of-bbox facilities are covered.
-    const tqPromise = (hasPOIQuery && effectiveProximity)
+    // Skip the grid over very large areas (e.g. 鎌倉市全体): it would need
+    // thousands of points. Search Box alone handles wide-area named POI well.
+    const bigArea = currentBbox && this._bboxToRadius(currentBbox) > 1500;
+    const tqPromise = (hasPOIQuery && effectiveProximity && !bigArea)
       ? this._gridTilequeryPOI(effectiveProximity[1], effectiveProximity[0], currentBbox, 200)
       : Promise.resolve([]);
+    if (bigArea && this.config.DEBUG) console.log('[MapboxMCP] 広域のためグリッド省略、Search Boxのみ');
 
     // ── Run both in parallel ──
     const [sbResultArrays, tqResults] = await Promise.all([
@@ -2077,7 +2085,7 @@ class MapboxMCPClient {
           full_address: f.full_address,
           feature_type: f.feature_type,
           bbox:         f.bbox,
-          context:      f.context || null,
+          prefecture:   f.prefecture || null,
           place_formatted: f.full_address,
         },
       })),

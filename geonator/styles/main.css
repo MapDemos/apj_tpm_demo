@@ -692,6 +692,9 @@ html, body {
 
 /* ── Mapbox Popup Override ───────────────────────────────────── */
 
+/* Popups must sit above tier markers (which set z-index up to 5). */
+.mapboxgl-popup { z-index: 100; }
+
 .mapboxgl-popup-content {
   background: var(--bg-card) !important;
   color: var(--text-1) !important;

@@ -118,10 +118,12 @@ class QueryEngine {
   }
 
   async _reparseMerged(additionalText) {
+    // Combine once here, then pass as the full text (previousText=null) so parseQuery
+    // does NOT re-append and duplicate the hint.
     const combined = `${this._previousText}\n追加情報：${additionalText}`;
     this._previousText = combined;
     try {
-      const schema = await this.llm.parseQuery(additionalText, this._previousText);
+      const schema = await this.llm.parseQuery(combined, null);
       if (!validateQuerySchema(schema).ok) return null;
       fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL);
       return schema;
@@ -136,6 +138,10 @@ class QueryEngine {
   // ─────────────────────────────────────────────
 
   async _executeSearch(schema, originalText) {
+    // Clear previous map results/drawings on every (re)execution so follow-up
+    // queries don't accumulate stale markers/bboxes on the map.
+    this.ui.clearResults?.();
+
     // Determine which cache layers to reuse (K)
     const cacheInvalid = this._detectCacheInvalidation(schema);
     this._cache.schema = schema;
@@ -234,10 +240,17 @@ class QueryEngine {
     // [AA] compute base bbox from all resolved points
     let bbox = this.mcp.resolveBBox({ points: resolvedPoints, marginM: 0 });
 
-    // span upper limit check (EE/§6-3)
+    // Upper-limit check (EE/§6-3): the dense building grid is infeasible over a
+    // huge area, so only building-category targets get pushed back. General POI
+    // targets (e.g. 鎌倉のコメダ珈琲) tolerate a large area — Search Box handles it.
     if (this._bboxExceedsLimit(bbox)) {
-      this.ui.showMessage(UI_TEXT.bbox_too_large);
-      return null;
+      const buildingTarget = ['category_mansion', 'category_apartment', 'category_building']
+        .includes(schema.target?.query_intent);
+      if (buildingTarget) {
+        this.ui.showMessage(UI_TEXT.bbox_too_large);
+        return null;
+      }
+      // else: allow — collectTarget will rely on Search Box (grid is skipped for big bbox)
     }
 
     // [3-A3] bearing filter
@@ -299,21 +312,31 @@ class QueryEngine {
 
     const features = sbResult.features;
 
-    // [B2] multiple distinct localities → Mode1 button
-    const distinct = this._filterDistinctLocalities(features);
-    if (distinct.length > 1 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
+    // Group by prefecture — a TRUE homonym is the same name in a DIFFERENT
+    // prefecture (鎌倉市/神奈川 vs 葛飾区鎌倉/東京). Sub-localities inside one
+    // prefecture are NOT alternatives — pick the broadest (place-level) there.
+    const byPref = new Map();
+    for (const f of features) {
+      const pref = f.properties?.prefecture || f.properties?.full_address || f.properties?.name;
+      if (!byPref.has(pref)) byPref.set(pref, []);
+      byPref.get(pref).push(f);
+    }
+    // representative per prefecture: prefer a place-level match, else the first
+    const reps = [...byPref.values()].map(group =>
+      group.find(f => f.properties?.feature_type === 'place') || group[0]
+    );
+
+    // [B2] genuine homonym across prefectures → Mode1 button
+    if (reps.length > 1 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
       this._clarifyCount++;
-      const choices = distinct.map(f => f.properties.full_address || f.properties.name);
-      const chosen = await this.ui.showChoices(
-        `「${anchor.text}」はどちらですか？`,
-        choices.slice(0, 4)
-      );
+      const choices = reps.map(f => f.properties.full_address || f.properties.name);
+      const chosen = await this.ui.showChoices(`「${anchor.text}」はどちらですか？`, choices.slice(0, 4));
       const idx = choices.indexOf(chosen);
-      const feature = distinct[idx >= 0 ? idx : 0];
-      return [this._featureToBboxPoint(feature)];
+      return [this._featureToBboxPoint(reps[idx >= 0 ? idx : 0])];
     }
 
-    return [this._featureToBboxPoint(features[0])];
+    // Single prefecture → use its representative (broadest match), no buttons
+    return [this._featureToBboxPoint(reps[0])];
   }
 
   async _resolvePoiOrAddress(anchor) {
