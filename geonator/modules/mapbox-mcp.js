@@ -641,6 +641,20 @@ class MapboxMCPClient {
     return name ? name.replace(/[​‌‍﻿]/g, '') : name;
   }
 
+  /**
+   * Normalize a name for dedup: 全角→半角、空白・中点・ハイフン・括弧を除去、小文字化。
+   * 「鮨・魚菜きと」「鮨 魚菜きと」→ 同一キー。「スシロー」の長音(ー)は保持。
+   */
+  static _normalizeName(name) {
+    if (!name) return '';
+    let s = MapboxMCPClient._cleanName(name) || '';
+    // 全角英数記号 → 半角
+    s = s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+    // 空白・中点・各種ハイフン・括弧類を除去（長音ー(U+30FC)は残す）
+    s = s.replace(/[\s　・･‐-―−()\[\]「」【】\-]/g, '');
+    return s.toLowerCase();
+  }
+
   _matchesAnyQuery(name, queries) {
     if (!name || !queries?.length) return false;
     const cleanName = MapboxMCPClient._cleanName(name);
@@ -775,7 +789,8 @@ class MapboxMCPClient {
     const dedupKey = item => {
       const lng = item.longitude ?? 0;
       const lat = item.latitude  ?? 0;
-      return `${item.name}|${Math.round(lng * 1000)}|${Math.round(lat * 1000)}`;
+      // Normalized name so 表記揺れ (鮨・魚菜きと vs 鮨 魚菜きと) at same spot merge.
+      return `${MapboxMCPClient._normalizeName(item.name)}|${Math.round(lng * 1000)}|${Math.round(lat * 1000)}`;
     };
 
     const seen = new Map();
@@ -1041,7 +1056,7 @@ class MapboxMCPClient {
     // Dedup by name + coordinate
     const seen = new Map();
     results.flat().forEach(item => {
-      const key = `${item.name}|${Math.round((item.longitude ?? 0) * 1000)}|${Math.round((item.latitude ?? 0) * 1000)}`;
+      const key = `${MapboxMCPClient._normalizeName(item.name)}|${Math.round((item.longitude ?? 0) * 1000)}|${Math.round((item.latitude ?? 0) * 1000)}`;
       if (!seen.has(key)) seen.set(key, item);
     });
 
