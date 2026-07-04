@@ -63,12 +63,23 @@ class QueryEngine {
       return null;
     }
 
-    // [II] schema validation
+    // Not a location query (greeting / chit-chat / no location clue) → guide the user
+    const noLocationClue = !schema?.proximity?.anchors?.length && !schema?.target?.text;
+    if (schema?.not_a_query || noLocationClue) {
+      this.ui.showMessage(UI_TEXT.not_a_query);
+      return null;
+    }
+
+    // [II] schema validation — malformed structure = treat as a real parse/comm issue
     const validation = validateQuerySchema(schema);
     if (!validation.ok) {
       console.warn('[QueryEngine] L1 schema invalid:', validation.errors);
-      // retry already done inside LLMClient; treat as communication error
-      this.ui.showMessage(UI_TEXT.error_communication);
+      // If it lacks the essentials, it's more likely a non-query than a comm error.
+      if (!schema?.proximity?.anchors?.length || !schema?.target?.text) {
+        this.ui.showMessage(UI_TEXT.not_a_query);
+      } else {
+        this.ui.showMessage(UI_TEXT.error_communication);
+      }
       return null;
     }
 
@@ -815,4 +826,5 @@ const UI_TEXT = {
   proximity_too_broad:  'もう少し具体的な地名（町名・丁目等）か駅名を教えてください。',
   error_communication:  '通信エラーが発生しました。もう一度お試しください。',
   clarify_limit:        '情報が不足しています。分かる範囲で場所を教えてください。',
+  not_a_query:          '場所の情報が読み取れませんでした。駅名・施設名・住所などと、探しているものを教えてください。（例：西大島駅の近くのマンション、バス停が目の前）',
 };
