@@ -80,13 +80,108 @@ class LocationFinderApp {
       const modelEl = document.getElementById('model-badge');
       if (modelEl) modelEl.textContent = this.config.CLAUDE_MODEL;
 
-      // 5. Welcome message
-      this.addMessage('assistant', LANG[this._lang].welcome);
+      // 5. Init JS-driven QueryEngine (new architecture)
+      this._initQueryEngine();
+
+      // 6. Welcome message
+      this.addMessage('assistant', UI_TEXT.welcome);
 
     } catch (err) {
       console.error('[App] initialize() failed:', err);
       this.addMessage('error', `初期化エラー: ${err.message}`);
     }
+  }
+
+  _initQueryEngine() {
+    const llm = new LLMClient(this.config);
+    const ui  = this._buildUICallbacks();
+    this.queryEngine = new QueryEngine({ mcp: this.mapboxMCP, llm, ui, config: this.config });
+  }
+
+  /**
+   * Build the UICallbacks object that QueryEngine uses.
+   * All DOM manipulation lives here; QueryEngine stays DOM-free.
+   */
+  _buildUICallbacks() {
+    const self = this;
+    return {
+      showMessage(text) {
+        self.addMessage('assistant', text);
+      },
+      showSearching(text) {
+        self._updateThinking(text);
+      },
+      async showChoices(question, choices) {
+        return new Promise(resolve => {
+          self.addMessage('assistant', question);
+          self._showChoicePanel(question, choices).then(resolve);
+        });
+      },
+      async showHintInput(prompt) {
+        return new Promise(resolve => {
+          self.addMessage('assistant', prompt);
+          self._showHintPanel(prompt, (text) => resolve(text));
+        });
+      },
+      showResults(full, partial, none, unsupported, conditionLabels) {
+        // Build combined candidate list with match metadata for marker display
+        const allCandidates = [
+          ...full.map(c    => ({ ...c, _matchClass: 'full' })),
+          ...partial.map(c => ({ ...c, _matchClass: 'partial' })),
+          ...none.map(c    => ({ ...c, _matchClass: 'none' })),
+        ];
+
+        // Use existing addCandidateMarkers (full=blue, partial=yellow, none=gray)
+        if (allCandidates.length > 0) {
+          self.addCandidateMarkers(allCandidates);
+        }
+
+        // Show unsupported note
+        if (unsupported && unsupported.length > 0) {
+          self.addMessage('assistant', `以下の条件は現在対応していませんが、他の情報で検索を進めます：${unsupported.join('、')}`);
+        }
+      },
+      async showFeedback() {
+        return new Promise(resolve => {
+          self._showFeedbackButtons(resolve);
+        });
+      },
+      clearResults() {
+        self.clearMapElements();
+        self._clearDebugLayers();
+        if (self.finalMarker) { self.finalMarker.remove(); self.finalMarker = null; }
+      },
+    };
+  }
+
+  /**
+   * Show done/continue/restart feedback buttons after results.
+   */
+  _showFeedbackButtons(onAction) {
+    const container = document.createElement('div');
+    container.className = 'feedback-buttons';
+    container.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;';
+
+    const buttons = [
+      { label: '✅ これで確定', value: 'done' },
+      { label: '🔄 続けて絞り込む', value: 'continue' },
+      { label: '🔁 最初からやり直す', value: 'restart' },
+    ];
+
+    for (const { label, value } of buttons) {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.className   = 'choice-btn';
+      btn.onclick = () => {
+        container.remove();
+        this.addMessage('user', label);
+        onAction(value);
+      };
+      container.appendChild(btn);
+    }
+
+    const chatMessages = document.getElementById('chatMessages');
+    if (chatMessages) chatMessages.appendChild(container);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -1346,17 +1441,28 @@ class LocationFinderApp {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // Claude AI Agent Loop
+  // JS-Driven Entry Point (replaces agentic Claude loop)
   // ═══════════════════════════════════════════════════════════════
 
   /**
-   * Send a user message to Claude, run the agentic tool loop,
-   * and display results progressively.
-   *
-   * @param {string} userText - Raw user input
+   * Delegate to QueryEngine (JS-driven architecture).
+   * @param {string} userText
    */
   async processUserMessage(userText) {
     this._resetFlowState();
+    this.map.flyTo({ zoom: 10, duration: 900, essential: true });
+    await this.queryEngine.run(userText);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Legacy Claude AI Agent Loop (DEPRECATED — kept for reference)
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * @deprecated Use processUserMessage → QueryEngine instead.
+   * Retained temporarily for reference during migration.
+   */
+  async _legacyAgentLoop(userText) {
     this._conditionTracker = [];
     this._lastProximity    = null;
     this.messages.push({ role: 'user', content: userText });
@@ -1536,7 +1642,6 @@ class LocationFinderApp {
     const totalSec = PerfLogger.endQuery(turnCount);
     this.addMessage('tool-status', `⏱ 完了: ${totalSec}s / APIターン ${turnCount}回`);
 
-    // ループ中にfinalizeされた場合、全メッセージの後に確実にパネルを表示
     if (this._finalizedDuringLoop) {
       this._finalizedDuringLoop = false;
       document.getElementById('resolutionPanel')?.remove();

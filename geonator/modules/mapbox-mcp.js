@@ -2029,4 +2029,257 @@ class MapboxMCPClient {
         return null;
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════
+  // JS-DRIVEN ARCHITECTURE PUBLIC API (systemdesign v2.0)
+  // Called by QueryEngine — not part of the agentic tool loop.
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Search Box wrapper for QueryEngine.
+   * Returns raw feature array (not minified JSON).
+   * @param {string} query
+   * @param {{ types?: string, proximity?: number[], bbox?: number[] }} opts
+   * @returns {Promise<{ features: Array }>}
+   */
+  async searchBox(query, opts = {}) {
+    const types     = opts.types     || 'poi,address,place,locality';
+    const proximity = opts.proximity || null;
+    const bbox      = opts.bbox      || null;
+    const features  = await this._searchBoxRequest(query, types, proximity, bbox);
+    // Wrap to look like a GeoJSON FeatureCollection-ish for QueryEngine
+    return {
+      features: (features || []).map(f => ({
+        geometry:   { coordinates: [f.longitude, f.latitude] },
+        properties: {
+          name:         f.name,
+          full_address: f.full_address,
+          feature_type: f.feature_type,
+          bbox:         f.bbox,
+          context:      f.context || null,
+          place_formatted: f.full_address,
+        },
+      })),
+    };
+  }
+
+  /**
+   * Fetch all transit entrances (stop_type=entrance) near a station coordinate.
+   * Used by QueryEngine._resolveStation.
+   * @param {number} lat
+   * @param {number} lng
+   * @param {number} radiusM
+   * @returns {Promise<Array<{name:string,lat:number,lng:number}>>}
+   */
+  async tilequeryTransitEntrances(lat, lng, radiusM = 500) {
+    const url =
+      `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
+      `?access_token=${this.token}` +
+      `&radius=${Math.min(radiusM, 500)}&limit=${this.config.TILEQUERY_LIMIT}` +
+      `&dedupe=true&layers=transit_stop_label`;
+
+    try {
+      const res = await this._fetchTilequeryWithCache(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.features || [])
+        .filter(f => f.properties?.stop_type === 'entrance')
+        .map(f => ({
+          name: f.properties?.name || null,
+          lat:  f.geometry.coordinates[1],
+          lng:  f.geometry.coordinates[0],
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * resolveBBox — unified bbox computation (C-3 / systemdesign §9-2).
+   * Replaces: _computeBboxFromPoints, calculateMidpointBBOX, radius→bbox inline.
+   *
+   * @param {{ points?: Array<{lng,lat,radiusM?,bbox?}>, marginM?: number }} opts
+   * @returns {number[]} [minX, minY, maxX, maxY]
+   */
+  resolveBBox({ points = [], marginM = 0 }) {
+    // Collect all coordinates
+    const lngs = [];
+    const lats  = [];
+    let singleRadius = 0;
+
+    for (const p of points) {
+      if (p.bbox) {
+        // Pre-computed bbox (e.g. locality)
+        lngs.push(p.bbox[0], p.bbox[2]);
+        lats.push(p.bbox[1],  p.bbox[3]);
+        continue;
+      }
+      lngs.push(p.lng);
+      lats.push(p.lat);
+      if (points.length === 1 && p.radiusM) singleRadius = p.radiusM;
+    }
+
+    if (lngs.length === 0) return [0, 0, 0, 0];
+
+    let minLng = Math.min(...lngs);
+    let maxLng = Math.max(...lngs);
+    let minLat  = Math.min(...lats);
+    let maxLat  = Math.max(...lats);
+
+    const centerLng = (minLng + maxLng) / 2;
+    const centerLat  = (minLat + maxLat) / 2;
+
+    // For single point with radius, extend from center
+    if (singleRadius > 0) {
+      const dLng = singleRadius / (111320 * Math.cos(centerLat * Math.PI / 180));
+      const dLat  = singleRadius / 110540;
+      minLng = centerLng - dLng;
+      maxLng = centerLng + dLng;
+      minLat  = centerLat  - dLat;
+      maxLat  = centerLat  + dLat;
+    }
+
+    // Apply minimum padding (150m) to avoid zero-size bbox
+    const padM   = Math.max(marginM, 150);
+    const padLng = padM / (111320 * Math.cos(centerLat * Math.PI / 180));
+    const padLat  = padM / 110540;
+
+    return [
+      Math.min(minLng, centerLng - padLng),
+      Math.min(minLat,  centerLat  - padLat),
+      Math.max(maxLng, centerLng + padLng),
+      Math.max(maxLat,  centerLat  + padLat),
+    ];
+  }
+
+  /**
+   * Expand bbox by an absolute margin in meters on all four sides.
+   * Used for condition bbox (C-2 / §7-4).
+   * @param {number[]} bbox
+   * @param {number} marginM
+   * @returns {number[]}
+   */
+  expandBBox(bbox, marginM) {
+    const [minX, minY, maxX, maxY] = bbox;
+    const cy     = (minY + maxY) / 2;
+    const dLng   = marginM / (111320 * Math.cos(cy * Math.PI / 180));
+    const dLat   = marginM / 110540;
+    return [minX - dLng, minY - dLat, maxX + dLng, maxY + dLat];
+  }
+
+  /**
+   * Collect target candidates within bbox.
+   * Returns plain item array (not minified JSON string).
+   * @param {object} target - QuerySchema.target
+   * @param {number[]} bbox
+   * @returns {Promise<Array>}
+   */
+  async collectTarget(target, bbox) {
+    const proximity = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
+    const queries   = [target.text];
+    const resultStr = await this._searchNearbyPOI(
+      queries, proximity, bbox, target.query_intent, null, false
+    );
+    return this._parseItemsFromResult(resultStr);
+  }
+
+  /**
+   * Collect condition candidates within bbox.
+   * Returns plain item array.
+   * @param {object} condition - QuerySchema.conditions[]
+   * @param {number[]} bbox
+   * @returns {Promise<Array>}
+   */
+  async collectCondition(condition, bbox) {
+    const proximity = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
+    const queries   = condition.text ? [condition.text] : [];
+    const intent    = condition.query_intent || this._condTypeToIntent(condition.type);
+    const resultStr = await this._searchNearbyPOI(
+      queries, proximity, bbox, intent, null, false
+    );
+    return this._parseItemsFromResult(resultStr);
+  }
+
+  _condTypeToIntent(type) {
+    switch (type) {
+      case 'category_busstop':    return 'category_busstop_location';
+      case 'intersection':        return 'intersection';
+      case 'signal':              return 'signal';
+      case 'transit_entrance':    return 'specific';
+      default:                    return 'specific';
+    }
+  }
+
+  _parseItemsFromResult(resultStr) {
+    try {
+      const parsed = typeof resultStr === 'string' ? JSON.parse(resultStr) : resultStr;
+      return Array.isArray(parsed?.items) ? parsed.items : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Evaluate whether a main candidate is within the specified distance of any condition item.
+   * Returns true if at least one condition item is within the distance.
+   *
+   * @param {{ id, lat, lng }} mainCandidate
+   * @param {Array<{ lat, lng }>} conditionItems
+   * @param {{ useIsochrone, useBuildingId, radiusM, minutes, profile, pushback }} distParams
+   * @param {Map} isoCache - shared isochrone polygon cache keyed by "lat,lng,level,profile,minutes"
+   * @returns {Promise<boolean>}
+   */
+  async evaluateDistance(mainCandidate, conditionItems, distParams, isoCache = new Map()) {
+    if (!conditionItems || conditionItems.length === 0) return false;
+    if (distParams.pushback) return false;
+
+    const { lat, lng } = mainCandidate;
+
+    // same_building: building-id comparison
+    if (distParams.useBuildingId) {
+      const mainBuildingId = await this._getBuildingId(lat, lng);
+      if (!mainBuildingId) return false;
+      for (const c of conditionItems) {
+        const cId = await this._getBuildingId(c.lat, c.lng);
+        if (cId && cId === mainBuildingId) return true;
+      }
+      return false;
+    }
+
+    // radius: turf.circle
+    if (!distParams.useIsochrone) {
+      const radiusKm = (distParams.radiusM ?? 250) / 1000;
+      const circle   = turf.circle(turf.point([lng, lat]), radiusKm, { units: 'kilometers', steps: 32 });
+      for (const c of conditionItems) {
+        if (turf.booleanPointInPolygon(turf.point([c.lng, c.lat]), circle)) return true;
+      }
+      return false;
+    }
+
+    // isochrone (FF: cache by anchor+level+profile+minutes)
+    const cacheKey = `${lat},${lng},${distParams.minutes},${distParams.profile}`;
+    let polygon = isoCache.get(cacheKey);
+    if (!polygon) {
+      const prof = distParams.profile || 'walking';
+      const mins = distParams.minutes;
+      const url  =
+        `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${lng},${lat}` +
+        `?contours_minutes=${mins}&polygons=true&access_token=${this.token}`;
+      try {
+        const res = await this._fetchWithRetry(url);
+        if (!res.ok) return false;
+        const data = await res.json();
+        polygon = data.features?.[0];
+        if (polygon) isoCache.set(cacheKey, polygon);
+      } catch {
+        return false;
+      }
+    }
+    if (!polygon) return false;
+
+    for (const c of conditionItems) {
+      if (turf.booleanPointInPolygon(turf.point([c.lng, c.lat]), polygon)) return true;
+    }
+    return false;
+  }
 }
