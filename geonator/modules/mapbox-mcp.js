@@ -816,11 +816,17 @@ class MapboxMCPClient {
     if (queryIntent === 'transit_entrance' && effectiveProximity) {
       const [lng, lat] = effectiveProximity;
       const entrances = await this.tilequeryTransitEntrances(lat, lng, 500);
-      const q = (queries[0] || '').replace(/(出口|口)\s*$/,'').trim(); // 「B1出口」→「B1」
+      // 「B1出口」→「B1」、「3番出口」→「3」（出口/口/番を除去）
+      let q = (queries[0] || '').replace(/(出口|口)\s*$/, '').replace(/番\s*$/, '').trim();
       const norm = s => MapboxMCPClient._normalizeName(s);
-      const filtered = q
-        ? entrances.filter(e => e.name && norm(e.name).includes(norm(q)))
-        : entrances;
+      const nq = norm(q);
+      let filtered;
+      if (!nq) {
+        filtered = entrances; // 出口名指定なし → 全出口
+      } else {
+        filtered = entrances.filter(e => e.name && norm(e.name) === nq);              // 完全一致優先
+        if (!filtered.length) filtered = entrances.filter(e => e.name && norm(e.name).includes(nq)); // なければ部分一致
+      }
       const items = filtered.map(e => ({ name: e.name, latitude: e.lat, longitude: e.lng }));
       return this._minify({ source: 'transit_stop_label (entrance)', count: items.length, items });
     }
