@@ -30,6 +30,7 @@ class QueryEngine {
     this._clarifyCount = 0;
     this._previousText = null;    // for L1 re-parse
     this._awaitingClarify = false; // last run ended asking for more info (main-input answer merges)
+    this._ratingCache = new Map(); // L2 relevance cache: "intent||name" → exact|related|mismatch (session stability)
   }
 
   /** Localized message bundle for the current UI language. */
@@ -619,29 +620,36 @@ class QueryEngine {
     if (!candidates || candidates.length === 0) return { kept: [], excludedNames: [] };
 
     // L2 relevance rating (all target types). Coarse buckets for stability:
-    // exact / mismatch(removed) / related(default). Batched + parallel (a single
-    // call can't reliably rate 500+ building candidates).
+    // exact / mismatch(removed) / related(default). Cached by intent||name for the
+    // session so repeated queries stay stable (LLM rating is nondeterministic).
     const intentLabel = this._buildIntentLabel(target);
-    const BATCH = 40;
-    const batches = [];
-    for (let i = 0; i < candidates.length; i += BATCH) batches.push(candidates.slice(i, i + BATCH));
+    const keyOf = c => `${intentLabel}||${(c.name || '').trim()}`;
 
-    const results = await Promise.all(batches.map(b =>
-      this.llm.rateCandidates(intentLabel, b.map(c => ({ id: c.id, name: c.name ?? '' })))
-    ));
-
-    const exact = new Set(), mismatch = new Set();
-    results.forEach(r => {
-      if (!r) return; // failed batch → its candidates default to 'related', kept
-      r.exact.forEach(id => exact.add(id));
-      r.mismatch.forEach(id => mismatch.add(id));
-    });
+    // Only send un-cached (and named) candidates to the LLM
+    const uncached = candidates.filter(c => c.name && !this._ratingCache.has(keyOf(c)));
+    if (uncached.length) {
+      const BATCH = 40;
+      const batches = [];
+      for (let i = 0; i < uncached.length; i += BATCH) batches.push(uncached.slice(i, i + BATCH));
+      const results = await Promise.all(batches.map(b =>
+        this.llm.rateCandidates(intentLabel, b.map(c => ({ id: c.id, name: c.name })))
+      ));
+      batches.forEach((b, bi) => {
+        const r = results[bi];
+        if (!r) return; // failed batch → leave uncached (retry next time), default 'related' this run
+        for (const c of b) {
+          const id = String(c.id);
+          const rel = r.mismatch.has(id) ? 'mismatch' : (r.exact.has(id) ? 'exact' : 'related');
+          this._ratingCache.set(keyOf(c), rel);
+        }
+      });
+    }
 
     const kept = [], excludedNames = [];
     for (const c of candidates) {
-      const id = String(c.id);
-      if (mismatch.has(id)) { excludedNames.push(c.name || '(名前なし)'); continue; }
-      c._relevance = exact.has(id) ? 'exact' : 'related';
+      const rel = this._ratingCache.get(keyOf(c)) ?? 'related';
+      if (rel === 'mismatch') { excludedNames.push(c.name || '(名前なし)'); continue; }
+      c._relevance = rel;
       kept.push(c);
     }
     return { kept, excludedNames };
@@ -777,7 +785,7 @@ class QueryEngine {
    * - partial → 'bronze', none → 'none'.
    */
   _assignTiers(full, partial, none) {
-    const EPS = 0.2;        // score range below which we do NOT crown a winner
+    const EPS = 0.3;        // score range below which we do NOT crown a winner (wider = fewer flips)
     const GOLD_BAND = 0.34; // top fraction of the range that earns gold
 
     if (full.length === 1) {
