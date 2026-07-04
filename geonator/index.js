@@ -314,8 +314,8 @@ class LocationFinderApp {
       L.push('');
       L.push('【Step2: 距離評価（スコア/ティア）】');
       L.push(`・全一致 ${e.full.length}件 / 部分一致 ${e.partial.length}件 / 参考 ${e.noneCount}件`);
-      e.full.slice(0, 20).forEach(f => L.push(`　${icon(f.tier)} ${f.name}  score=${f.score} ← [${f.labels.join(', ')}]`));
-      e.partial.slice(0, 12).forEach(p => L.push(`　${icon(p.tier)} ${p.name} (${p.hit}/${p.total}) score=${p.score} ← [${p.labels.join(', ')}]`));
+      e.full.slice(0, 20).forEach(f => L.push(`　${icon(f.tier)} ${f.name}  [${f.rel || '-'}] score=${f.score} ← [${f.labels.join(', ')}]`));
+      e.partial.slice(0, 12).forEach(p => L.push(`　${icon(p.tier)} ${p.name} (${p.hit}/${p.total}) [${p.rel || '-'}] score=${p.score} ← [${p.labels.join(', ')}]`));
     }
 
     return L.join('\n');

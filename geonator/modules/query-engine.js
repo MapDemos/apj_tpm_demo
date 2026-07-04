@@ -205,7 +205,7 @@ class QueryEngine {
     this.ui.drawPolygons?.(this.mcp._evalPolygons);
 
     // Debug: evaluation breakdown (with score + tier)
-    const dbgRow = c => ({ name: c.name || '(名前なし)', score: c._matchInfo?.score ?? 0, tier: c._tier, hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [] });
+    const dbgRow = c => ({ name: c.name || '(名前なし)', score: c._matchInfo?.score ?? 0, tier: c._tier, rel: c._relevance, hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [] });
     this._dbgReport.evaluation = {
       full:    results.full.map(dbgRow),
       partial: results.partial.map(dbgRow),
@@ -579,8 +579,8 @@ class QueryEngine {
       }));
     }
 
-    // [3-B1] noise removal: L2 intent check
-    const { kept, excludedNames } = await this._denoiseMain(target, mainRaw);
+    // [3-B1] L2 relevance rating: remove mismatches, tag kept as exact/related
+    const { kept, excludedNames } = await this._rateMain(target, mainRaw);
 
     // Debug: target + condition collection breakdown
     this._dbgReport.target = {
@@ -595,35 +595,34 @@ class QueryEngine {
     return { main: kept, conditions: condResults };
   }
 
-  async _denoiseMain(target, candidates) {
+  async _rateMain(target, candidates) {
     if (!candidates || candidates.length === 0) return { kept: [], excludedNames: [] };
 
-    // L2 intent check: judge by query intent, but only remove candidates that
-    // CLEARLY don't match (ambiguous kept — recall priority). Per building type
-    // (マンション/アパート/ビル) the intent label differs so judgment is precise.
-    //
-    // Building searches can return 500+ POIs; a single L2 call can't reliably
-    // process them all, so batch into chunks and run in parallel (each batch
-    // gets a focused list the LLM can actually judge).
+    // L2 relevance rating (all target types). Coarse buckets for stability:
+    // exact / mismatch(removed) / related(default). Batched + parallel (a single
+    // call can't reliably rate 500+ building candidates).
     const intentLabel = this._buildIntentLabel(target);
     const BATCH = 40;
     const batches = [];
     for (let i = 0; i < candidates.length; i += BATCH) batches.push(candidates.slice(i, i + BATCH));
 
     const results = await Promise.all(batches.map(b =>
-      this.llm.findIntentMismatches(intentLabel, b.map(c => ({ id: c.id, name: c.name ?? '' })))
+      this.llm.rateCandidates(intentLabel, b.map(c => ({ id: c.id, name: c.name ?? '' })))
     ));
 
-    const drop = new Set();
-    results.forEach(mismatch => {
-      if (mismatch === null) return; // failed batch → keep all in it (conservative)
-      mismatch.forEach(id => drop.add(String(id)));
+    const exact = new Set(), mismatch = new Set();
+    results.forEach(r => {
+      if (!r) return; // failed batch → its candidates default to 'related', kept
+      r.exact.forEach(id => exact.add(id));
+      r.mismatch.forEach(id => mismatch.add(id));
     });
 
     const kept = [], excludedNames = [];
     for (const c of candidates) {
-      if (drop.has(String(c.id))) excludedNames.push(c.name || '(名前なし)');
-      else kept.push(c);
+      const id = String(c.id);
+      if (mismatch.has(id)) { excludedNames.push(c.name || '(名前なし)'); continue; }
+      c._relevance = exact.has(id) ? 'exact' : 'related';
+      kept.push(c);
     }
     return { kept, excludedNames };
   }
@@ -654,9 +653,15 @@ class QueryEngine {
       tracker.set(String(c.id), { candidate: c, total: conditions.length, hit: 0, hitLabels: [], closenessSum: 0 });
     }
 
+    const relMult = c => (c._relevance === 'exact' ? 1.0 : 0.5); // L2 relevance factor
+
     if (conditions.length === 0) {
-      // No conditions — all match; no scoring dimension, treat uniformly.
-      mainCandidates.forEach(c => { c._matchInfo = { hit: 0, total: 0, labels: [], score: 1 }; c._tier = 'match'; });
+      // No conditions — score = L2 relevance only (exact スーパー > related 八百屋).
+      mainCandidates.forEach(c => {
+        c._matchInfo = { hit: 0, total: 0, labels: [], score: +relMult(c).toFixed(3), relevance: c._relevance };
+      });
+      this._assignTiers(mainCandidates, [], []); // variance gate splits gold/silver by relevance
+      mainCandidates.sort((a, b) => b._matchInfo.score - a._matchInfo.score);
       return { full: mainCandidates, partial: [], none: [] };
     }
 
@@ -690,11 +695,14 @@ class QueryEngine {
       }
     }
 
-    // Classify (OR — all displayed) + attach continuous score
+    // Classify (OR — all displayed) + attach continuous score.
+    // score = L2 relevance × condition proximity (exact スーパー near conditions
+    // ranks above a related 八百屋 near the same conditions).
     const full = [], partial = [], none = [];
     for (const [, t] of tracker) {
-      const score = t.hit > 0 ? t.closenessSum / t.hit : 0; // avg closeness over matched conditions
-      t.candidate._matchInfo = { hit: t.hit, total: t.total, labels: t.hitLabels, score: +score.toFixed(3) };
+      const condScore = t.hit > 0 ? t.closenessSum / t.hit : 0;
+      const score = relMult(t.candidate) * condScore;
+      t.candidate._matchInfo = { hit: t.hit, total: t.total, labels: t.hitLabels, score: +score.toFixed(3), relevance: t.candidate._relevance };
       if (t.hit === t.total)      full.push(t.candidate);
       else if (t.hit > 0)         partial.push(t.candidate);
       else                        none.push(t.candidate);

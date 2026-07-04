@@ -62,20 +62,28 @@ class LLMClient {
    * @param {Array<{id: number|string, name: string}>} candidates
    * @returns {Promise<Array<number|string>|null>} mismatch_ids, or null on failure
    */
-  async findIntentMismatches(intentLabel, candidates) {
-    if (!candidates || candidates.length === 0) return [];
+  /**
+   * Rate candidates against the intent: returns { exact:Set, mismatch:Set } of ids.
+   * Unlisted ids = 'related' (kept, medium). null on parse failure (caller keeps all).
+   */
+  async rateCandidates(intentLabel, candidates) {
+    if (!candidates || candidates.length === 0) return { exact: new Set(), mismatch: new Set() };
 
     const result = await this._callClaude(
       this._buildL2Prompt(intentLabel, candidates),
-      1024,  // large enough for id list even with ~150 candidates
+      1024,
       this.config.L2_MODEL,
       'L2'
     );
     try {
       const json = this._extractJSON(result);
-      return Array.isArray(json?.mismatch_ids) ? json.mismatch_ids : null;
+      if (!json) return null;
+      return {
+        exact:    new Set((json.exact    || []).map(String)),
+        mismatch: new Set((json.mismatch || []).map(String)),
+      };
     } catch {
-      return null; // parse failure → caller keeps all
+      return null; // parse failure → caller keeps all as 'related'
     }
   }
 

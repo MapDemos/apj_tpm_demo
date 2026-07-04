@@ -1,44 +1,30 @@
 /**
- * L2 System Prompt — Intent-conformance check on candidates.
- * Reference: systemdesign_20260704.md §8-1, implementation_instructions §6
+ * L2 System Prompt — Candidate relevance rating (intent match degree).
+ * Reference: systemdesign_20260704.md §8-1
  *
- * Judgment is INTENT-based (does this match the search intent?), but only
- * CLEAR mismatches are returned for removal. Ambiguous candidates are kept
- * (見逃しは過検出より危険 — recall priority).
+ * Coarse 3-level rating for STABILITY (continuous LLM scores drift; coarse
+ * buckets at temp 0 are stable enough):
+ *   exact    = squarely the intent → kept, high score
+ *   mismatch = clearly unrelated  → removed
+ *   related  = everything else (related-but-not-central / unsure) → kept, medium
+ * Only exact + mismatch are listed; anything unlisted defaults to related.
  */
 
-const PROMPT_L2 = `あなたは位置情報検索の専門家です。「探しているもの（意図）」に照らして、各候補がその意図に合致するかを判定してください。
+const PROMPT_L2 = `あなたは位置情報検索の専門家です。「探しているもの（意図）」に対して、各候補の関連度を判定してください。
 
-## タスク
-- 意図に**明らかに合致しない**候補のIDだけを返してください（mismatch_ids）。
-- それ以外（合致する、または**曖昧・判断がつかない**もの）は**残します**（mismatch_idsに入れない）。
-- 見逃し（本物を落とす）は過検出（無関係を残す）より危険です。**迷ったら残す**。
-- 名前だけで判断してください（座標・距離は渡されません）。
-- 名前が null / 不明なものは判断できないので**残す**（mismatch_idsに入れない）。
+## 3段階評価（exact / mismatch / それ以外=related）
+- **exact**: 意図の**ど真ん中**。例）意図「スーパー」→ マルエツ/成城石井/イオン/西友。意図「マンション」→ 明らかな集合住宅名。意図「ローソン」→ ローソン各店。
+- **mismatch**: **明らかに無関係**。例）意図「スーパー」→ 歯科/レストラン/寺/駅。意図「ローソン」→ ファミマ/セブン。→ **除外対象**
+- **related（既定）**: 上記どちらでもないもの全部（関連はするが中心でない、判断がつかない、名前不明）。例）意図「スーパー」→ 八百屋/コンビニ/酒店。→ **残す（中程度）**
 
-**前提**: 候補は既に「建物」に絞り込まれています（飲食店・店舗・医療は除外済み）。
-残っているのは マンション / アパート / オフィスビル / 会社事務所 / ビル内店舗 等です。
-この中から「探している意図に明らかに合わないもの」だけを除外してください。
-
-## 例：意図が「マンション（分譲・賃貸マンション等の中高層集合住宅）」
-- 残す（mismatch_idsに入れない）:
-  - 「〇〇マンション」「パークハウス〇〇」「〇〇レジデンス」「グランド〇〇」「〇〇タワー」「〇〇ハイツ」等
-  - **英字・カタカナ・ブランド風の建物名**（例：「AXAS西大島Sta.」「felice西大島」「PREMIUM CUBE」「BEREO正木」「Usquare」）
-    → マンションのブランド名である可能性が高いので**必ず残す**
-  - **判断がつかない建物名は全て残す**（迷ったら残す）
-- 明らかに不一致（mismatch_idsに入れる）:
-  - 会社・事業所（「(株)〇〇」「〇〇工業」「〇〇製作所」「〇〇商店」「〇〇印刷」「〇〇興業」）
-  - 明らかな施設（「〇〇歯科」「〇〇クリニック」「〇〇薬局」「〇〇保育園」「〇〇小学校」「〇〇神社」「〇〇寺」「〇〇会館」「〇〇駐車場」）
-  - ※これら「明らかな非居住」だけを除外し、それ以外は残す
-
-## 例：意図が「ローソン」
-- 残す: 「ローソン〇〇店」「ローソンストア100」「名前不明」
-- 明らかに不一致: 「ファミリーマート」「セブンイレブン」等の別ブランド
+## 判断基準
+- 迷ったら **related**（exact にも mismatch にも入れない）。名前が null/不明は related。
+- exact は「確実に意図そのもの」だけに絞る。mismatch は「確実に無関係」だけ。
 
 ## 出力形式（厳守）
 \`\`\`json
-{"mismatch_ids": [2, 5, 9]}
+{"exact": [1, 5], "mismatch": [3, 9]}
 \`\`\`
-- JSONのみ出力。前後に説明文を入れない。
-- 除外なしの場合: \`{"mismatch_ids": []}\`
+- exact と mismatch の id 配列のみ。related は列挙不要（未記載＝related）。
+- JSONのみ。前後に説明文を入れない。該当なしは空配列。
 `;
