@@ -124,17 +124,8 @@ class LocationFinderApp {
         });
       },
       showResults(full, partial, none, unsupported, conditionLabels) {
-        // Build combined candidate list with match metadata for marker display
-        const allCandidates = [
-          ...full.map(c    => ({ ...c, match_level: 'full' })),
-          ...partial.map(c => ({ ...c, match_level: 'partial' })),
-          ...none.map(c    => ({ ...c, match_level: 'partial' })), // 'none' shown as partial pin
-        ];
-
-        // Use existing addCandidateMarkers (full=blue, partial=yellow, none=gray)
-        if (allCandidates.length > 0) {
-          self.addCandidateMarkers(allCandidates);
-        }
+        // Tier-aware markers (gold/silver/match/bronze). QueryEngine set _tier + _matchInfo.score.
+        self._renderTierMarkers([...full, ...partial, ...none]);
 
         // Show unsupported note
         if (unsupported && unsupported.length > 0) {
@@ -256,14 +247,15 @@ class LocationFinderApp {
       });
     }
 
-    // ── Step2 評価 ──
+    // ── Step2 評価（スコア・ティア） ──
     if (r.evaluation) {
       const e = r.evaluation;
+      const icon = t => ({ gold:'🥇', silver:'🥈', match:'🟢', bronze:'🥉', none:'⚪' }[t] || '🟢');
       L.push('');
-      L.push('【Step2: 距離評価】');
+      L.push('【Step2: 距離評価（スコア/ティア）】');
       L.push(`・全一致 ${e.full.length}件 / 部分一致 ${e.partial.length}件 / 参考 ${e.noneCount}件`);
-      e.full.slice(0, 15).forEach(f => L.push(`　🟢 ${f.name} ← [${f.labels.join(', ')}]`));
-      e.partial.slice(0, 15).forEach(p => L.push(`　🟡 ${p.name} (${p.hit}/${p.total}) ← [${p.labels.join(', ')}]`));
+      e.full.slice(0, 20).forEach(f => L.push(`　${icon(f.tier)} ${f.name}  score=${f.score} ← [${f.labels.join(', ')}]`));
+      e.partial.slice(0, 12).forEach(p => L.push(`　${icon(p.tier)} ${p.name} (${p.hit}/${p.total}) score=${p.score} ← [${p.labels.join(', ')}]`));
     }
 
     return L.join('\n');
@@ -459,6 +451,68 @@ class LocationFinderApp {
     const examples = document.getElementById('examplesArea');
     if (examples) examples.style.display = '';
     this.addMessage('assistant', LANG[this._lang].welcome);
+  }
+
+  /**
+   * Render candidate markers by tier (JS-driven scoring).
+   * gold = full match, top score (stands out dramatically when scores spread)
+   * silver = full match, lower score
+   * match = full match, flat distribution (no meaningful winner → all equal)
+   * bronze = partial match
+   * none = no condition matched (shown only when nothing else matched)
+   */
+  _renderTierMarkers(candidates) {
+    this.candidateMarkers.forEach(m => m.remove());
+    this.candidateMarkers = [];
+    if (!candidates || candidates.length === 0) return;
+
+    const TIER = {
+      gold:   { size: 40, color: '#f59e0b', ring: '#fde68a', z: 5, glow: true,  label: '🏅 最有力', badge: '★' },
+      silver: { size: 24, color: '#60a5fa', ring: '#bfdbfe', z: 3, glow: false, label: '全一致',   badge: '' },
+      match:  { size: 28, color: '#f59e0b', ring: '#fcd34d', z: 4, glow: false, label: '条件一致', badge: '' },
+      bronze: { size: 18, color: '#94a3b8', ring: '#cbd5e1', z: 2, glow: false, label: '部分一致', badge: '' },
+      none:   { size: 14, color: '#64748b', ring: '#475569', z: 1, glow: false, label: '参考',     badge: '' },
+    };
+
+    // Draw lower tiers first so gold ends up on top
+    const order = ['none', 'bronze', 'silver', 'match', 'gold'];
+    const sorted = [...candidates].sort((a, b) => order.indexOf(a._tier) - order.indexOf(b._tier));
+
+    let goldNum = 0;
+    for (const place of sorted) {
+      const tier = TIER[place._tier] || TIER.none;
+      const lng = place.longitude ?? place.lng;
+      const lat = place.latitude  ?? place.lat;
+      if (lng == null || lat == null) continue;
+
+      const el = document.createElement('div');
+      el.className = `tier-marker tier-${place._tier}${tier.glow ? ' tier-glow' : ''}`;
+      el.style.cssText =
+        `width:${tier.size}px;height:${tier.size}px;background:${tier.color};` +
+        `border:2px solid ${tier.ring};border-radius:50%;z-index:${tier.z};` +
+        `box-shadow:${tier.glow ? '0 0 0 4px rgba(245,158,11,.35), 0 0 16px 4px rgba(245,158,11,.6)' : '0 1px 4px rgba(0,0,0,.4)'};` +
+        `cursor:pointer;display:flex;align-items:center;justify-content:center;` +
+        `font-size:${Math.round(tier.size*0.5)}px;color:#1a1000;font-weight:700;`;
+      if (place._tier === 'gold') { goldNum++; el.textContent = String(goldNum); }
+
+      const mi = place._matchInfo || {};
+      const scorePct = mi.score != null ? Math.round(mi.score * 100) : null;
+      const popupHTML =
+        `<div style="font-weight:700;color:${tier.color}">${tier.badge} ${tier.label}${scorePct != null ? `（スコア ${scorePct}）` : ''}</div>` +
+        `<strong>${_esc(place.name || '(名前なし)')}</strong>` +
+        (mi.labels?.length ? `<div class="popup-reason">✓ ${_esc(mi.labels.join('、'))}${mi.total ? `（${mi.hit}/${mi.total}）` : ''}</div>` : '');
+
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat(_safeLL(lng, lat))
+        .setPopup(new mapboxgl.Popup({ offset: tier.size / 2 + 6, closeButton: false }).setHTML(popupHTML))
+        .addTo(this.map);
+      el.addEventListener('click', () => marker.togglePopup());
+      this.candidateMarkers.push(marker);
+    }
+
+    // Auto-open the top gold candidate's popup
+    const topGold = this.candidateMarkers.find(m => m.getElement().classList.contains('tier-gold'));
+    if (topGold) setTimeout(() => topGold.togglePopup(), 600);
   }
 
   // ═══════════════════════════════════════════════════════════════

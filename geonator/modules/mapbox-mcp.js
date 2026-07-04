@@ -2257,52 +2257,63 @@ class MapboxMCPClient {
   }
 
   /**
-   * Evaluate whether a main candidate is within the specified distance of any condition item.
-   * Returns true if at least one condition item is within the distance.
+   * Evaluate a main candidate against a condition's items.
+   * Returns { matched, nearestM } where nearestM is the straight-line distance (m)
+   * to the nearest condition item (used for scoring). matched follows the method
+   * (circle / isochrone polygon / same-building id).
    *
    * @param {{ id, lat, lng }} mainCandidate
    * @param {Array<{ lat, lng }>} conditionItems
    * @param {{ useIsochrone, useBuildingId, radiusM, minutes, profile, pushback }} distParams
-   * @param {Map} isoCache - shared isochrone polygon cache keyed by "lat,lng,level,profile,minutes"
-   * @returns {Promise<boolean>}
+   * @param {Map} isoCache
+   * @returns {Promise<{ matched: boolean, nearestM: number|null }>}
    */
   async evaluateDistance(mainCandidate, conditionItems, distParams, isoCache = new Map()) {
-    if (!conditionItems || conditionItems.length === 0) return false;
-    if (distParams.pushback) return false;
+    const NO = { matched: false, nearestM: null };
+    if (!conditionItems || conditionItems.length === 0) return NO;
+    if (distParams.pushback) return NO;
 
-    // Support both lat/lng and latitude/longitude field names
     const lat = mainCandidate.latitude  ?? mainCandidate.lat;
     const lng = mainCandidate.longitude ?? mainCandidate.lng;
-    if (lat == null || lng == null) return false;
+    if (lat == null || lng == null) return NO;
 
-    const condLngLat = (c) => [
-      c.longitude ?? c.lng,
-      c.latitude  ?? c.lat,
-    ];
+    const condLngLat = (c) => [c.longitude ?? c.lng, c.latitude ?? c.lat];
+    const pt = turf.point([lng, lat]);
+
+    // Nearest straight-line distance to any condition item (for scoring)
+    let nearestM = null;
+    for (const c of conditionItems) {
+      const [cLng, cLat] = condLngLat(c);
+      if (cLng == null || cLat == null) continue;
+      const dM = turf.distance(pt, turf.point([cLng, cLat]), { units: 'meters' });
+      if (nearestM == null || dM < nearestM) nearestM = dM;
+    }
 
     // same_building: building-id comparison
     if (distParams.useBuildingId) {
       const mainBuildingId = await this._getBuildingId(lat, lng);
-      if (!mainBuildingId) return false;
+      if (!mainBuildingId) return { matched: false, nearestM };
       for (const c of conditionItems) {
         const [cLng, cLat] = condLngLat(c);
         const cId = await this._getBuildingId(cLat, cLng);
-        if (cId && cId === mainBuildingId) return true;
+        if (cId && cId === mainBuildingId) return { matched: true, nearestM: 0 };
       }
-      return false;
+      return { matched: false, nearestM };
     }
 
     // radius: turf.circle
     if (!distParams.useIsochrone) {
       const radiusKm = (distParams.radiusM ?? 250) / 1000;
-      const circle   = turf.circle(turf.point([lng, lat]), radiusKm, { units: 'kilometers', steps: 32 });
-      this._evalPolygons.push(circle);  // for visualization
+      const circle   = turf.circle(pt, radiusKm, { units: 'kilometers', steps: 32 });
+      this._evalPolygons.push(circle);
       for (const c of conditionItems) {
         const [cLng, cLat] = condLngLat(c);
         if (cLng != null && cLat != null &&
-            turf.booleanPointInPolygon(turf.point([cLng, cLat]), circle)) return true;
+            turf.booleanPointInPolygon(turf.point([cLng, cLat]), circle)) {
+          return { matched: true, nearestM };
+        }
       }
-      return false;
+      return { matched: false, nearestM };
     }
 
     // isochrone (FF: cache by anchor+level+profile+minutes)
@@ -2316,22 +2327,24 @@ class MapboxMCPClient {
         `?contours_minutes=${mins}&polygons=true&access_token=${this.token}`;
       try {
         const res = await this._fetchWithRetry(url);
-        if (!res.ok) return false;
+        if (!res.ok) return { matched: false, nearestM };
         const data = await res.json();
         polygon = data.features?.[0];
         if (polygon) isoCache.set(cacheKey, polygon);
       } catch {
-        return false;
+        return { matched: false, nearestM };
       }
     }
-    if (!polygon) return false;
-    this._evalPolygons.push(polygon);  // for visualization
+    if (!polygon) return { matched: false, nearestM };
+    this._evalPolygons.push(polygon);
 
     for (const c of conditionItems) {
       const [cLng, cLat] = condLngLat(c);
       if (cLng != null && cLat != null &&
-          turf.booleanPointInPolygon(turf.point([cLng, cLat]), polygon)) return true;
+          turf.booleanPointInPolygon(turf.point([cLng, cLat]), polygon)) {
+        return { matched: true, nearestM };
+      }
     }
-    return false;
+    return { matched: false, nearestM };
   }
 }

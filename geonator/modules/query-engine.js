@@ -185,10 +185,11 @@ class QueryEngine {
     const results = await this._evaluate(schema, this._cache.mainCandidates, this._cache.condCandidates);
     this.ui.drawPolygons?.(this.mcp._evalPolygons);
 
-    // Debug: evaluation breakdown
+    // Debug: evaluation breakdown (with score + tier)
+    const dbgRow = c => ({ name: c.name || '(名前なし)', score: c._matchInfo?.score ?? 0, tier: c._tier, hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [] });
     this._dbgReport.evaluation = {
-      full:    results.full.map(c    => ({ name: c.name || '(名前なし)', labels: c._matchInfo?.labels ?? [] })),
-      partial: results.partial.map(c => ({ name: c.name || '(名前なし)', hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [] })),
+      full:    results.full.map(dbgRow),
+      partial: results.partial.map(dbgRow),
       noneCount: results.none.length,
     };
 
@@ -493,22 +494,22 @@ class QueryEngine {
 
     const conditions = schema.conditions ?? [];
 
-    // conditionTracker: candidateId → { total, hit }
+    // conditionTracker: candidateId → { total, hit, closenessSum }
     const tracker = new Map();
     for (const c of mainCandidates) {
-      tracker.set(String(c.id), { candidate: c, total: conditions.length, hit: 0, hitLabels: [] });
+      tracker.set(String(c.id), { candidate: c, total: conditions.length, hit: 0, hitLabels: [], closenessSum: 0 });
     }
 
     if (conditions.length === 0) {
-      // No conditions — all are "full" by default
-      return {
-        full:    mainCandidates,
-        partial: [],
-        none:    [],
-      };
+      // No conditions — all match; no scoring dimension, treat uniformly.
+      mainCandidates.forEach(c => { c._matchInfo = { hit: 0, total: 0, labels: [], score: 1 }; c._tier = 'match'; });
+      return { full: mainCandidates, partial: [], none: [] };
     }
 
-    // [FF] isochrone optimization: group by (level+method+profile+minutes) → compute once
+    // reference reach per profile (m/min) for isochrone closeness approximation
+    const speed = { walking: 80, cycling: 250, driving: 500 };
+
+    // [FF] isochrone optimization: compute polygon once per anchor+level
     const isoCache = new Map();
 
     for (const cond of conditions) {
@@ -517,31 +518,68 @@ class QueryEngine {
       if (condItems.length === 0) continue; // 0-item condition → all miss (S already notified)
 
       const distParams = resolveDistanceParams(cond.distance, this.config.DEFAULT_LEVEL);
+      const refM = distParams.radiusM
+        ?? (distParams.minutes ? distParams.minutes * (speed[distParams.profile] || 80) : 250);
 
       for (const main of mainCandidates) {
-        const inside = await this.mcp.evaluateDistance(
-          main, condItems, distParams, isoCache
-        );
-        if (inside) {
+        const { matched, nearestM } = await this.mcp.evaluateDistance(main, condItems, distParams, isoCache);
+        if (matched) {
           const t = tracker.get(String(main.id));
-          if (t) { t.hit++; t.hitLabels.push(cond.text ?? cond.type); }
+          if (t) {
+            t.hit++;
+            t.hitLabels.push(cond.text ?? cond.type);
+            // closeness ∈ [0,1]: 1 = right on top, 0 = at the threshold edge
+            const closeness = nearestM != null ? Math.max(0, Math.min(1, 1 - nearestM / refM)) : 0.5;
+            t.closenessSum += closeness;
+          }
         }
       }
     }
 
-    // Classify (I — OR, all displayed)
-    const full    = [];
-    const partial = [];
-    const none    = [];
-
+    // Classify (OR — all displayed) + attach continuous score
+    const full = [], partial = [], none = [];
     for (const [, t] of tracker) {
-      t.candidate._matchInfo = { hit: t.hit, total: t.total, labels: t.hitLabels };
+      const score = t.hit > 0 ? t.closenessSum / t.hit : 0; // avg closeness over matched conditions
+      t.candidate._matchInfo = { hit: t.hit, total: t.total, labels: t.hitLabels, score: +score.toFixed(3) };
       if (t.hit === t.total)      full.push(t.candidate);
       else if (t.hit > 0)         partial.push(t.candidate);
       else                        none.push(t.candidate);
     }
 
+    // Tiering with variance gate (JS, deterministic) — gold/silver only when the
+    // full-match scores actually spread; otherwise everyone is equal ("同程度").
+    this._assignTiers(full, partial, none);
+
+    // Sort each class by score desc (best first)
+    const byScore = (a, b) => (b._matchInfo.score - a._matchInfo.score);
+    full.sort(byScore); partial.sort(byScore);
+
     return { full, partial, none };
+  }
+
+  /**
+   * Assign _tier to candidates: 'gold' | 'silver' | 'match' | 'bronze' | 'none'.
+   * - full matches: split gold/silver only if score spread ≥ EPS; else all 'match' (flat).
+   * - partial → 'bronze', none → 'none'.
+   */
+  _assignTiers(full, partial, none) {
+    const EPS = 0.2;        // score range below which we do NOT crown a winner
+    const GOLD_BAND = 0.34; // top fraction of the range that earns gold
+
+    if (full.length > 0) {
+      const scores = full.map(c => c._matchInfo.score);
+      const max = Math.max(...scores), min = Math.min(...scores);
+      const range = max - min;
+      if (range < EPS || full.length === 1) {
+        // Flat: no meaningful winner → all equal (no dramatic gold)
+        full.forEach(c => { c._tier = 'match'; c._flatTier = true; });
+      } else {
+        const goldCut = max - range * GOLD_BAND;
+        full.forEach(c => { c._tier = c._matchInfo.score >= goldCut ? 'gold' : 'silver'; });
+      }
+    }
+    partial.forEach(c => { c._tier = 'bronze'; });
+    none.forEach(c => { c._tier = 'none'; });
   }
 
   // ─────────────────────────────────────────────
@@ -570,9 +608,20 @@ class QueryEngine {
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
     this.ui.showResults(full, partial, displayNone, schema.unsupported, conditionLabels);
 
-    const msg = hasMatch
-      ? `${full.length + partial.length}件見つかりました（全マッチ：${full.length}件、部分マッチ：${partial.length}件）`
-      : `条件に一致する候補はありませんでしたが、範囲内の候補${displayNone.length}件を参考として表示します。`;
+    let msg;
+    if (!hasMatch) {
+      msg = `条件に一致する候補はありませんでしたが、範囲内の候補${displayNone.length}件を参考として表示します。`;
+    } else {
+      const goldCount = full.filter(c => c._tier === 'gold').length;
+      const isFlat    = full.length > 0 && full[0]._tier === 'match';
+      if (goldCount > 0) {
+        msg = `最有力${goldCount}件を特定しました（全マッチ：${full.length}件、部分マッチ：${partial.length}件）。金色マーカーが最も条件に近い候補です。`;
+      } else if (isFlat) {
+        msg = `${full.length}件が同程度に条件を満たしています（部分マッチ：${partial.length}件）。甲乙つけがたいため全て同格で表示します。`;
+      } else {
+        msg = `${full.length + partial.length}件見つかりました（全マッチ：${full.length}件、部分マッチ：${partial.length}件）`;
+      }
+    }
     this.ui.showMessage(msg);
   }
 
