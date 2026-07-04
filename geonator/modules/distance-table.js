@@ -6,10 +6,10 @@
 
 const DISTANCE_TABLE = {
   same_building:   { method: 'building_id', radius_m: null,  iso_min: null },
-  adjacent:        { method: 'circle',      radius_m: 50,    iso_min: null }, // always circle, never isochrone
-  very_close:      { method: 'both',        radius_m: 250,   iso_min: 3   },
-  nearby:          { method: 'both',        radius_m: 700,   iso_min: 10  },
-  somewhat_nearby: { method: 'both',        radius_m: 1400,  iso_min: 20  },
+  adjacent:        { method: 'circle',      radius_m: 30,    iso_min: null }, // always circle, never isochrone
+  very_close:      { method: 'both',        radius_m: 120,   iso_min: 2   },
+  nearby:          { method: 'both',        radius_m: 350,   iso_min: 5   },
+  somewhat_nearby: { method: 'both',        radius_m: 700,   iso_min: 9   },
   far:             { method: 'none',        radius_m: null,  iso_min: null }, // → pushback, not used as filter
 };
 
@@ -26,27 +26,30 @@ function resolveDistanceParams(distance, defaultLevel = 'very_close') {
   const method = distance.method || 'radius';
   const entry  = DISTANCE_TABLE[level];
 
+  // Level-driven special cases first
+  if (level === 'same_building' || entry?.method === 'building_id') {
+    return { useBuildingId: true, level };
+  }
   if (!entry || entry.method === 'none') {
     return { pushback: true, level };
   }
-  if (entry.method === 'building_id') {
-    return { useBuildingId: true, level };
-  }
-  if (entry.method === 'circle' || level === 'adjacent') {
-    return { useIsochrone: false, radiusM: entry.radius_m, minutes: null, profile: null, level };
-  }
 
-  // explicit meters override
+  // ── Explicit user-provided values override the table (any level) ──
   if (distance.meters != null) {
     return { useIsochrone: false, radiusM: distance.meters, minutes: null, profile: null, level };
   }
-
-  if (method === 'isochrone') {
-    const minutes  = distance.minutes  != null ? distance.minutes  : entry.iso_min;
-    const profile  = distance.profile  || 'walking';
-    return { useIsochrone: true, radiusM: null, minutes, profile, level };
+  if (distance.minutes != null) {
+    return { useIsochrone: true, radiusM: null, minutes: distance.minutes, profile: distance.profile || 'walking', level };
   }
 
+  // ── Table-driven ──
+  // adjacent is always a circle (straight-line), never isochrone
+  if (entry.method === 'circle' || level === 'adjacent') {
+    return { useIsochrone: false, radiusM: entry.radius_m, minutes: null, profile: null, level };
+  }
+  if (method === 'isochrone') {
+    return { useIsochrone: true, radiusM: null, minutes: entry.iso_min, profile: distance.profile || 'walking', level };
+  }
   // radius (default)
   return { useIsochrone: false, radiusM: entry.radius_m, minutes: null, profile: null, level };
 }
