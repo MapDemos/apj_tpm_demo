@@ -568,8 +568,14 @@ class QueryEngine {
     const condDebug   = [];
     if (conditions?.length) {
       await Promise.all(conditions.map(async (c) => {
+        const key = c.text ?? c.type;
+        // road/water are evaluated per-candidate against the road/water layer
+        // (they're lines, not points) — no item collection here.
+        if (c.type === 'road' || c.type === 'water') {
+          condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: '候補ごと評価' });
+          return;
+        }
         const items = await this.mcp.collectCondition(c, condBbox);
-        const key   = c.text ?? c.type;
         condResults[key] = items;
         condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
         // [S] note if condition returned 0 items
@@ -627,6 +633,21 @@ class QueryEngine {
     return { kept, excludedNames };
   }
 
+  /**
+   * Decide how to match a road condition from its text.
+   * - 大通り/幹線/国道等の一般語 → 幹線道路のみ (majorOnly)
+   * - ○○通り/○○街道 等の固有名 → 名前一致
+   * - それ以外 → 任意の道路
+   */
+  _roadOpts(text) {
+    if (!text) return {};
+    const t = text.trim();
+    const MAJOR = ['大通り', '大通', '幹線', '幹線道路', '幹線道', '国道', '都道', '県道', '主要道路', '産業道路', '大道り'];
+    if (MAJOR.includes(t)) return { majorOnly: true };
+    if (/(通り|街道|バイパス|ライン|道路)$/.test(t) && t.length >= 3) return { name: t };
+    return {};
+  }
+
   _buildIntentLabel(target) {
     switch (target.query_intent) {
       case 'category_mansion':   return 'マンション（分譲・賃貸マンション等の中高層集合住宅）';
@@ -671,26 +692,43 @@ class QueryEngine {
     // [FF] isochrone optimization: compute polygon once per anchor+level
     const isoCache = new Map();
 
-    for (const cond of conditions) {
-      const condKey = `${cond.text ?? cond.type}`;
-      const condItems = condCandidates[condKey] ?? [];
-      if (condItems.length === 0) continue; // 0-item condition → all miss (S already notified)
+    const addHit = (t, label, nearestM, refM) => {
+      t.hit++;
+      t.hitLabels.push(label);
+      const closeness = nearestM != null ? Math.max(0, Math.min(1, 1 - nearestM / refM)) : 0.5;
+      t.closenessSum += closeness;
+    };
 
+    for (const cond of conditions) {
+      const label = cond.text ?? cond.type;
       const distParams = resolveDistanceParams(cond.distance, this.config.DEFAULT_LEVEL);
       const refM = distParams.radiusM
         ?? (distParams.minutes ? distParams.minutes * (speed[distParams.profile] || 80) : 250);
 
+      // road / water: per-candidate layer check (streets-v8 road/water layers)
+      if (cond.type === 'road' || cond.type === 'water') {
+        const roadOpts = cond.type === 'road' ? this._roadOpts(cond.text) : null;
+        for (const main of mainCandidates) {
+          const lat = main.latitude ?? main.lat, lng = main.longitude ?? main.lng;
+          const res = cond.type === 'road'
+            ? await this.mcp.roadNear(lat, lng, refM, roadOpts)
+            : await this.mcp.waterNear(lat, lng, refM);
+          if (res.matched && res.nearestM != null && res.nearestM <= refM) {
+            const t = tracker.get(String(main.id));
+            if (t) addHit(t, label, res.nearestM, refM);
+          }
+        }
+        continue;
+      }
+
+      // point-based conditions (poi / bus stop / intersection / signal)
+      const condItems = condCandidates[label] ?? [];
+      if (condItems.length === 0) continue; // 0-item → all miss (S already notified)
       for (const main of mainCandidates) {
         const { matched, nearestM } = await this.mcp.evaluateDistance(main, condItems, distParams, isoCache);
         if (matched) {
           const t = tracker.get(String(main.id));
-          if (t) {
-            t.hit++;
-            t.hitLabels.push(cond.text ?? cond.type);
-            // closeness ∈ [0,1]: 1 = right on top, 0 = at the threshold edge
-            const closeness = nearestM != null ? Math.max(0, Math.min(1, 1 - nearestM / refM)) : 0.5;
-            t.closenessSum += closeness;
-          }
+          if (t) addHit(t, label, nearestM, refM);
         }
       }
     }

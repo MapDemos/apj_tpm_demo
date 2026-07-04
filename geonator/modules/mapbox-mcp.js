@@ -2108,6 +2108,57 @@ class MapboxMCPClient {
   }
 
   /**
+   * Is there a road near (lat,lng)? Uses streets-v8 road layer (class-aware).
+   * @param {object} opts - { majorOnly?:bool (幹線のみ), name?:string (道路名一致) }
+   * @returns {Promise<{matched:boolean, nearestM:number|null}>}
+   */
+  async roadNear(lat, lng, radiusM, opts = {}) {
+    const r = Math.min(Math.max(Math.ceil(radiusM), 30), 500);
+    const url = `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
+      `?access_token=${this.token}&radius=${r}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road`;
+    try {
+      const res = await this._fetchTilequeryWithCache(url);
+      if (!res.ok) return { matched: false, nearestM: null };
+      const data = await res.json();
+      const MAJOR = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link']);
+      let best = null;
+      for (const f of (data.features || [])) {
+        const p = f.properties || {};
+        const cls = p.class;
+        if (!cls || MapboxMCPClient.NON_ROAD_CLASSES.has(cls)) continue;   // exclude rail/ferry
+        if (MapboxMCPClient.ROAD_CLASS_RANK[cls] == null) continue;         // roads only
+        if (opts.majorOnly && !MAJOR.has(cls)) continue;
+        if (opts.name && !((p.name || '').includes(opts.name))) continue;
+        const d = Math.round(p.tilequery?.distance ?? 9999);
+        if (best === null || d < best) best = d;
+      }
+      return { matched: best !== null, nearestM: best };
+    } catch { return { matched: false, nearestM: null }; }
+  }
+
+  /**
+   * Is there water near (lat,lng)? Uses streets-v8 water/waterway layer.
+   * (川/海/湖の区別はデータ上つかない — 有無と距離のみ。)
+   * @returns {Promise<{matched:boolean, nearestM:number|null}>}
+   */
+  async waterNear(lat, lng, radiusM) {
+    const r = Math.min(Math.max(Math.ceil(radiusM), 30), 1000);
+    const url = `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
+      `?access_token=${this.token}&radius=${r}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=water,waterway`;
+    try {
+      const res = await this._fetchTilequeryWithCache(url);
+      if (!res.ok) return { matched: false, nearestM: null };
+      const data = await res.json();
+      let best = null;
+      for (const f of (data.features || [])) {
+        const d = Math.round(f.properties?.tilequery?.distance ?? 9999);
+        if (best === null || d < best) best = d;
+      }
+      return { matched: best !== null, nearestM: best };
+    } catch { return { matched: false, nearestM: null }; }
+  }
+
+  /**
    * Fetch all transit entrances (stop_type=entrance) near a station coordinate.
    * Used by QueryEngine._resolveStation.
    * @param {number} lat
