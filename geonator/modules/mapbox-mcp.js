@@ -811,6 +811,20 @@ class MapboxMCPClient {
       ? proximity
       : (bbox?.length >= 4 ? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2] : null);
 
+    // ── 駅出口: transit_stop_label (stop_type=entrance) を出口名でフィルタ ──
+    // 「B1出口」→ 実データはtransit_stop_labelにname="B1"。一般POI検索では拾えない。
+    if (queryIntent === 'transit_entrance' && effectiveProximity) {
+      const [lng, lat] = effectiveProximity;
+      const entrances = await this.tilequeryTransitEntrances(lat, lng, 500);
+      const q = (queries[0] || '').replace(/(出口|口)\s*$/,'').trim(); // 「B1出口」→「B1」
+      const norm = s => MapboxMCPClient._normalizeName(s);
+      const filtered = q
+        ? entrances.filter(e => e.name && norm(e.name).includes(norm(q)))
+        : entrances;
+      const items = filtered.map(e => ({ name: e.name, latitude: e.lat, longitude: e.lng }));
+      return this._minify({ source: 'transit_stop_label (entrance)', count: items.length, items });
+    }
+
     // ── バス停ロケーション（名前なし・位置関係）: transit_stop_label mode=bus ──
     if (queryIntent === 'category_busstop_location' && effectiveProximity) {
       const [lng, lat] = effectiveProximity;
@@ -2317,7 +2331,7 @@ class MapboxMCPClient {
       case 'category_busstop':    return 'category_busstop_location'; // individual bus-stop points
       case 'intersection':        return 'intersection';
       case 'signal':              return 'signal';
-      case 'transit_entrance':    return 'specific'; // TODO: transit_stop_label entrance path
+      case 'transit_entrance':    return 'transit_entrance'; // transit_stop_label entrance layer
       default:                    return 'specific'; // poi / road / water
     }
   }
