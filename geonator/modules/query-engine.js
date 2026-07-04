@@ -289,9 +289,11 @@ class QueryEngine {
       case 'station':
         return await this._resolveStation(anchor);
       case 'locality':
+      case 'address':
+        // Area anchors (地名・丁目) — homonym disambiguation by municipality
+        // (台東区入谷 vs 足立区入谷 are both 東京都 → must compare at 区/市 level).
         return await this._resolveLocality(anchor);
       case 'poi':
-      case 'address':
         return await this._resolvePoiOrAddress(anchor, scopeBbox);
       default:
         return null;
@@ -344,26 +346,26 @@ class QueryEngine {
   }
 
   async _resolveLocality(anchor) {
-    const sbResult = await this.mcp.searchBox(anchor.text, { types: 'place,locality,neighborhood,district' });
+    const sbResult = await this.mcp.searchBox(anchor.text, { types: 'place,locality,neighborhood,district,address' });
     if (!sbResult?.features?.length) return null;
 
     const features = sbResult.features;
 
-    // Group by prefecture — a TRUE homonym is the same name in a DIFFERENT
-    // prefecture (鎌倉市/神奈川 vs 葛飾区鎌倉/東京). Sub-localities inside one
-    // prefecture are NOT alternatives — pick the broadest (place-level) there.
-    const byPref = new Map();
+    // Group by MUNICIPALITY (都道府県+市区町村). A true homonym is the same name
+    // in a different municipality — 台東区入谷 vs 足立区入谷 are BOTH 東京都, so
+    // prefecture alone is too coarse; compare at the 区/市 level.
+    const byMuni = new Map();
     for (const f of features) {
-      const pref = f.properties?.prefecture || f.properties?.full_address || f.properties?.name;
-      if (!byPref.has(pref)) byPref.set(pref, []);
-      byPref.get(pref).push(f);
+      const key = this._municipalityKey(f.properties?.full_address || f.properties?.name || '');
+      if (!byMuni.has(key)) byMuni.set(key, []);
+      byMuni.get(key).push(f);
     }
-    // representative per prefecture: prefer a place-level match, else the first
-    const reps = [...byPref.values()].map(group =>
+    // representative per municipality: prefer place-level, else the first
+    const reps = [...byMuni.values()].map(group =>
       group.find(f => f.properties?.feature_type === 'place') || group[0]
     );
 
-    // [B2] genuine homonym across prefectures → Mode1 button
+    // [B2] genuine homonym across municipalities → Mode1 button
     if (reps.length > 1 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
       this._clarifyCount++;
       const choices = reps.map(f => f.properties.full_address || f.properties.name);
@@ -372,8 +374,15 @@ class QueryEngine {
       return [this._featureToBboxPoint(reps[idx >= 0 ? idx : 0])];
     }
 
-    // Single prefecture → use its representative (broadest match), no buttons
+    // Single municipality → use its representative, no buttons
     return [this._featureToBboxPoint(reps[0])];
+  }
+
+  /** Municipality key: 都道府県 + 最初の市区町村 (e.g. 東京都台東区). Falls back to raw. */
+  _municipalityKey(name) {
+    const clean = (name || '').replace(/〒[\d-]*/g, '').trim();
+    const m = clean.match(/(..[都道府県])((?:.+?郡)?.+?[市区町村])/);
+    return m ? (m[1] + m[2]) : clean;
   }
 
   async _resolvePoiOrAddress(anchor, scopeBbox = null) {
