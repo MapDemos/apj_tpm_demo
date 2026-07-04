@@ -2196,8 +2196,21 @@ class MapboxMCPClient {
    */
   async collectCondition(condition, bbox) {
     const proximity = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
-    const queries   = condition.text ? [condition.text] : [];
-    const intent    = condition.query_intent || this._condTypeToIntent(condition.type);
+
+    // The search PATH is driven by condition.type (JS-driven), NOT by L1's query_intent.
+    const intent = this._condTypeToIntent(condition.type);
+
+    // Generic category words ("交差点"/"信号"/"バス停" etc.) must NOT be used as a
+    // name filter / search query — they would filter everything out. Only pass a
+    // query when the text is a SPECIFIC name (e.g. "○○交差点", "ローソン").
+    const GENERIC_WORDS = [
+      '交差点', '信号', '信号機', 'バス停', 'バス停留所', '停留所',
+      '川', '海', '運河', '橋', '道', '道路', '通り', '大通り', '駅出口', '出口',
+    ];
+    let text = condition.text || null;
+    if (text && GENERIC_WORDS.includes(text.trim())) text = null;
+    const queries = text ? [text] : [];
+
     const resultStr = await this._searchNearbyPOI(
       queries, proximity, bbox, intent, null, false
     );
@@ -2206,11 +2219,11 @@ class MapboxMCPClient {
 
   _condTypeToIntent(type) {
     switch (type) {
-      case 'category_busstop':    return 'category_busstop_location';
+      case 'category_busstop':    return 'category_busstop_location'; // individual bus-stop points
       case 'intersection':        return 'intersection';
       case 'signal':              return 'signal';
-      case 'transit_entrance':    return 'specific';
-      default:                    return 'specific';
+      case 'transit_entrance':    return 'specific'; // TODO: transit_stop_label entrance path
+      default:                    return 'specific'; // poi / road / water
     }
   }
 

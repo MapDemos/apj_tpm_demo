@@ -320,6 +320,17 @@ html, body {
   border: 1px solid rgba(239,68,68,.3);
   color: #fca5a5;
 }
+.message.debug { align-self: stretch; align-items: stretch; }
+.message.debug .message-bubble {
+  background: rgba(139,92,246,.07);
+  border: 1px dashed rgba(139,92,246,.35);
+  color: #c4b5fd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-width: 100%;
+}
 
 /* Example chips */
 

@@ -38,11 +38,13 @@ class QueryEngine {
   async run(userText) {
     this._previousText = userText;
     this._clarifyCount = 0;
+    this._dbgReport = { schema: null, proximity: null, target: null, conditions: [], evaluation: null };
     this.ui.clearResults();
 
     const schema = await this._parseAndValidate(userText, null);
     if (!schema) return; // clarification was handled inside
 
+    this._dbgReport.schema = schema;
     await this._executeSearch(schema, userText);
   }
 
@@ -151,6 +153,15 @@ class QueryEngine {
     // [3-A4] compute dual bbox (C-2)
     const bboxes = this._computeDualBbox(this._cache.bbox, schema);
 
+    // Debug: proximity resolution info
+    this._dbgReport.proximity = {
+      anchors:      schema.proximity.anchors.map(a => `${a.text}(${a.type})`),
+      pointCount:   this._cache.bbox.resolvedPoints?.length ?? 0,
+      targetBboxM:  this._bboxWidthM(bboxes.targetBbox),
+      condBboxM:    this._bboxWidthM(bboxes.condBbox),
+      bearing:      schema.proximity.bearing_filter || null,
+    };
+
     // Visualize search area (target = tight, condition = wide) + fit map
     this.ui.drawBBox?.(bboxes.condBbox);
     this.ui.drawBBox?.(bboxes.targetBbox);
@@ -174,12 +185,26 @@ class QueryEngine {
     const results = await this._evaluate(schema, this._cache.mainCandidates, this._cache.condCandidates);
     this.ui.drawPolygons?.(this.mcp._evalPolygons);
 
+    // Debug: evaluation breakdown
+    this._dbgReport.evaluation = {
+      full:    results.full.map(c    => ({ name: c.name || '(名前なし)', labels: c._matchInfo?.labels ?? [] })),
+      partial: results.partial.map(c => ({ name: c.name || '(名前なし)', hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [] })),
+      noneCount: results.none.length,
+    };
+
     // [4] show results
     this._showResults(results, schema);
     this.ui.refreshCounts?.();
+    this.ui.showDebugReport?.(this._dbgReport);
 
     // [5] feedback
     await this._handleFeedback(schema, originalText);
+  }
+
+  _bboxWidthM(bbox) {
+    if (!bbox) return 0;
+    const cy = (bbox[1] + bbox[3]) / 2;
+    return Math.round(Math.abs(bbox[2] - bbox[0]) * 111320 * Math.cos(cy * Math.PI / 180));
   }
 
   // ─────────────────────────────────────────────
@@ -385,25 +410,38 @@ class QueryEngine {
 
     // Conditions collection (wide bbox) — parallel
     const condResults = {};
+    const condDebug   = [];
     if (conditions?.length) {
       await Promise.all(conditions.map(async (c) => {
         const items = await this.mcp.collectCondition(c, condBbox);
-        condResults[c.text ?? c.type] = items;
+        const key   = c.text ?? c.type;
+        condResults[key] = items;
+        condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
         // [S] note if condition returned 0 items
         if (!items || items.length === 0) {
-          this.ui.showMessage(`「${c.text ?? c.type}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`);
+          this.ui.showMessage(`「${key}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`);
         }
       }));
     }
 
-    // [3-B1] noise removal: prefix filter (JS) + L2 (LLM)
-    const mainFiltered = await this._denoiseMain(target, mainRaw);
+    // [3-B1] noise removal: L2 intent check
+    const { kept, excludedNames } = await this._denoiseMain(target, mainRaw);
 
-    return { main: mainFiltered, conditions: condResults };
+    // Debug: target + condition collection breakdown
+    this._dbgReport.target = {
+      intent:        this._buildIntentLabel(target),
+      raw:           mainRaw.length,
+      excluded:      excludedNames.length,
+      excludedNames: excludedNames.slice(0, 40),
+      kept:          kept.length,
+    };
+    this._dbgReport.conditions = condDebug;
+
+    return { main: kept, conditions: condResults };
   }
 
   async _denoiseMain(target, candidates) {
-    if (!candidates || candidates.length === 0) return [];
+    if (!candidates || candidates.length === 0) return { kept: [], excludedNames: [] };
 
     // L2 intent check: judge by query intent, but only remove candidates that
     // CLEARLY don't match (ambiguous kept — recall priority). Per building type
@@ -412,9 +450,14 @@ class QueryEngine {
     const slim     = candidates.map(c => ({ id: c.id, name: c.name ?? '' }));
     const mismatch = await this.llm.findIntentMismatches(intentLabel, slim);
 
-    if (mismatch === null) return candidates; // parse failure → keep all (conservative)
+    if (mismatch === null) return { kept: candidates, excludedNames: [] }; // parse failure → keep all
     const drop = new Set(mismatch.map(String));
-    return candidates.filter(c => !drop.has(String(c.id)));
+    const kept = [], excludedNames = [];
+    for (const c of candidates) {
+      if (drop.has(String(c.id))) excludedNames.push(c.name || '(名前なし)');
+      else kept.push(c);
+    }
+    return { kept, excludedNames };
   }
 
   _buildIntentLabel(target) {
@@ -501,15 +544,22 @@ class QueryEngine {
       return;
     }
 
-    if (full.length === 0 && partial.length === 0 && none.length > 0) {
-      // [L] main exists but 0 conditions matched
+    const hasMatch = full.length > 0 || partial.length > 0;
+
+    if (!hasMatch && none.length > 0) {
+      // [L] main exists but 0 conditions matched → show 参考 as fallback
       this.ui.showMessage(UI_TEXT.no_condition_match);
     }
 
-    const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
-    this.ui.showResults(full, partial, none, schema.unsupported, conditionLabels);
+    // 参考(none) is only shown when there is NO full/partial match (else too many).
+    const displayNone = hasMatch ? [] : none;
 
-    const msg = `${totalMain}件見つかりました（全マッチ：${full.length}件、部分マッチ：${partial.length}件、参考：${none.length}件）`;
+    const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
+    this.ui.showResults(full, partial, displayNone, schema.unsupported, conditionLabels);
+
+    const msg = hasMatch
+      ? `${full.length + partial.length}件見つかりました（全マッチ：${full.length}件、部分マッチ：${partial.length}件）`
+      : `条件に一致する候補はありませんでしたが、範囲内の候補${displayNone.length}件を参考として表示します。`;
     this.ui.showMessage(msg);
   }
 

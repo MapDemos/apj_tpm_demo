@@ -199,7 +199,74 @@ class LocationFinderApp {
           self.map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 80, duration: 900, maxZoom: 16 });
         } catch(_) {}
       },
+      showDebugReport(report) {
+        if (!self._debugMode || !report) return;
+        self.addMessage('debug', self._renderDebugReport(report));
+      },
     };
+  }
+
+  /**
+   * Render the QueryEngine debug report into a readable text block.
+   * Shows: parsed QuerySchema, per-element processing, query hit/exclude counts,
+   * and evaluation partial-match breakdown.
+   */
+  _renderDebugReport(r) {
+    const L = [];
+    L.push('🔧 デバッグ情報');
+
+    // ── QuerySchema ──
+    if (r.schema) {
+      const s = r.schema;
+      const anchors = (s.proximity?.anchors || []).map(a => `${a.text}[${a.type}/${a.specificity}]`).join(', ');
+      L.push('');
+      L.push('【QuerySchema】');
+      L.push(`・proximity: ${anchors}${s.proximity?.bearing_filter ? ' 方角=' + s.proximity.bearing_filter : ''}`);
+      L.push(`・target: ${s.target?.text}  intent=${s.target?.query_intent}`);
+      (s.conditions || []).forEach(c => {
+        const d = c.distance || {};
+        L.push(`・condition: ${c.text ?? c.type} [${c.type}]  距離=${d.level}/${d.method}${d.minutes ? ' ' + d.minutes + '分' : ''}${d.profile ? ' ' + d.profile : ''}`);
+      });
+      if (s.unsupported?.length) L.push(`・unsupported: ${s.unsupported.join('、')}`);
+    }
+
+    // ── 一次検索 ──
+    if (r.proximity) {
+      const p = r.proximity;
+      L.push('');
+      L.push('【一次検索: proximity解決】');
+      L.push(`・アンカー: ${p.anchors.join(', ')}（解決点 ${p.pointCount}）`);
+      L.push(`・target収集bbox: 約${p.targetBboxM}m / condition収集bbox: 約${p.condBboxM}m${p.bearing ? ' / 方角カット=' + p.bearing : ''}`);
+    }
+
+    // ── Step1 収集 ──
+    if (r.target) {
+      const t = r.target;
+      L.push('');
+      L.push('【Step1: target収集＋L2意図チェック】');
+      L.push(`・意図: ${t.intent}`);
+      L.push(`・取得 ${t.raw}件 → L2で不一致 ${t.excluded}件 除外 → 残 ${t.kept}件`);
+      if (t.excludedNames.length) L.push(`　除外例: ${t.excludedNames.slice(0, 12).join('、')}${t.excluded > 12 ? ' …' : ''}`);
+    }
+    if (r.conditions?.length) {
+      L.push('');
+      L.push('【Step1: condition収集】');
+      r.conditions.forEach(c => {
+        L.push(`・${c.label} [${c.type}/${c.level}]: ${c.found}件`);
+      });
+    }
+
+    // ── Step2 評価 ──
+    if (r.evaluation) {
+      const e = r.evaluation;
+      L.push('');
+      L.push('【Step2: 距離評価】');
+      L.push(`・全一致 ${e.full.length}件 / 部分一致 ${e.partial.length}件 / 参考 ${e.noneCount}件`);
+      e.full.slice(0, 15).forEach(f => L.push(`　🟢 ${f.name} ← [${f.labels.join(', ')}]`));
+      e.partial.slice(0, 15).forEach(p => L.push(`　🟡 ${p.name} (${p.hit}/${p.total}) ← [${p.labels.join(', ')}]`));
+    }
+
+    return L.join('\n');
   }
 
   /**
