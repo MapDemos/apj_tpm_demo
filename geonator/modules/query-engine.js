@@ -293,6 +293,10 @@ class QueryEngine {
         // Area anchors (地名・丁目) — homonym disambiguation by municipality
         // (台東区入谷 vs 足立区入谷 are both 東京都 → must compare at 区/市 level).
         return await this._resolveLocality(anchor);
+      case 'intersection':
+        // Named intersection as reference (「入谷二丁目の交差点」= the intersection
+        // NAMED 入谷二丁目). Resolve its area, then find that named intersection.
+        return await this._resolveIntersectionAnchor(anchor);
       case 'poi':
         return await this._resolvePoiOrAddress(anchor, scopeBbox);
       default:
@@ -376,6 +380,30 @@ class QueryEngine {
 
     // Single municipality → use its representative, no buttons
     return [this._featureToBboxPoint(reps[0])];
+  }
+
+  /**
+   * Resolve a named intersection as a proximity anchor.
+   * 「入谷二丁目の交差点」→ resolve 入谷二丁目 area (with 台東/足立 disambiguation),
+   * then find the intersection NAMED 入谷二丁目 within it.
+   */
+  async _resolveIntersectionAnchor(anchor) {
+    // 1. Resolve the area (reuses municipality disambiguation)
+    const areaPoints = await this._resolveLocality({ type: 'locality', text: anchor.text });
+    if (!areaPoints || areaPoints.length === 0) return null;
+    const areaBbox = this.mcp.resolveBBox({ points: areaPoints, marginM: 0 });
+
+    // 2. Find intersections whose name matches (road layer, class=intersection)
+    const items = await this.mcp.collectCondition({ type: 'intersection', text: anchor.text }, areaBbox);
+    if (!items || items.length === 0) {
+      this.ui.showMessage(`「${anchor.text}」という名前の交差点が見つかりませんでした。`);
+      return null;
+    }
+
+    // Nearest matching intersection (items are distance-sorted from area center)
+    const best = items[0];
+    const radiusM = DISTANCE_TABLE.nearby.radius_m;
+    return [{ lng: best.longitude ?? best.lng, lat: best.latitude ?? best.lat, radiusM }];
   }
 
   /** Municipality key: 都道府県 + 最初の市区町村 (e.g. 東京都台東区). Falls back to raw. */

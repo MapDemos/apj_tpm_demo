@@ -4,7 +4,7 @@
  */
 
 const SCHEMA_ENUMS = {
-  anchor_type:    ['station', 'poi', 'address', 'locality'],
+  anchor_type:    ['station', 'poi', 'address', 'locality', 'intersection'],
   specificity:    ['specific', 'generic'],
   target_type:    ['residential_building', 'commercial_building', 'general_poi'],
   query_intent:   ['category_mansion', 'category_apartment', 'category_building', 'specific', 'category_busstop', 'category_busstop_location', 'intersection', 'signal'],
