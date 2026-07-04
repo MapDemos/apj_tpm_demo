@@ -642,27 +642,27 @@ class MapboxMCPClient {
   }
 
   /**
-   * Normalize a name for dedup: 全角→半角、空白・中点・ハイフン・括弧を除去、小文字化。
-   * 「鮨・魚菜きと」「鮨 魚菜きと」→ 同一キー。「スシロー」の長音(ー)は保持。
+   * Normalize a name for dedup / matching:
+   * - NFKC（全角英数→半角、半角カナ→全角カナ・濁点結合）
+   * - ひらがな→カタカナ（すし→スシ、ﾌｧﾐﾏ→ファミマ→そのまま）
+   * - 空白・中点・ハイフン・括弧を除去、小文字化。長音(ー)は保持。
+   * 注: 漢字↔かな（寿司↔すし）は統一しない → それはQE(queries展開)で担保。
    */
   static _normalizeName(name) {
     if (!name) return '';
-    let s = MapboxMCPClient._cleanName(name) || '';
-    // 全角英数記号 → 半角
-    s = s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+    let s = (MapboxMCPClient._cleanName(name) || '').normalize('NFKC');
+    // ひらがな → カタカナ
+    s = s.replace(/[ぁ-ゖ]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0x60));
     // 空白・中点・各種ハイフン・括弧類を除去（長音ー(U+30FC)は残す）
-    s = s.replace(/[\s　・･‐-―−()\[\]「」【】\-]/g, '');
+    s = s.replace(/[\s・‐-―−()\[\]「」【】\-]/g, '');
     return s.toLowerCase();
   }
 
   _matchesAnyQuery(name, queries) {
     if (!name || !queries?.length) return false;
-    const cleanName = MapboxMCPClient._cleanName(name);
-    const nameLower = cleanName.toLowerCase();
-    const matched = queries.some(q => q && nameLower.includes(MapboxMCPClient._cleanName(q).toLowerCase()));
-    // (Per-item EXCLUDED logging removed — grid name-filtering rejects hundreds
-    //  of POIs per specific-POI condition search, which spammed the console.)
-    return matched;
+    // Normalized matching so 表記揺れ（全半角/かなカナ/スペース）を吸収する。
+    const nn = MapboxMCPClient._normalizeName(name);
+    return queries.some(q => q && nn.includes(MapboxMCPClient._normalizeName(q)));
   }
 
   // ── Helper: class → category 文字列 ──
