@@ -746,8 +746,9 @@ class QueryEngine {
       // point-based conditions (poi / bus stop / intersection / signal)
       const condItems = condCandidates[label] ?? [];
       if (condItems.length === 0) continue; // 0-item → all miss (S already notified)
+      const dir = cond.direction || null; // 「南側にアパホテル」→ item must be south of candidate
       for (const main of mainCandidates) {
-        const { matched, nearestM } = await this.mcp.evaluateDistance(main, condItems, distParams, isoCache);
+        const { matched, nearestM } = await this.mcp.evaluateDistance(main, condItems, distParams, isoCache, dir);
         if (matched) {
           const t = tracker.get(String(main.id));
           if (t) addHit(t, label, nearestM, refM);

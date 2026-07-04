@@ -129,6 +129,7 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close') {
       } else if (c.text && !c.queries.includes(c.text)) {
         c.queries.unshift(c.text);
       }
+      if (c.direction === undefined) c.direction = null;
     }
   }
 

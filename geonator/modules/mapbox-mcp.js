@@ -2369,9 +2369,11 @@ class MapboxMCPClient {
    * @param {Array<{ lat, lng }>} conditionItems
    * @param {{ useIsochrone, useBuildingId, radiusM, minutes, profile, pushback }} distParams
    * @param {Map} isoCache
+   * @param {string|null} direction - 'north'|'south'|'east'|'west': require the item
+   *   to be on that side of the candidate (half-plane). null = any direction.
    * @returns {Promise<{ matched: boolean, nearestM: number|null }>}
    */
-  async evaluateDistance(mainCandidate, conditionItems, distParams, isoCache = new Map()) {
+  async evaluateDistance(mainCandidate, conditionItems, distParams, isoCache = new Map(), direction = null) {
     const NO = { matched: false, nearestM: null };
     if (!conditionItems || conditionItems.length === 0) return NO;
     if (distParams.pushback) return NO;
@@ -2381,13 +2383,24 @@ class MapboxMCPClient {
     if (lat == null || lng == null) return NO;
 
     const condLngLat = (c) => [c.longitude ?? c.lng, c.latitude ?? c.lat];
+    // Directional half-plane filter: 「南側にアパホテル」→ item must be south of candidate.
+    const inDirection = ([cLng, cLat]) => {
+      if (!direction) return true;
+      switch (direction) {
+        case 'north': return cLat >  lat;
+        case 'south': return cLat <  lat;
+        case 'east':  return cLng >  lng;
+        case 'west':  return cLng <  lng;
+        default:      return true;
+      }
+    };
     const pt = turf.point([lng, lat]);
 
-    // Nearest straight-line distance to any condition item (for scoring)
+    // Nearest straight-line distance to any (direction-filtered) condition item
     let nearestM = null;
     for (const c of conditionItems) {
       const [cLng, cLat] = condLngLat(c);
-      if (cLng == null || cLat == null) continue;
+      if (cLng == null || cLat == null || !inDirection([cLng, cLat])) continue;
       const dM = turf.distance(pt, turf.point([cLng, cLat]), { units: 'meters' });
       if (nearestM == null || dM < nearestM) nearestM = dM;
     }
@@ -2398,6 +2411,7 @@ class MapboxMCPClient {
       if (!mainBuildingId) return { matched: false, nearestM };
       for (const c of conditionItems) {
         const [cLng, cLat] = condLngLat(c);
+        if (!inDirection([cLng, cLat])) continue;
         const cId = await this._getBuildingId(cLat, cLng);
         if (cId && cId === mainBuildingId) return { matched: true, nearestM: 0 };
       }
@@ -2411,7 +2425,7 @@ class MapboxMCPClient {
       this._evalPolygons.push(circle);
       for (const c of conditionItems) {
         const [cLng, cLat] = condLngLat(c);
-        if (cLng != null && cLat != null &&
+        if (cLng != null && cLat != null && inDirection([cLng, cLat]) &&
             turf.booleanPointInPolygon(turf.point([cLng, cLat]), circle)) {
           return { matched: true, nearestM };
         }
@@ -2443,7 +2457,7 @@ class MapboxMCPClient {
 
     for (const c of conditionItems) {
       const [cLng, cLat] = condLngLat(c);
-      if (cLng != null && cLat != null &&
+      if (cLng != null && cLat != null && inDirection([cLng, cLat]) &&
           turf.booleanPointInPolygon(turf.point([cLng, cLat]), polygon)) {
         return { matched: true, nearestM };
       }
