@@ -28,7 +28,8 @@ class QueryEngine {
     // Cache layers (K)
     this._cache = { bbox: null, mainCandidates: null, condCandidates: null, schema: null };
     this._clarifyCount = 0;
-    this._previousText = null; // for L1 re-parse
+    this._previousText = null;    // for L1 re-parse
+    this._awaitingClarify = false; // last run ended asking for more info (main-input answer merges)
   }
 
   // ─────────────────────────────────────────────
@@ -36,18 +37,25 @@ class QueryEngine {
   // ─────────────────────────────────────────────
 
   async run(userText) {
-    this._previousText = userText;
+    // If the previous run ended waiting for clarification (e.g. "池袋は複数あります"),
+    // the user's main-input answer (「池袋駅」) is merged with the original query so
+    // target/conditions are retained.
+    const merged = (this._awaitingClarify && this._previousText)
+      ? `${this._previousText}\n追加情報：${userText}`
+      : userText;
+    this._previousText = merged;
+    this._awaitingClarify = false;
     this._clarifyCount = 0;
     this._dbgReport = { schema: null, proximity: null, target: null, conditions: [], evaluation: null };
     this.llm.resetStats?.();
     this._runStart = Date.now();
     this.ui.clearResults();
 
-    const schema = await this._parseAndValidate(userText, null);
+    const schema = await this._parseAndValidate(merged, null);
     if (!schema) return; // clarification was handled inside
 
     this._dbgReport.schema = schema;
-    await this._executeSearch(schema, userText);
+    await this._executeSearch(schema, merged);
   }
 
   // ─────────────────────────────────────────────
@@ -255,6 +263,7 @@ class QueryEngine {
       if (points === null) return null; // clarification/disambiguation in progress or aborted
       if (points.length === 0) {
         this.ui.showMessage(`${anchor.text}が見つかりませんでした。別の地名や駅名をお試しください。`);
+        this._awaitingClarify = true; // next answer merges with this query
         return null;
       }
       resolvedPoints.push(...points);
@@ -449,6 +458,7 @@ class QueryEngine {
     // broad proximity (its bbox is used when available).
     if (['region', 'country'].includes(ftype)) {
       this.ui.showMessage(UI_TEXT.proximity_too_broad);
+      this._awaitingClarify = true;
       return null;
     }
     if (feature.properties?.bbox) return [this._featureToBboxPoint(feature)];
@@ -500,6 +510,7 @@ class QueryEngine {
     }
     this._clarifyCount++;
     this.ui.showMessage(`「${anchor.text}」は複数あります。地名や駅名も一緒に教えてください。`);
+    this._awaitingClarify = true; // next main-input answer merges with this query
   }
 
   // ─────────────────────────────────────────────
