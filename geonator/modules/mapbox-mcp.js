@@ -641,9 +641,8 @@ class MapboxMCPClient {
     const cleanName = MapboxMCPClient._cleanName(name);
     const nameLower = cleanName.toLowerCase();
     const matched = queries.some(q => q && nameLower.includes(MapboxMCPClient._cleanName(q).toLowerCase()));
-    if (!matched && this.config.DEBUG) {
-      console.log(`[TQ filter] EXCLUDED: "${cleanName}" (queries: [${queries.slice(0,3).join(', ')}...])`);
-    }
+    // (Per-item EXCLUDED logging removed — grid name-filtering rejects hundreds
+    //  of POIs per specific-POI condition search, which spammed the console.)
     return matched;
   }
 

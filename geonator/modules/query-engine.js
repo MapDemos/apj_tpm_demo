@@ -446,12 +446,25 @@ class QueryEngine {
     // L2 intent check: judge by query intent, but only remove candidates that
     // CLEARLY don't match (ambiguous kept — recall priority). Per building type
     // (マンション/アパート/ビル) the intent label differs so judgment is precise.
+    //
+    // Building searches can return 500+ POIs; a single L2 call can't reliably
+    // process them all, so batch into chunks and run in parallel (each batch
+    // gets a focused list the LLM can actually judge).
     const intentLabel = this._buildIntentLabel(target);
-    const slim     = candidates.map(c => ({ id: c.id, name: c.name ?? '' }));
-    const mismatch = await this.llm.findIntentMismatches(intentLabel, slim);
+    const BATCH = 40;
+    const batches = [];
+    for (let i = 0; i < candidates.length; i += BATCH) batches.push(candidates.slice(i, i + BATCH));
 
-    if (mismatch === null) return { kept: candidates, excludedNames: [] }; // parse failure → keep all
-    const drop = new Set(mismatch.map(String));
+    const results = await Promise.all(batches.map(b =>
+      this.llm.findIntentMismatches(intentLabel, b.map(c => ({ id: c.id, name: c.name ?? '' })))
+    ));
+
+    const drop = new Set();
+    results.forEach(mismatch => {
+      if (mismatch === null) return; // failed batch → keep all in it (conservative)
+      mismatch.forEach(id => drop.add(String(id)));
+    });
+
     const kept = [], excludedNames = [];
     for (const c of candidates) {
       if (drop.has(String(c.id))) excludedNames.push(c.name || '(名前なし)');
