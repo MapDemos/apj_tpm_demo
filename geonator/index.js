@@ -299,11 +299,20 @@ class LocationFinderApp {
     // ── Step1 収集 ──
     if (r.target) {
       const t = r.target;
+      const fmt = (arr) => (arr || []).map(i => typeof i === 'string' ? i : `${i.name}${i.cls ? '[' + i.cls + ']' : ''}${i.distance != null ? ' ' + i.distance + 'm' : ''}`);
       L.push('');
       L.push('【Step1: target収集＋L2意図チェック】');
       L.push(`・意図: ${t.intent}`);
+      if (t.sbCount != null || t.tqCount != null) {
+        L.push(`・API内訳: Search Box ${t.sbCount ?? 0}件 / Tilequery採用 ${t.tqCount ?? 0}件 / Tilequery除外 ${t.tqDroppedCount ?? 0}件${t.wantClasses ? '（カテゴリclass=' + t.wantClasses.join(',') + '）' : ''}`);
+      }
+      // Raw fetched lists (before L2), so recall gaps are visible.
+      if (t.sbItems?.length)   L.push(`　▸ Search Box取得(${t.sbItems.length}): ${fmt(t.sbItems).join('、')}`);
+      if (t.tqItems?.length)   L.push(`　▸ Tilequery採用(${t.tqItems.length}): ${fmt(t.tqItems).join('、')}`);
+      if (t.tqDropped?.length) L.push(`　▸ Tilequery除外(名前/class不一致 ${t.tqDropped.length}): ${fmt(t.tqDropped).join('、')}`);
       L.push(`・取得 ${t.raw}件 → L2で不一致 ${t.excluded}件 除外 → 残 ${t.kept}件`);
-      if (t.excludedNames.length) L.push(`　除外例: ${t.excludedNames.slice(0, 12).join('、')}${t.excluded > 12 ? ' …' : ''}`);
+      if (t.excludedNames?.length) L.push(`　L2除外: ${t.excludedNames.slice(0, 20).join('、')}${t.excluded > 20 ? ' …' : ''}`);
+      if (t.keptNames?.length)     L.push(`　残候補: ${t.keptNames.join('、')}`);
     }
     if (r.conditions?.length) {
       L.push('');
@@ -379,12 +388,19 @@ class LocationFinderApp {
       `<button class="choice-btn step-next-btn">▶ 次へ</button></div></div>`;
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
+    // Make the pause obvious: the "thinking" spinner would otherwise keep
+    // spinning and look like a hang while we wait for the click.
+    this._updateThinking(this._lang === 'ja'
+      ? '⏸ ステップ待機中 — チャットの「▶ 次へ」で継続'
+      : '⏸ Paused — click "▶ Next" in the chat to continue');
     const btn = wrapper.querySelector('.step-next-btn');
     // Register so toggling debug off (or reset) can release a pending step.
     const done = () => {
       if (this._debugStepResolve !== done) return; // already released
       this._debugStepResolve = null;
       btn.disabled = true;
+      btn.textContent = '✓';
+      this._updateThinking(this._lang === 'ja' ? '処理中…' : 'Processing…');
       onNext();
     };
     this._debugStepResolve = done;

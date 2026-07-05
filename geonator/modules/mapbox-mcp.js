@@ -703,6 +703,41 @@ class MapboxMCPClient {
     );
   }
 
+  // ── streets-v8 poi_label `class` の有効値（全21種・公式）──
+  // POI_CATEGORY_CLASS で使う class 名はこの集合に含まれていること（タイポ防止）。
+  static POI_LABEL_CLASSES = new Set([
+    'arts_and_entertainment', 'building', 'commercial_services', 'education',
+    'food_and_drink', 'food_and_drink_stores', 'general', 'historic', 'industrial',
+    'landmark', 'lodging', 'medical', 'motorist', 'park_like', 'place_like',
+    'public_facilities', 'religion', 'sport_and_leisure', 'store_like', 'visitor_amenities',
+  ]);
+
+  // ── Category words → streets-v8 poi_label class ──
+  // For category POI targets (ホテル/カフェ等), many members don't contain the
+  // category word in their name (東横イン, ドーミーイン…). Keeping poi_label hits
+  // by class recovers them; L2 then rates relevance. Keys are matched by substring
+  // against the normalized query, so both "ホテル" and "ビジネスホテル" hit lodging.
+  // 慎重に1:1に近いカテゴリのみ登録する（food_and_drink 等は飲食全般で広すぎるので、
+  // 精度優先で今は入れない。必要になったら都度追加）。
+  static POI_CATEGORY_CLASS = [
+    { words: ['ホテル', '宿', '旅館', 'ホステル', '民宿', 'ゲストハウス', 'ロッジ', '宿泊'], classes: ['lodging'] },
+  ];
+
+  /**
+   * If any query is a known category word, return the poi_label class(es) that
+   * category maps to (so we can keep tilequery hits by class, not just name).
+   * @param {string[]} queries
+   * @returns {string[]|null}
+   */
+  _queryPoiClasses(queries) {
+    if (!queries?.length) return null;
+    const norm = queries.map(q => MapboxMCPClient._normalizeName(q));
+    for (const { words, classes } of MapboxMCPClient.POI_CATEGORY_CLASS) {
+      if (words.some(w => norm.some(n => n.includes(MapboxMCPClient._normalizeName(w))))) return classes;
+    }
+    return null;
+  }
+
   /**
    * 【主】Search Box API ツインリクエスト × queries配列を並行実行。
    * Search Box API (poi/both クエリ) と Tilequery poi_label (streets-v8) を並行実行し、
@@ -923,7 +958,10 @@ class MapboxMCPClient {
     const hasPOIQuery = queries.some(q => MapboxMCPClient.classifyQueryType(q) !== 'place');
 
     let sbCount = 0, tqCount = 0;
-    const sbItems = [], tqItems = [];
+    const sbItems = [], tqItems = [], tqDropped = [];
+    // Category classes for this query (e.g. ホテル → ['lodging']). When set, keep
+    // tilequery poi_label hits by class even if the name lacks the category word.
+    const wantClasses = this._queryPoiClasses(queries);
 
     // ── Search Box requests (type-classified per query) ──
     const sbRequests = queries.flatMap(q => {
@@ -958,7 +996,11 @@ class MapboxMCPClient {
       if (!seen.has(key)) { seen.set(key, item); sbItems.push(item); sbCount++; }
     });
     tqResults.forEach(item => {
-      if (!this._matchesAnyQuery(item.name, queries)) return;
+      // Keep if the name matches a query OR the poi_label class/maki matches the
+      // query's category (recovers category members not named after the category).
+      const nameMatch  = this._matchesAnyQuery(item.name, queries);
+      const classMatch = wantClasses && (wantClasses.includes(item.cls) || wantClasses.includes(item.maki));
+      if (!nameMatch && !classMatch) { tqDropped.push(item); return; }
       const key = dedupKey(item);
       if (!seen.has(key)) { seen.set(key, item); tqItems.push(item); tqCount++; }
     });
@@ -988,8 +1030,11 @@ class MapboxMCPClient {
       _debug: {
         sb_count: sbCount,
         tq_count: tqCount,
-        sb_items: sbItems.slice(0, 30).map(i => ({ name: i.name, distance: i.distance })),
-        tq_items: tqItems.slice(0, 30).map(i => ({ name: i.name, distance: i.distance })),
+        tq_dropped_count: tqDropped.length,
+        want_classes: wantClasses || null,
+        sb_items:      sbItems.slice(0, 50).map(i => ({ name: i.name, distance: i.distance })),
+        tq_items:      tqItems.slice(0, 50).map(i => ({ name: i.name, distance: i.distance, cls: i.cls })),
+        tq_dropped:    tqDropped.slice(0, 50).map(i => ({ name: i.name, distance: i.distance, cls: i.cls })),
       },
     });
     this._searchResultCache.set(searchCacheKey, result);
@@ -1116,6 +1161,7 @@ class MapboxMCPClient {
           latitude:  f.geometry?.coordinates?.[1],
           distance:  Math.round(f.properties?.tilequery?.distance || 0),
           cls:       f.properties?.class || null,   // streets-v8 poi_label class
+          maki:      f.properties?.maki  || null,   // streets-v8 poi_label maki icon
         }))
         .filter(f => f.longitude != null && f.latitude != null);
     } catch (_) { return []; }
@@ -2291,6 +2337,11 @@ class MapboxMCPClient {
     const resultStr = await this._searchNearbyPOI(
       queries, proximity, bbox, target.query_intent, null, false
     );
+    // Stash raw collection debug (SB/TQ/dropped lists) for the debug report.
+    try {
+      const parsed = typeof resultStr === 'string' ? JSON.parse(resultStr) : resultStr;
+      this._lastTargetDebug = parsed?._debug || null;
+    } catch { this._lastTargetDebug = null; }
     return this._parseItemsFromResult(resultStr);
   }
 

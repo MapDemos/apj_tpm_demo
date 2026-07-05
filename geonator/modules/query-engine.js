@@ -457,9 +457,22 @@ class QueryEngine {
       opts.proximity = [(scopeBbox[0] + scopeBbox[2]) / 2, (scopeBbox[1] + scopeBbox[3]) / 2];
     }
     const sbResult = await this.mcp.searchBox(anchor.text, opts);
-    let features = sbResult?.features || [];
-    if (scopeBbox) features = features.filter(f => this._pointInBbox(f.geometry?.coordinates, scopeBbox));
-    if (!features.length) return null;
+    const rawFeatures = sbResult?.features || [];
+    let features = rawFeatures;
+    if (scopeBbox) {
+      const filtered = rawFeatures.filter(f => this._pointInBbox(f.geometry?.coordinates, scopeBbox));
+      // Safety net (recall priority): if the scope box drops EVERYTHING but the raw
+      // search did find results, the scope was likely too tight/wrong (or the anchor
+      // is actually outside it). Fall back to the proximity-biased raw results rather
+      // than aborting with nothing.
+      features = filtered.length ? filtered : rawFeatures;
+    }
+    if (!features.length) {
+      // Genuinely nothing found — tell the user instead of aborting silently.
+      this.ui.showMessage(this._m().anchorNotFound(anchor.text));
+      this._awaitingClarify = true;
+      return null;
+    }
 
     const radiusM = DISTANCE_TABLE.nearby.radius_m; // default extent around the anchor
 
@@ -626,12 +639,23 @@ class QueryEngine {
     const { kept, excludedNames } = await this._rateMain(target, mainRaw);
 
     // Debug: target + condition collection breakdown
+    const tdbg = this.mcp._lastTargetDebug || null;
     this._dbgReport.target = {
       intent:        this._buildIntentLabel(target),
       raw:           mainRaw.length,
       excluded:      excludedNames.length,
       excludedNames: excludedNames.slice(0, 40),
       kept:          kept.length,
+      keptNames:     kept.map(c => c.name).slice(0, 50),
+      // Raw collection lists (before L2 rating): what each API returned + what the
+      // name/class filter dropped. Surfaced so the collection stage is inspectable.
+      sbCount:       tdbg?.sb_count ?? null,
+      tqCount:       tdbg?.tq_count ?? null,
+      tqDroppedCount: tdbg?.tq_dropped_count ?? null,
+      wantClasses:   tdbg?.want_classes ?? null,
+      sbItems:       tdbg?.sb_items ?? [],
+      tqItems:       tdbg?.tq_items ?? [],
+      tqDropped:     tdbg?.tq_dropped ?? [],
     };
     this._dbgReport.conditions = condDebug;
 
