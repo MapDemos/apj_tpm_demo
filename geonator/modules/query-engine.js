@@ -609,11 +609,20 @@ class QueryEngine {
   async _collectCandidates(schema, { targetBbox, condBbox }) {
     const { target, conditions } = schema;
 
-    // Target collection (tight bbox)
-    let mainRaw = await this.mcp.collectTarget(target, targetBbox);
+    // Build ONE shared poi_label grid over the widest (condition) bbox, reused by the
+    // target and every poi condition — they all query poi_label, so one dense (65)
+    // pass replaces N per-query grids (fixes latency; keeps full recall). Skip only
+    // for huge general-target areas (buildings are bounded earlier by push-back).
+    const targetIsBuilding = ['category_mansion', 'category_apartment', 'category_building']
+      .includes(target?.query_intent);
+    const useGrid = targetIsBuilding || this.mcp._bboxToRadius(condBbox) <= 1500;
+    const sharedGrid = useGrid ? await this.mcp.buildPoiLabelGrid(condBbox, 65) : null;
+
+    // Target collection (partition shared grid to the tight target bbox)
+    let mainRaw = await this.mcp.collectTarget(target, targetBbox, sharedGrid);
     mainRaw = this._applyBuildingNameRules(target, mainRaw);
 
-    // Conditions collection (wide bbox) — parallel
+    // Conditions collection (partition shared grid to the wide condition bbox) — parallel
     const condResults = {};
     const condDebug   = [];
     if (conditions?.length) {
@@ -625,7 +634,7 @@ class QueryEngine {
           condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: '候補ごと評価' });
           return;
         }
-        const items = await this.mcp.collectCondition(c, condBbox);
+        const items = await this.mcp.collectCondition(c, condBbox, sharedGrid);
         condResults[key] = items;
         condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
         // [S] note if condition returned 0 items

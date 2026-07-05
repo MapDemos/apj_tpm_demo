@@ -781,7 +781,10 @@ class MapboxMCPClient {
     });
   }
 
-  async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null, isPrimary = false) {
+  async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null, isPrimary = false, sharedGrid = null) {
+    // sharedGrid: pre-fetched poi_label items (buildPoiLabelGrid) reused across the
+    // target + all poi conditions so we don't run one grid per query. When present,
+    // the building/general paths partition it locally instead of fetching their own.
     // ── 信号・交差点クエリ: Tilequeryのみ（Search Box不可） ──
     // bboxが渡されている場合（localityのbbox等）はそのbboxの外接円半径を使い全域をカバーする
     // Condition search radius cap: cover the full condition bbox (§7-4 dual-bbox),
@@ -907,48 +910,58 @@ class MapboxMCPClient {
       if (this.config.DEBUG)
         console.log(`[MapboxMCP] 建物系 → グリッドTilequery のみ (初期bbox幅=${Math.round((currentBbox[2]-currentBbox[0])*111320)}m)`);
 
-      // radius=65m keeps each grid point's result under Tilequery's 50-cap in dense
-      // urban areas (radius 200 truncated to nearest-50 and dropped buildings like
-      // マンション). Denser grid = complete coverage.
-      const tqItems = await this._gridTilequeryPOI(lat, lng, currentBbox, 65);
+      // Buildings query poi_label. Reuse the shared grid (filtered to this bbox) when
+      // provided; else fetch our own dense grid. radius=65 keeps each grid point under
+      // Tilequery's 50-cap so dense areas don't drop buildings like マンション.
+      const tqItems = sharedGrid
+        ? this._filterItemsToBbox(sharedGrid, currentBbox)
+        : await this._gridTilequeryPOI(lat, lng, currentBbox, 65);
       // Building-category targets: keep only poi_label class=building (reliably drops
       // restaurants/shops/medical/etc. without name-guessing). Items with no class
-      // (e.g. Search Box fallback) are kept.
+      // (e.g. Search Box results) are kept.
       const buildingOnly = tqItems.filter(item => !item.cls || item.cls === 'building');
       if (this.config.DEBUG)
         console.log(`[MapboxMCP] 建物クラスフィルタ: ${tqItems.length}件 → ${buildingOnly.length}件 (class=building)`);
+      const bTqItems = [], bSbItems = [];
       buildingOnly.forEach(item => {
         if (!_notBlocked(item.name)) return;
-        if (!seen.has(dedupKey(item))) seen.set(dedupKey(item), item);
+        const k = dedupKey(item);
+        if (!seen.has(k)) { seen.set(k, item); bTqItems.push(item); }
       });
 
-      // ── Building fallback: Search Box when Tilequery returns 0 ──
-      if (seen.size === 0) {
-        if (this.config.DEBUG) console.log('[MapboxMCP] 建物: Tilequery 0件 → Search Box フォールバック');
-        const sbRequests = queries.flatMap(q => {
-          const qt = MapboxMCPClient.classifyQueryType(q);
-          if (qt === 'place') return [this._searchBoxRequest(q, 'place,district,locality', proximity, currentBbox)];
-          if (qt === 'poi')   return [this._searchBoxRequest(q, 'poi',                     proximity, currentBbox)];
-          return [
-            this._searchBoxRequest(q, 'poi',                     proximity, currentBbox),
-            this._searchBoxRequest(q, 'place,district,locality', proximity, currentBbox),
-          ];
-        });
-        const sbResults = await Promise.all(sbRequests);
-        sbResults.flat().forEach(item => {
-          const key = dedupKey(item);
-          if (!seen.has(key)) seen.set(key, item);
-        });
-      }
+      // ── Search Box in PARALLEL as a supplement (not just a 0-hit fallback):
+      //    poi_label misses some named buildings; Search Box catches them. ──
+      const bSbRequests = queries.flatMap(q => {
+        const qt = MapboxMCPClient.classifyQueryType(q);
+        if (qt === 'place') return [this._searchBoxRequest(q, 'place,district,locality', proximity, currentBbox)];
+        if (qt === 'poi')   return [this._searchBoxRequest(q, 'poi',                     proximity, currentBbox)];
+        return [
+          this._searchBoxRequest(q, 'poi',                     proximity, currentBbox),
+          this._searchBoxRequest(q, 'place,district,locality', proximity, currentBbox),
+        ];
+      });
+      const bSbResults = await Promise.all(bSbRequests);
+      bSbResults.flat().forEach(item => {
+        if (!_notBlocked(item.name)) return;
+        const key = dedupKey(item);
+        if (!seen.has(key)) { seen.set(key, item); bSbItems.push(item); }
+      });
 
       const items = this._assignIds([...seen.values()]
         .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
         .slice(0, 150), isPrimary);
-      const src = items.length
-        ? (seen.size > 0 && items[0].full_address !== undefined
-            ? 'Search Box (building fallback)' : 'Tilequery poi_label grid (buildings)')
-        : 'no results';
-      const result = this._minify({ source: src, count: items.length, items, _debug: { sb_count: 0, tq_count: items.length, sb_items: [], tq_items: items.slice(0,30).map(i=>({name:i.name,distance:i.distance})) } });
+      const result = this._minify({
+        source: 'Tilequery poi_label grid (buildings) + Search Box',
+        count: items.length, items,
+        _debug: {
+          sb_count: bSbItems.length,
+          tq_count: bTqItems.length,
+          tq_dropped_count: tqItems.length - buildingOnly.length,
+          sb_items:   bSbItems.slice(0, 50).map(i => ({ name: i.name, distance: i.distance })),
+          tq_items:   bTqItems.slice(0, 50).map(i => ({ name: i.name, distance: i.distance, cls: i.cls })),
+          tq_dropped: tqItems.filter(it => it.cls && it.cls !== 'building').slice(0, 50).map(i => ({ name: i.name, distance: i.distance, cls: i.cls })),
+        },
+      });
       this._searchResultCache.set(searchCacheKey, result);
       return result;
     }
@@ -984,9 +997,11 @@ class MapboxMCPClient {
     // fill every point's 50 slots and crowd out rarer categories (lodging etc.).
     // A tight radius keeps each point's poi_label count under the cap = no gaps.
     const bigArea = currentBbox && this._bboxToRadius(currentBbox) > 1500;
-    const tqPromise = (hasPOIQuery && effectiveProximity && !bigArea)
-      ? this._gridTilequeryPOI(effectiveProximity[1], effectiveProximity[0], currentBbox, 65)
-      : Promise.resolve([]);
+    const tqPromise = sharedGrid
+      ? Promise.resolve(this._filterItemsToBbox(sharedGrid, currentBbox))
+      : ((hasPOIQuery && effectiveProximity && !bigArea)
+          ? this._gridTilequeryPOI(effectiveProximity[1], effectiveProximity[0], currentBbox, 65)
+          : Promise.resolve([]));
     if (bigArea && this.config.DEBUG) console.log('[MapboxMCP] 広域のためグリッド省略、Search Boxのみ');
 
     // ── Run both in parallel ──
@@ -1144,6 +1159,33 @@ class MapboxMCPClient {
 
     this._poiGridCache.set(gridKey, gridResult);
     return gridResult;
+  }
+
+  /**
+   * Build ONE shared poi_label grid over a bbox (center = bbox center ≈ proximity),
+   * reused by the target and every poi condition instead of each running its own grid.
+   * All poi consumers (マンション/アパート/ビル/一般POI/poi条件) query poi_label, so a
+   * single dense (radius=65) pass captures buildings + lodging + branded POIs together;
+   * callers partition it locally by class/name. Cached via _gridTilequeryPOI.
+   * @param {number[]} bbox  - [minLng, minLat, maxLng, maxLat] (usually condBbox = widest)
+   * @param {number}   radius
+   * @returns {Promise<Array>} deduped poi_label items { name, longitude, latitude, distance, cls, maki }
+   */
+  async buildPoiLabelGrid(bbox, radius = 65) {
+    if (!bbox || bbox.length < 4) return [];
+    const centerLng = (bbox[0] + bbox[2]) / 2;
+    const centerLat = (bbox[1] + bbox[3]) / 2;
+    return this._gridTilequeryPOI(centerLat, centerLng, bbox, radius);
+  }
+
+  /** Keep only items whose coordinate falls inside bbox (for partitioning a shared grid). */
+  _filterItemsToBbox(items, bbox) {
+    if (!bbox || bbox.length < 4) return items || [];
+    const [minX, minY, maxX, maxY] = bbox;
+    return (items || []).filter(it => {
+      const lng = it.longitude ?? it.lng, lat = it.latitude ?? it.lat;
+      return lng != null && lat != null && lng >= minX && lng <= maxX && lat >= minY && lat <= maxY;
+    });
   }
 
   /**
@@ -2337,12 +2379,12 @@ class MapboxMCPClient {
    * @param {number[]} bbox
    * @returns {Promise<Array>}
    */
-  async collectTarget(target, bbox) {
+  async collectTarget(target, bbox, sharedGrid = null) {
     const proximity = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
     // Query Expansion: general-POI targets carry synonyms (寿司屋→寿司/鮨/すし).
     const queries   = (target.queries?.length ? target.queries : [target.text]);
     const resultStr = await this._searchNearbyPOI(
-      queries, proximity, bbox, target.query_intent, null, false
+      queries, proximity, bbox, target.query_intent, null, false, sharedGrid
     );
     // Stash raw collection debug (SB/TQ/dropped lists) for the debug report.
     try {
@@ -2359,7 +2401,7 @@ class MapboxMCPClient {
    * @param {number[]} bbox
    * @returns {Promise<Array>}
    */
-  async collectCondition(condition, bbox) {
+  async collectCondition(condition, bbox, sharedGrid = null) {
     const proximity = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
 
     // The search PATH is driven by condition.type (JS-driven), NOT by L1's query_intent.
@@ -2384,8 +2426,10 @@ class MapboxMCPClient {
       queries = text ? [text] : [];
     }
 
+    // Only poi conditions consume the shared poi_label grid; other types (bus stop /
+    // transit / intersection / signal) take their own layer branches inside.
     const resultStr = await this._searchNearbyPOI(
-      queries, proximity, bbox, intent, null, false
+      queries, proximity, bbox, intent, null, false, condition.type === 'poi' ? sharedGrid : null
     );
     return this._parseItemsFromResult(resultStr);
   }
