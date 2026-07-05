@@ -147,7 +147,7 @@ class LocationFinderApp {
   _initScoringSettings() {
     // Preset profiles: [weightProximity(0..1), decisiveness(0..1)]
     const PRESETS = {
-      decisive: [0.70, 0.85],  // 言い切り型: 近さ寄り＋僅差でもgoldを立てる
+      decisive: [0.95, 0.85],  // 言い切り型: 近さ95%/関連5%＝ほぼ近さ全振り＋僅差でもgoldを立てる
       balanced: [0.65, 0.40],  // バランス型（既定）
       cautious: [0.60, 0.10],  // 慎重型: 僅差は同程度、goldは高信頼のみ
     };
