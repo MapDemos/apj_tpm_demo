@@ -635,9 +635,17 @@ class LocationFinderApp {
 
       const mi = place._matchInfo || {};
       const scorePct = mi.score != null ? Math.round(mi.score * 100) : null;
+      // L2 relevance (意図への文脈適合): exact = 意図のど真ん中 / related = 関連はするが中心でない。
+      // mismatch は評価前に除外済みなので、ここに来るのは exact / related のみ。
+      const REL = {
+        exact:   { stars: '★★★', text: 'ど真ん中', color: '#16a34a' },
+        related: { stars: '★★☆', text: '関連',     color: '#64748b' },
+      };
+      const rel = REL[mi.relevance];
       const popupHTML =
         `<div style="font-weight:700;color:${tier.color}">${tier.badge} ${tier.label}${scorePct != null ? `（スコア ${scorePct}）` : ''}</div>` +
         `<strong>${_esc(place.name || '(名前なし)')}</strong>` +
+        (rel ? `<div class="popup-reason" style="color:${rel.color}">関連性 ${rel.stars} ${rel.text}</div>` : '') +
         (mi.labels?.length ? `<div class="popup-reason">✓ ${_esc(mi.labels.join('、'))}${mi.total ? `（${mi.hit}/${mi.total}）` : ''}</div>` : '');
 
       const marker = new mapboxgl.Marker({ element: el })

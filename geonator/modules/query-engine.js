@@ -751,7 +751,11 @@ class QueryEngine {
       tracker.set(String(c.id), { candidate: c, total: conditions.length, hit: 0, hitLabels: [], closenessSum: 0 });
     }
 
-    const relMult = c => (c._relevance === 'exact' ? 1.0 : 0.5); // L2 relevance factor
+    // L2 relevance factor. Widened gap (exact 1.0 vs related 0.35) so the *type* of
+    // place matters more than being marginally closer: an exact-intent candidate a bit
+    // farther now beats a merely-related one right next to the conditions. mismatch is
+    // already dropped in _rateMain, so only exact/related reach here.
+    const relMult = c => (c._relevance === 'exact' ? 1.0 : 0.35);
 
     if (conditions.length === 0) {
       // No conditions — score = L2 relevance only (exact スーパー > related 八百屋).
