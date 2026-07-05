@@ -762,7 +762,9 @@ class QueryEngine {
       mainCandidates.forEach(c => {
         c._matchInfo = { hit: 0, total: 0, labels: [], score: +relMult(c).toFixed(3), relevance: c._relevance };
       });
-      this._assignTiers(mainCandidates, [], []); // variance gate splits gold/silver by relevance
+      // No conditions: score = relMult only (exact 1.0 / related 0.35). 絶対ゲート
+      // GOLD_MIN(0.5)により exact のみ gold 適格、related は match 止まり。
+      this._assignTiers(mainCandidates, [], []);
       mainCandidates.sort((a, b) => b._matchInfo.score - a._matchInfo.score);
       return { full: mainCandidates, partial: [], none: [] };
     }
@@ -820,7 +822,11 @@ class QueryEngine {
     // ranks above a related 八百屋 near the same conditions).
     const full = [], partial = [], none = [];
     for (const [, t] of tracker) {
-      const condScore = t.hit > 0 ? t.closenessSum / t.hit : 0;
+      // condScore = 全条件での平均closeness。分母は hit ではなく total（非ヒット条件を
+      // 0で算入する）。hit で割ると「近かった条件だけの条件付き平均」になり、1条件だけ
+      // 極近な partial が全条件そこそこの full を上回る楽観バイアスが出る（統計レビュー §4）。
+      // full は hit==total なので値は不変、partial の過大評価だけが是正される。
+      const condScore = t.total > 0 ? t.closenessSum / t.total : 0;
       const score = relMult(t.candidate) * condScore;
       t.candidate._matchInfo = { hit: t.hit, total: t.total, labels: t.hitLabels, score: +score.toFixed(3), relevance: t.candidate._relevance };
       if (t.hit === t.total)      full.push(t.candidate);
@@ -828,8 +834,8 @@ class QueryEngine {
       else                        none.push(t.candidate);
     }
 
-    // Tiering with variance gate (JS, deterministic) — gold/silver only when the
-    // full-match scores actually spread; otherwise everyone is equal ("同程度").
+    // Tiering (JS, deterministic): 絶対ゲート＋マージン。絶対水準を満たし単独突出のときのみ
+    // gold、僅差なら "同程度"(match)、全件低スコアなら gold なし。詳細は _assignTiers。
     this._assignTiers(full, partial, none);
 
     // Sort each class by score desc (best first)
@@ -841,26 +847,40 @@ class QueryEngine {
 
   /**
    * Assign _tier to candidates: 'gold' | 'silver' | 'match' | 'bronze' | 'none'.
-   * - full matches: split gold/silver only if score spread ≥ EPS; else all 'match' (flat).
-   * - partial → 'bronze', none → 'none'.
+   *
+   * 絶対ゲート（主）＋マージン（従）方式。旧 range(max-min)ゲートは
+   *   ① 期待レンジがサンプル数 n とともに増大 → n と交絡（多い時に金乱発 / 少ない時に潰す）
+   *   ② min 側の外れ値1件で range が広がり誤分割（「最下位の悪さ」を見てしまう）
+   * のため廃止。zスコア/パーセンタイルは n≤3 で破綻するため採用しない（統計レビュー参照）。
+   *
+   * 判定（full マッチのみが gold/silver 対象）:
+   *   - top < GOLD_MIN_SCORE           → 絶対ゲート不通過。全員 match（"全件イマイチ"で
+   *                                       単独 full でも gold にしない。best-of-garbage 防止）
+   *   - n==1 または (top−2nd) ≥ MARGIN → top を gold（絶対水準を満たし単独突出）。
+   *                                       残りは GOLD_MIN_SCORE 以上なら silver、未満は match。
+   *   - それ以外（絶対水準は満たすが僅差）→ 同程度。全員 match（どんぐり＝勝者なし）
+   *   - partial → 'bronze', none → 'none'
    */
   _assignTiers(full, partial, none) {
-    const EPS = 0.3;        // score range below which we do NOT crown a winner (wider = fewer flips)
-    const GOLD_BAND = 0.34; // top fraction of the range that earns gold
+    const GOLD_MIN = this.config.GOLD_MIN_SCORE ?? 0.5;
+    const MARGIN   = this.config.GOLD_MARGIN    ?? 0.15;
 
-    if (full.length === 1) {
-      // Single full match = the clear answer → gold (no "同程度" tie framing).
-      full[0]._tier = 'gold';
-    } else if (full.length > 1) {
-      const scores = full.map(c => c._matchInfo.score);
-      const max = Math.max(...scores), min = Math.min(...scores);
-      const range = max - min;
-      if (range < EPS) {
-        // Flat: no meaningful winner → all equal (no dramatic gold)
+    if (full.length >= 1) {
+      const sorted = [...full].sort((a, b) => b._matchInfo.score - a._matchInfo.score);
+      const top    = sorted[0]._matchInfo.score;
+      const second = sorted.length > 1 ? sorted[1]._matchInfo.score : -Infinity;
+      const margin = top - second; // n==1 のとき +Infinity 相当
+
+      if (top < GOLD_MIN) {
+        // 絶対ゲート不通過：全条件を満たしていても実力が低い → 勝者を立てない
         full.forEach(c => { c._tier = 'match'; c._flatTier = true; });
+      } else if (margin >= MARGIN) {
+        // 絶対水準を満たし、1位が単独で突出 → gold
+        sorted[0]._tier = 'gold';
+        sorted.slice(1).forEach(c => { c._tier = c._matchInfo.score >= GOLD_MIN ? 'silver' : 'match'; });
       } else {
-        const goldCut = max - range * GOLD_BAND;
-        full.forEach(c => { c._tier = c._matchInfo.score >= goldCut ? 'gold' : 'silver'; });
+        // 絶対水準は満たすが僅差（どんぐりの背比べ）→ 同程度、gold なし
+        full.forEach(c => { c._tier = 'match'; c._flatTier = true; });
       }
     }
     partial.forEach(c => { c._tier = 'bronze'; });

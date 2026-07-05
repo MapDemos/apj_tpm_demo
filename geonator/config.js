@@ -73,5 +73,17 @@ const CONFIG = {
   CANDIDATE_LIMIT:     150,          // max candidates collected per query
   BBOX_MAX_HALF_M:     2000,         // max half-width of primary search bbox in meters (§6-3)
 
+  // ============================================
+  // SCORING / TIERING (統計レビュー 2026-07-05)
+  // 絶対ゲート＋マージン方式。range(max-min)はサンプル数nと外れ値に交絡するため廃止。
+  // zスコア/パーセンタイルはn≤3で破綻するため主軸にしない。
+  // ※ 下記は暫定値。人手ラベル付き検証セット(#5)でgrid searchして較正すること。
+  // ============================================
+  GOLD_MIN_SCORE: 0.5,   // gold候補が満たすべき絶対スコア下限（score=relMult×condScore）。
+                         //   related(≤0.35)は構造的にgold不可＝relevanceゲートを内包。
+                         //   exactはcondScore≥0.5（参照距離の半分以内）が必要。
+  GOLD_MARGIN:    0.15,  // 単独goldを認める「1位−2位」の差。n非依存・min側外れ値に不感。
+                         //   これ未満は同程度(match)扱いでgoldを出さない（どんぐり検知）。
+
   DEBUG: true,
 };
