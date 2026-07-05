@@ -253,7 +253,7 @@ class LocationFinderApp {
             totIn += s.inTok; totOut += s.outTok;
           }
         }
-        parts.push(`API: SB ${self.mapboxMCP?._sbRequests ?? 0} / TQ ${self.mapboxMCP?._tqRequests ?? 0}`);
+        parts.push(`API: SB ${self.mapboxMCP?._sbRequests ?? 0} / TQ ${self.mapboxMCP?._tqRequests ?? 0} / ISO ${self.mapboxMCP?._isoRequests ?? 0}`);
         self.addMessage('tool-status', parts.join('\n'));
         // header cumulative token display
         self._tokens.input  += totIn;
@@ -551,6 +551,8 @@ class LocationFinderApp {
       this.mapboxMCP._sbRequests  = 0;
       this.mapboxMCP._tqRequests  = 0;
       this.mapboxMCP._tqCacheHits = 0;
+      this.mapboxMCP._isoRequests  = 0;
+      this.mapboxMCP._isoCacheHits = 0;
       this.mapboxMCP._tqCache.clear();
       this.mapboxMCP._poiGridCache?.clear();
       this.mapboxMCP._searchResultCache?.clear();
@@ -2576,12 +2578,18 @@ class LocationFinderApp {
   _updateAPICountDisplay() {
     const sb = document.getElementById('api-counter-sb');
     const tq = document.getElementById('api-counter-tq');
+    const iso = document.getElementById('api-counter-iso');
     if (sb) sb.textContent = `SB: ${this.mapboxMCP?._sbRequests ?? 0} req`;
     const tqHits = this.mapboxMCP?._tqCacheHits ?? 0;
     const tqReal = this.mapboxMCP?._tqRequests  ?? 0;
     if (tq) tq.textContent = tqHits > 0
       ? `TQ: ${tqReal} req (+${tqHits}↩)`
       : `TQ: ${tqReal} req`;
+    const isoHits = this.mapboxMCP?._isoCacheHits ?? 0;
+    const isoReal = this.mapboxMCP?._isoRequests  ?? 0;
+    if (iso) iso.textContent = isoHits > 0
+      ? `ISO: ${isoReal} req (+${isoHits}↩)`
+      : `ISO: ${isoReal} req`;
   }
 
   _updateTokenDisplay() {

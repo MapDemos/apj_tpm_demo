@@ -28,6 +28,8 @@ class MapboxMCPClient {
     this._sbRequests     = 0;   // Search Box API request count (reset by index.js on chat clear)
     this._tqRequests     = 0;   // Tilequery API request count (actual fetches only)
     this._tqCacheHits    = 0;   // Tilequery cache hits
+    this._isoRequests    = 0;   // Isochrone API request count (actual fetches only)
+    this._isoCacheHits   = 0;   // Isochrone cache hits (within-run isoCache)
     this._tqCache        = new Map(); // url → parsed JSON (cleared on chat reset)
     this._poiGridCache      = new Map();
     this._searchResultCache = new Map();
@@ -977,9 +979,13 @@ class MapboxMCPClient {
     // ── Tilequery poi_label (streets-v8) — grid search for poi/both queries ──
     // Skip the grid over very large areas (e.g. 鎌倉市全体): it would need
     // thousands of points. Search Box alone handles wide-area named POI well.
+    // radius=65 (same as the building path): Tilequery caps at 50 results/point, so
+    // in dense areas a larger radius lets high-density categories (buildings/shops)
+    // fill every point's 50 slots and crowd out rarer categories (lodging etc.).
+    // A tight radius keeps each point's poi_label count under the cap = no gaps.
     const bigArea = currentBbox && this._bboxToRadius(currentBbox) > 1500;
     const tqPromise = (hasPOIQuery && effectiveProximity && !bigArea)
-      ? this._gridTilequeryPOI(effectiveProximity[1], effectiveProximity[0], currentBbox, 200)
+      ? this._gridTilequeryPOI(effectiveProximity[1], effectiveProximity[0], currentBbox, 65)
       : Promise.resolve([]);
     if (bigArea && this.config.DEBUG) console.log('[MapboxMCP] 広域のためグリッド省略、Search Boxのみ');
 
@@ -1856,6 +1862,7 @@ class MapboxMCPClient {
         const url =
           `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${anchorLng},${anchorLat}` +
           `?contours_minutes=${minutes}&polygons=true&access_token=${this.token}`;
+        this._isoRequests++; // actual isochrone API call
         const res = await this._fetchWithRetry(url);
         if (!res.ok) return JSON.stringify({ error: `Isochrone API ${res.status}` });
         const data = await res.json();
@@ -2427,10 +2434,11 @@ class MapboxMCPClient {
     const mins = distParams.minutes;
     const cacheKey = `${lat},${lng},${mins},${prof}`;
     const cached = isoCache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) { this._isoCacheHits++; return cached; }
     const url =
       `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${lng},${lat}` +
       `?contours_minutes=${mins}&polygons=true&access_token=${this.token}`;
+    this._isoRequests++; // actual isochrone API call
     try {
       const res = await this._fetchWithRetry(url);
       if (!res.ok) return null;
