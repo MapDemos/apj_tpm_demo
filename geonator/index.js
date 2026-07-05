@@ -119,6 +119,8 @@ class LocationFinderApp {
     l1Sel?.addEventListener('change', e => { this.config.L1_MODEL = e.target.value; persist(); });
     l2Sel?.addEventListener('change', e => { this.config.L2_MODEL = e.target.value; persist(); });
 
+    this._initScoringSettings();
+
     document.getElementById('settingsBtn')?.addEventListener('click', () => {
       if (modal) modal.style.display = 'flex';
     });
@@ -135,6 +137,75 @@ class LocationFinderApp {
     if (!el) return;
     const s = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
     el.textContent = `L1:${s(this.config.L1_MODEL)} / L2:${s(this.config.L2_MODEL)}`;
+  }
+
+  /**
+   * Scoring settings: 2 sliders (意図⟷近さ weight / 言い切り度) + 3 presets.
+   * Values live in CONFIG (read by QueryEngine on the NEXT search) and persist to
+   * localStorage. Presets set both sliders at once (推論スタイル).
+   */
+  _initScoringSettings() {
+    // Preset profiles: [weightProximity(0..1), decisiveness(0..1)]
+    const PRESETS = {
+      decisive: [0.70, 0.85],  // 言い切り型: 近さ寄り＋僅差でもgoldを立てる
+      balanced: [0.65, 0.40],  // バランス型（既定）
+      cautious: [0.60, 0.10],  // 慎重型: 僅差は同程度、goldは高信頼のみ
+    };
+
+    // Restore saved scoring prefs
+    try {
+      const s = JSON.parse(localStorage.getItem('geonator_scoring') || '{}');
+      if (typeof s.wProx === 'number') this.config.SCORE_WEIGHT_PROXIMITY = s.wProx;
+      if (typeof s.dec   === 'number') this.config.SCORE_DECISIVENESS     = s.dec;
+    } catch (_) {}
+
+    const proxSlider = document.getElementById('weightProxSlider');
+    const decSlider  = document.getElementById('decisivenessSlider');
+    const proxVal    = document.getElementById('weightProxVal');
+    const decVal     = document.getElementById('decisivenessVal');
+
+    const syncUI = () => {
+      const p = this.config.SCORE_WEIGHT_PROXIMITY ?? 0.65;
+      const d = this.config.SCORE_DECISIVENESS     ?? 0.4;
+      if (proxSlider) proxSlider.value = String(Math.round(p * 100));
+      if (decSlider)  decSlider.value  = String(Math.round(d * 100));
+      if (proxVal) proxVal.textContent = `近さ ${Math.round(p * 100)}% / 意図 ${Math.round((1 - p) * 100)}%`;
+      if (decVal)  decVal.textContent  = `言い切り度 ${Math.round(d * 100)}%`;
+      // Highlight the matching preset (if any)
+      document.querySelectorAll('#scorePresets .preset-btn').forEach(b => {
+        const pr = PRESETS[b.dataset.preset];
+        b.classList.toggle('active', pr && Math.abs(pr[0] - p) < 0.001 && Math.abs(pr[1] - d) < 0.001);
+      });
+    };
+
+    const persistScoring = () => {
+      try {
+        localStorage.setItem('geonator_scoring', JSON.stringify({
+          wProx: this.config.SCORE_WEIGHT_PROXIMITY,
+          dec:   this.config.SCORE_DECISIVENESS,
+        }));
+      } catch (_) {}
+    };
+
+    proxSlider?.addEventListener('input', e => {
+      this.config.SCORE_WEIGHT_PROXIMITY = Number(e.target.value) / 100;
+      persistScoring(); syncUI();
+    });
+    decSlider?.addEventListener('input', e => {
+      this.config.SCORE_DECISIVENESS = Number(e.target.value) / 100;
+      persistScoring(); syncUI();
+    });
+    document.querySelectorAll('#scorePresets .preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pr = PRESETS[btn.dataset.preset];
+        if (!pr) return;
+        this.config.SCORE_WEIGHT_PROXIMITY = pr[0];
+        this.config.SCORE_DECISIVENESS     = pr[1];
+        persistScoring(); syncUI();
+      });
+    });
+
+    syncUI();
   }
 
   /**
@@ -171,6 +242,9 @@ class LocationFinderApp {
       showResults(full, partial, none, unsupported, conditionLabels) {
         // Tier-aware markers (gold/silver/match/bronze). QueryEngine set _tier + _matchInfo.score.
         self._renderTierMarkers([...full, ...partial, ...none]);
+
+        // Candidate list in the dialogue panel (clickable + feedback for ground truth)
+        self._renderCandidatePanel(full, partial, none);
 
         // Show unsupported note
         if (unsupported && unsupported.length > 0) {
@@ -595,12 +669,13 @@ class LocationFinderApp {
     this.candidateMarkers = [];
     if (!candidates || candidates.length === 0) return;
 
+    // Sizes kept small to reduce map clutter; gold pulses (CSS radar ring) to stand out.
     const TIER = {
-      gold:   { size: 40, color: '#f59e0b', ring: '#fde68a', z: 5, glow: true,  label: '🏅 最有力', badge: '★' },
-      silver: { size: 24, color: '#60a5fa', ring: '#bfdbfe', z: 3, glow: false, label: '全一致',   badge: '' },
-      match:  { size: 28, color: '#f59e0b', ring: '#fcd34d', z: 4, glow: false, label: '条件一致', badge: '' },
-      bronze: { size: 18, color: '#94a3b8', ring: '#cbd5e1', z: 2, glow: false, label: '部分一致', badge: '' },
-      none:   { size: 14, color: '#64748b', ring: '#475569', z: 1, glow: false, label: '参考',     badge: '' },
+      gold:   { size: 22, color: '#f59e0b', ring: '#fde68a', z: 5, glow: true,  label: '🏅 最有力', badge: '★' },
+      silver: { size: 15, color: '#60a5fa', ring: '#bfdbfe', z: 3, glow: false, label: '全一致',   badge: '' },
+      match:  { size: 17, color: '#f59e0b', ring: '#fcd34d', z: 4, glow: false, label: '条件一致', badge: '' },
+      bronze: { size: 12, color: '#94a3b8', ring: '#cbd5e1', z: 2, glow: false, label: '部分一致', badge: '' },
+      none:   { size: 9,  color: '#64748b', ring: '#475569', z: 1, glow: false, label: '参考',     badge: '' },
     };
 
     // Draw lower tiers first so gold ends up on top
@@ -652,6 +727,7 @@ class LocationFinderApp {
         .setLngLat(_safeLL(lng, lat))
         .setPopup(new mapboxgl.Popup({ offset: tier.size / 2 + 6, closeButton: false }).setHTML(popupHTML))
         .addTo(this.map);
+      marker._candId = place.id; // link to dialogue-panel candidate rows
       dot.addEventListener('click', () => {
         marker.togglePopup();
         if (this._debugMode) this._highlightStep('step-eval');
@@ -662,6 +738,161 @@ class LocationFinderApp {
     // Auto-open the top gold candidate's popup
     const topGold = this.candidateMarkers.find(m => m.getElement().classList.contains('tier-gold'));
     if (topGold) setTimeout(() => topGold.togglePopup(), 600);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Candidate list in dialogue panel + feedback (ground-truth capture)
+  // ─────────────────────────────────────────────────────────────
+
+  static _TIER_ICON = { gold: '🥇', silver: '🥈', match: '🟢', bronze: '🥉', none: '⚪' };
+
+  /**
+   * Render candidates as a clickable list in the conversation panel, each with
+   * ✓正解 / ✗違う feedback buttons. Feedback is stored in localStorage as ground
+   * truth (shared between operator and Claude via CSV export). Available in both
+   * normal and debug mode.
+   */
+  _renderCandidatePanel(full, partial, none) {
+    const rows = [...(full || []), ...(partial || [])];
+    if (rows.length === 0 && (!none || none.length === 0)) return;
+
+    const container = document.getElementById('chatMessages');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message candidates';
+
+    const panel = document.createElement('div');
+    panel.className = 'candidate-panel';
+
+    // Header + export
+    const header = document.createElement('div');
+    header.className = 'candidate-header';
+    header.innerHTML = `<span>候補 ${rows.length}件 — 正しい結果を教えてください</span>`;
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'cand-export-btn';
+    exportBtn.textContent = '⬇ CSV';
+    exportBtn.title = '蓄積したフィードバックをCSVで書き出す';
+    exportBtn.onclick = () => this._exportFeedback();
+    header.appendChild(exportBtn);
+    panel.appendChild(header);
+
+    rows.forEach((c, i) => {
+      const mi = c._matchInfo || {};
+      const lng = c.longitude ?? c.lng, lat = c.latitude ?? c.lat;
+      const icon = LocationFinderApp._TIER_ICON[c._tier] || '🟢';
+      const scorePct = mi.score != null ? Math.round(mi.score * 100) : '-';
+      const dist = c.distance != null ? ` ・${c.distance}m` : '';
+
+      const row = document.createElement('div');
+      row.className = 'cand-row';
+      row.innerHTML =
+        `<span class="cand-rank">${i + 1}</span>` +
+        `<span class="cand-icon">${icon}</span>` +
+        `<span class="cand-name">${_esc(c.name || '(名前なし)')}</span>` +
+        `<span class="cand-score">${scorePct}${dist}</span>`;
+      row.title = 'クリックで地図上の位置へ';
+      row.addEventListener('click', () => this._focusCandidate(c.id, lng, lat));
+
+      const fb = document.createElement('div');
+      fb.className = 'cand-fb';
+      const mk = (txt, label, cls) => {
+        const b = document.createElement('button');
+        b.className = `cand-fb-btn ${cls}`;
+        b.textContent = txt;
+        b.onclick = (e) => {
+          e.stopPropagation();
+          this._recordFeedback(c, label, i + 1);
+          fb.querySelectorAll('.cand-fb-btn').forEach(x => x.classList.remove('chosen'));
+          b.classList.add('chosen');
+        };
+        return b;
+      };
+      fb.appendChild(mk('✓ 正解', 'correct', 'ok'));
+      fb.appendChild(mk('✗ 違う', 'wrong', 'ng'));
+      row.appendChild(fb);
+      panel.appendChild(row);
+    });
+
+    // Panel-level: no correct candidate exists (critical for the all_far regime)
+    const footer = document.createElement('div');
+    footer.className = 'candidate-footer';
+    const noneBtn = document.createElement('button');
+    noneBtn.className = 'cand-none-btn';
+    noneBtn.textContent = 'この中に正解はない（該当なし）';
+    noneBtn.onclick = () => {
+      this._recordFeedback(null, 'none', null);
+      noneBtn.classList.add('chosen');
+      noneBtn.textContent = '記録しました：該当なし';
+    };
+    footer.appendChild(noneBtn);
+    if (none && none.length) {
+      const n = document.createElement('span');
+      n.className = 'cand-none-count';
+      n.textContent = `（参考: 条件未一致 ${none.length}件は非表示）`;
+      footer.appendChild(n);
+    }
+    panel.appendChild(footer);
+
+    wrapper.appendChild(panel);
+    container.appendChild(wrapper);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  /** Fly to a candidate and open its map popup. */
+  _focusCandidate(id, lng, lat) {
+    if (lng == null || lat == null) return;
+    this.map.flyTo({ center: [lng, lat], zoom: 16, duration: 800, essential: true });
+    const marker = (this.candidateMarkers || []).find(m => m._candId === id);
+    if (marker && !marker.getPopup().isOpen()) marker.togglePopup();
+  }
+
+  /**
+   * Append one ground-truth feedback row to localStorage.
+   * label: 'correct' | 'wrong' | 'none'. Records the place identity + the scoring
+   * params in effect, so labels stay valid even after the scoring is retuned.
+   */
+  _recordFeedback(candidate, label, rank) {
+    const mi = candidate?._matchInfo || {};
+    const row = {
+      ts:           new Date().toISOString(),
+      query:        this._lastQuery || '',
+      label,
+      candidate_id: candidate?.id ?? '',
+      name:         candidate?.name ?? '',
+      lat:          candidate?.latitude ?? candidate?.lat ?? '',
+      lng:          candidate?.longitude ?? candidate?.lng ?? '',
+      rank:         rank ?? '',
+      score:        mi.score ?? '',
+      tier:         candidate?._tier ?? '',
+      relevance:    candidate?._relevance ?? '',
+      w_prox:       this.config.SCORE_WEIGHT_PROXIMITY ?? '',
+      related:      this.config.SCORE_RELATED ?? '',
+      decisiveness: this.config.SCORE_DECISIVENESS ?? '',
+      gold_min:     this.config.GOLD_MIN_SCORE ?? '',
+    };
+    let all = [];
+    try { all = JSON.parse(localStorage.getItem('geonator_feedback') || '[]'); } catch (_) {}
+    all.push(row);
+    try { localStorage.setItem('geonator_feedback', JSON.stringify(all)); } catch (_) {}
+  }
+
+  /** Export accumulated feedback as a downloadable CSV. */
+  _exportFeedback() {
+    let all = [];
+    try { all = JSON.parse(localStorage.getItem('geonator_feedback') || '[]'); } catch (_) {}
+    if (!all.length) { this.addMessage('assistant', 'フィードバックはまだ記録されていません。'); return; }
+
+    const cols = ['ts','query','label','candidate_id','name','lat','lng','rank','score','tier','relevance','w_prox','related','decisiveness','gold_min'];
+    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [cols.join(',')].concat(all.map(r => cols.map(c => esc(r[c])).join(','))).join('\n');
+
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `geonator_feedback_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    this.addMessage('assistant', `フィードバック ${all.length}件 を CSV でエクスポートしました。`);
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -1805,6 +2036,7 @@ class LocationFinderApp {
    */
   async processUserMessage(userText) {
     this._resetFlowState();
+    this._lastQuery = userText; // captured for ground-truth feedback rows
     this.map.flyTo({ zoom: 10, duration: 900, essential: true });
     await this.queryEngine.run(userText);
   }

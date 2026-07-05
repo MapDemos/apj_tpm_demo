@@ -75,15 +75,19 @@ const CONFIG = {
 
   // ============================================
   // SCORING / TIERING (統計レビュー 2026-07-05)
-  // 絶対ゲート＋マージン方式。range(max-min)はサンプル数nと外れ値に交絡するため廃止。
-  // zスコア/パーセンタイルはn≤3で破綻するため主軸にしない。
-  // ※ 下記は暫定値。人手ラベル付き検証セット(#5)でgrid searchして較正すること。
+  // score = w_prox×condScore + w_rel×relScore の重み付き和。
+  //   condScore = 条件との近さ(0..1、非ヒットは0で算入)
+  //   relScore  = 意図一致度: exact=1.0 / related=SCORE_RELATED
+  //   w_prox    = SCORE_WEIGHT_PROXIMITY, w_rel = 1 - w_prox
+  // ティアは「絶対ゲート(GOLD_MIN_SCORE)＋マージン(1位-2位)」で決定。
+  //   range(max-min)はnと外れ値に交絡、zスコア/パーセンタイルはn≤3で破綻のため不採用。
+  // ※ 下記は暫定既定値。設定画面のスライダー/プリセットで調整、最終は検証セット(#5)で較正。
+  //   スライダー2本 = SCORE_WEIGHT_PROXIMITY（意図⟷近さ）と SCORE_DECISIVENESS（言い切り度）。
   // ============================================
-  GOLD_MIN_SCORE: 0.5,   // gold候補が満たすべき絶対スコア下限（score=relMult×condScore）。
-                         //   related(≤0.35)は構造的にgold不可＝relevanceゲートを内包。
-                         //   exactはcondScore≥0.5（参照距離の半分以内）が必要。
-  GOLD_MARGIN:    0.15,  // 単独goldを認める「1位−2位」の差。n非依存・min側外れ値に不感。
-                         //   これ未満は同程度(match)扱いでgoldを出さない（どんぐり検知）。
+  SCORE_WEIGHT_PROXIMITY: 0.65,  // バランス: 近さの重み(0=意図重視 … 1=近さ重視)。既定は近さ寄り＝relevance関与ダウン
+  SCORE_RELATED:          0.6,   // relatedの意図スコア(exact=1.0固定)。重み付き和なのでrelatedでも近ければgold到達可
+  SCORE_DECISIVENESS:     0.4,   // 言い切り度(0=慎重…1=言い切り)。高いほど僅差でもgoldを立てる→GOLD_MARGINを縮める
+  GOLD_MIN_SCORE:         0.5,   // gold候補の絶対スコア下限（固定のゴミ足切り。全件低スコアなら単独fullでもgold不可）
 
   DEBUG: true,
 };

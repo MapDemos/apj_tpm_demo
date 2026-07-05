@@ -58,6 +58,31 @@
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
         </select>
       </label>
+
+      <div class="settings-divider"></div>
+      <div class="settings-subtitle">スコアリング調整 <span class="settings-hint">（次の検索から反映）</span></div>
+
+      <!-- Preset buttons (推論スタイル) -->
+      <div class="settings-presets" id="scorePresets">
+        <button class="preset-btn" data-preset="decisive">🎯 言い切り型</button>
+        <button class="preset-btn" data-preset="balanced">⚖️ バランス型</button>
+        <button class="preset-btn" data-preset="cautious">🧭 慎重型</button>
+      </div>
+
+      <!-- Slider 1: 意図 ⟷ 近さ -->
+      <div class="settings-slider-row">
+        <div class="slider-label"><span>意図の一致</span><span>近さ</span></div>
+        <input type="range" id="weightProxSlider" min="0" max="100" step="5">
+        <div class="slider-val" id="weightProxVal">-</div>
+      </div>
+
+      <!-- Slider 2: 言い切り度 -->
+      <div class="settings-slider-row">
+        <div class="slider-label"><span>慎重（同程度多め）</span><span>言い切り（gold積極）</span></div>
+        <input type="range" id="decisivenessSlider" min="0" max="100" step="5">
+        <div class="slider-val" id="decisivenessVal">-</div>
+      </div>
+
       <div class="settings-actions">
         <button id="settingsCloseBtn" class="control-btn">閉じる</button>
       </div>

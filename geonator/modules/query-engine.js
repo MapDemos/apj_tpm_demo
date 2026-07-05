@@ -64,6 +64,20 @@ class QueryEngine {
     if (!schema) return; // clarification was handled inside
 
     this._dbgReport.schema = schema;
+
+    // [STEP] QuerySchema — show the parsed intent early so the operator can sanity-check
+    // L1's interpretation (target / conditions / distances) before any search runs.
+    const anchors = (schema.proximity?.anchors || []).map(a => `${a.text}[${a.type}/${a.specificity}]`).join(', ');
+    await this._step('step-schema', '⓪ クエリ解釈 (QuerySchema)', [
+      `proximity: ${anchors || '(なし)'}${schema.proximity?.bearing_filter ? ' 方角=' + schema.proximity.bearing_filter : ''}`,
+      `target: ${schema.target?.text}  intent=${schema.target?.query_intent}`,
+      ...(schema.conditions || []).map(c => {
+        const d = c.distance || {};
+        return `condition: ${c.text ?? c.type} [${c.type}] 距離=${d.level ?? '-'}/${d.method ?? '-'}${d.minutes ? ' ' + d.minutes + '分' : ''}`;
+      }),
+      ...(schema.unsupported?.length ? [`unsupported: ${schema.unsupported.join('、')}`] : []),
+    ]);
+
     await this._executeSearch(schema, merged);
   }
 
@@ -751,19 +765,19 @@ class QueryEngine {
       tracker.set(String(c.id), { candidate: c, total: conditions.length, hit: 0, hitLabels: [], closenessSum: 0 });
     }
 
-    // L2 relevance factor. Widened gap (exact 1.0 vs related 0.35) so the *type* of
-    // place matters more than being marginally closer: an exact-intent candidate a bit
-    // farther now beats a merely-related one right next to the conditions. mismatch is
-    // already dropped in _rateMain, so only exact/related reach here.
-    const relMult = c => (c._relevance === 'exact' ? 1.0 : 0.35);
+    // Weighted-sum score: score = w_prox×condScore + w_rel×relScore.
+    // relScore = 意図一致度 (exact 1.0 / related SCORE_RELATED)。掛け算(旧)と違い related を
+    // ハードにgold不可にしない — 近ければ(condScore高)relatedでもgold到達可。バランス
+    // スライダー(SCORE_WEIGHT_PROXIMITY)で「意図⟷近さ」の重みを可変。mismatchは_rateMainで除外済み。
+    const wProx    = Math.max(0, Math.min(1, this.config.SCORE_WEIGHT_PROXIMITY ?? 0.65));
+    const wRel     = 1 - wProx;
+    const relScore = c => (c._relevance === 'exact' ? 1.0 : (this.config.SCORE_RELATED ?? 0.6));
 
     if (conditions.length === 0) {
-      // No conditions — score = L2 relevance only (exact スーパー > related 八百屋).
+      // No conditions — no proximity signal, so score = relScore only.
       mainCandidates.forEach(c => {
-        c._matchInfo = { hit: 0, total: 0, labels: [], score: +relMult(c).toFixed(3), relevance: c._relevance };
+        c._matchInfo = { hit: 0, total: 0, labels: [], score: +relScore(c).toFixed(3), relevance: c._relevance };
       });
-      // No conditions: score = relMult only (exact 1.0 / related 0.35). 絶対ゲート
-      // GOLD_MIN(0.5)により exact のみ gold 適格、related は match 止まり。
       this._assignTiers(mainCandidates, [], []);
       mainCandidates.sort((a, b) => b._matchInfo.score - a._matchInfo.score);
       return { full: mainCandidates, partial: [], none: [] };
@@ -818,8 +832,8 @@ class QueryEngine {
     }
 
     // Classify (OR — all displayed) + attach continuous score.
-    // score = L2 relevance × condition proximity (exact スーパー near conditions
-    // ranks above a related 八百屋 near the same conditions).
+    // score = w_prox×condScore + w_rel×relScore（重み付き和）。バランススライダーで
+    // 「意図の一致」と「近さ」の効き具合を可変。
     const full = [], partial = [], none = [];
     for (const [, t] of tracker) {
       // condScore = 全条件での平均closeness。分母は hit ではなく total（非ヒット条件を
@@ -827,7 +841,7 @@ class QueryEngine {
       // 極近な partial が全条件そこそこの full を上回る楽観バイアスが出る（統計レビュー §4）。
       // full は hit==total なので値は不変、partial の過大評価だけが是正される。
       const condScore = t.total > 0 ? t.closenessSum / t.total : 0;
-      const score = relMult(t.candidate) * condScore;
+      const score = wProx * condScore + wRel * relScore(t.candidate);
       t.candidate._matchInfo = { hit: t.hit, total: t.total, labels: t.hitLabels, score: +score.toFixed(3), relevance: t.candidate._relevance };
       if (t.hit === t.total)      full.push(t.candidate);
       else if (t.hit > 0)         partial.push(t.candidate);
@@ -863,7 +877,10 @@ class QueryEngine {
    */
   _assignTiers(full, partial, none) {
     const GOLD_MIN = this.config.GOLD_MIN_SCORE ?? 0.5;
-    const MARGIN   = this.config.GOLD_MARGIN    ?? 0.15;
+    // MARGIN は言い切り度スライダーから導出：言い切り(1.0)ほど小さく(僅差でもgold)、
+    // 慎重(0.0)ほど大きく(同程度に倒す)。decisiveness 0→0.30, 1→0.05 に線形マップ。
+    const dec    = Math.max(0, Math.min(1, this.config.SCORE_DECISIVENESS ?? 0.4));
+    const MARGIN = 0.30 - 0.25 * dec;
 
     if (full.length >= 1) {
       const sorted = [...full].sort((a, b) => b._matchInfo.score - a._matchInfo.score);
