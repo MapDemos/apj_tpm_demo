@@ -2360,108 +2360,135 @@ class MapboxMCPClient {
   }
 
   /**
-   * Evaluate a main candidate against a condition's items.
-   * Returns { matched, nearestM } where nearestM is the straight-line distance (m)
-   * to the nearest condition item (used for scoring). matched follows the method
-   * (circle / isochrone polygon / same-building id).
+   * Build a reach polygon (circle for radius, isochrone for time) centered on an
+   * anchor point. Isochrone polygons are cached by anchor+minutes+profile.
+   * @param {[number, number]} anchorLngLat - [lng, lat]
+   * @param {{ useIsochrone, radiusM, minutes, profile }} distParams
+   * @param {Map} isoCache
+   * @returns {Promise<object|null>} GeoJSON polygon feature, or null
+   */
+  async _reachPolygon([lng, lat], distParams, isoCache) {
+    if (!distParams.useIsochrone) {
+      const radiusKm = (distParams.radiusM ?? 250) / 1000;
+      return turf.circle(turf.point([lng, lat]), radiusKm, { units: 'kilometers', steps: 32 });
+    }
+    const prof = distParams.profile || 'walking';
+    const mins = distParams.minutes;
+    const cacheKey = `${lat},${lng},${mins},${prof}`;
+    const cached = isoCache.get(cacheKey);
+    if (cached) return cached;
+    const url =
+      `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${lng},${lat}` +
+      `?contours_minutes=${mins}&polygons=true&access_token=${this.token}`;
+    try {
+      const res = await this._fetchWithRetry(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const polygon = data.features?.[0] || null;
+      if (polygon) isoCache.set(cacheKey, polygon);
+      return polygon;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Evaluate ALL main candidates against a condition's items in one pass.
+   * Reach polygons (circle/isochrone) are built on the FEWER-cardinality side, so
+   * a single fixed reference (e.g. one 出口/交差点) yields one isochrone call
+   * instead of one-per-candidate — and the reach is centered on that reference,
+   * which is the correct semantics for "X分以内 from the anchor". This is one
+   * uniform rule applied to every condition (no special-casing per query shape).
    *
-   * @param {{ id, lat, lng }} mainCandidate
+   * @param {Array<{ id, lat, lng }>} mainCandidates
    * @param {Array<{ lat, lng }>} conditionItems
    * @param {{ useIsochrone, useBuildingId, radiusM, minutes, profile, pushback }} distParams
    * @param {Map} isoCache
-   * @param {string|null} direction - 'north'|'south'|'east'|'west': require the item
-   *   to be on that side of the candidate (half-plane). null = any direction.
-   * @returns {Promise<{ matched: boolean, nearestM: number|null }>}
+   * @param {string|null} direction - 'north'|'south'|'east'|'west': require the
+   *   condition item to be on that side of the main candidate. null = any.
+   * @returns {Promise<Map<string, number|null>>} matched mainId → nearestM (meters)
    */
-  async evaluateDistance(mainCandidate, conditionItems, distParams, isoCache = new Map(), direction = null) {
-    const NO = { matched: false, nearestM: null };
-    if (!conditionItems || conditionItems.length === 0) return NO;
-    if (distParams.pushback) return NO;
+  async evaluateDistanceBatch(mainCandidates, conditionItems, distParams, isoCache = new Map(), direction = null) {
+    const matches = new Map(); // mainId → nearestM
+    if (!mainCandidates?.length || !conditionItems?.length || distParams.pushback) return matches;
 
-    const lat = mainCandidate.latitude  ?? mainCandidate.lat;
-    const lng = mainCandidate.longitude ?? mainCandidate.lng;
-    if (lat == null || lng == null) return NO;
-
-    const condLngLat = (c) => [c.longitude ?? c.lng, c.latitude ?? c.lat];
-    // Directional half-plane filter: 「南側にアパホテル」→ item must be south of candidate.
-    const inDirection = ([cLng, cLat]) => {
+    const ll = (o) => [o.longitude ?? o.lng, o.latitude ?? o.lat];
+    // Directional half-plane: item must be on `direction` side of the main candidate.
+    const dirOK = ([mLng, mLat], [iLng, iLat]) => {
       if (!direction) return true;
       switch (direction) {
-        case 'north': return cLat >  lat;
-        case 'south': return cLat <  lat;
-        case 'east':  return cLng >  lng;
-        case 'west':  return cLng <  lng;
+        case 'north': return iLat > mLat;
+        case 'south': return iLat < mLat;
+        case 'east':  return iLng > mLng;
+        case 'west':  return iLng < mLng;
         default:      return true;
       }
     };
-    const pt = turf.point([lng, lat]);
-
-    // Nearest straight-line distance to any (direction-filtered) condition item
-    let nearestM = null;
-    for (const c of conditionItems) {
-      const [cLng, cLat] = condLngLat(c);
-      if (cLng == null || cLat == null || !inDirection([cLng, cLat])) continue;
-      const dM = turf.distance(pt, turf.point([cLng, cLat]), { units: 'meters' });
-      if (nearestM == null || dM < nearestM) nearestM = dM;
-    }
-
-    // same_building: building-id comparison
-    if (distParams.useBuildingId) {
-      const mainBuildingId = await this._getBuildingId(lat, lng);
-      if (!mainBuildingId) return { matched: false, nearestM };
+    // Nearest straight-line distance (m) from a main to any direction-valid item.
+    const nearestFor = (mp) => {
+      let n = null;
       for (const c of conditionItems) {
-        const [cLng, cLat] = condLngLat(c);
-        if (!inDirection([cLng, cLat])) continue;
-        const cId = await this._getBuildingId(cLat, cLng);
-        if (cId && cId === mainBuildingId) return { matched: true, nearestM: 0 };
+        const ip = ll(c);
+        if (ip[0] == null || ip[1] == null || !dirOK(mp, ip)) continue;
+        const d = turf.distance(turf.point(mp), turf.point(ip), { units: 'meters' });
+        if (n == null || d < n) n = d;
       }
-      return { matched: false, nearestM };
-    }
+      return n;
+    };
 
-    // radius: turf.circle
-    if (!distParams.useIsochrone) {
-      const radiusKm = (distParams.radiusM ?? 250) / 1000;
-      const circle   = turf.circle(pt, radiusKm, { units: 'kilometers', steps: 32 });
-      this._evalPolygons.push(circle);
-      for (const c of conditionItems) {
-        const [cLng, cLat] = condLngLat(c);
-        if (cLng != null && cLat != null && inDirection([cLng, cLat]) &&
-            turf.booleanPointInPolygon(turf.point([cLng, cLat]), circle)) {
-          return { matched: true, nearestM };
+    // same_building: building-id comparison (per main; no polygon)
+    if (distParams.useBuildingId) {
+      for (const main of mainCandidates) {
+        const mp = ll(main);
+        if (mp[0] == null || mp[1] == null) continue;
+        const mainId = await this._getBuildingId(mp[1], mp[0]);
+        if (!mainId) continue;
+        for (const c of conditionItems) {
+          const ip = ll(c);
+          if (ip[0] == null || ip[1] == null || !dirOK(mp, ip)) continue;
+          const cId = await this._getBuildingId(ip[1], ip[0]);
+          if (cId && cId === mainId) { matches.set(String(main.id), 0); break; }
         }
       }
-      return { matched: false, nearestM };
+      return matches;
     }
 
-    // isochrone (FF: cache by anchor+level+profile+minutes)
-    const cacheKey = `${lat},${lng},${distParams.minutes},${distParams.profile}`;
-    let polygon = isoCache.get(cacheKey);
-    if (!polygon) {
-      const prof = distParams.profile || 'walking';
-      const mins = distParams.minutes;
-      const url  =
-        `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${lng},${lat}` +
-        `?contours_minutes=${mins}&polygons=true&access_token=${this.token}`;
-      try {
-        const res = await this._fetchWithRetry(url);
-        if (!res.ok) return { matched: false, nearestM };
-        const data = await res.json();
-        polygon = data.features?.[0];
-        if (polygon) isoCache.set(cacheKey, polygon);
-      } catch {
-        return { matched: false, nearestM };
-      }
-    }
-    if (!polygon) return { matched: false, nearestM };
-    this._evalPolygons.push(polygon);
+    // Build reach polygons on the fewer-cardinality side.
+    const flip    = conditionItems.length <= mainCandidates.length;
+    const anchors = flip ? conditionItems : mainCandidates;
 
-    for (const c of conditionItems) {
-      const [cLng, cLat] = condLngLat(c);
-      if (cLng != null && cLat != null && inDirection([cLng, cLat]) &&
-          turf.booleanPointInPolygon(turf.point([cLng, cLat]), polygon)) {
-        return { matched: true, nearestM };
+    for (const a of anchors) {
+      const ap = ll(a);
+      if (ap[0] == null || ap[1] == null) continue;
+      const poly = await this._reachPolygon(ap, distParams, isoCache);
+      if (!poly) continue;
+      this._evalPolygons.push(poly);
+
+      if (flip) {
+        // anchor = condition item; test each main candidate against it
+        for (const main of mainCandidates) {
+          const mp = ll(main);
+          if (mp[0] == null || mp[1] == null || !dirOK(mp, ap)) continue;
+          if (turf.booleanPointInPolygon(turf.point(mp), poly)) {
+            const nm = nearestFor(mp);
+            const prev = matches.get(String(main.id));
+            if (!matches.has(String(main.id)) || (nm != null && (prev == null || nm < prev))) {
+              matches.set(String(main.id), nm);
+            }
+          }
+        }
+      } else {
+        // anchor = main candidate; test each condition item against it
+        for (const c of conditionItems) {
+          const ip = ll(c);
+          if (ip[0] == null || ip[1] == null || !dirOK(ap, ip)) continue;
+          if (turf.booleanPointInPolygon(turf.point(ip), poly)) {
+            matches.set(String(a.id), nearestFor(ap));
+            break;
+          }
+        }
       }
     }
-    return { matched: false, nearestM };
+    return matches;
   }
 }

@@ -769,12 +769,12 @@ class QueryEngine {
       const condItems = condCandidates[label] ?? [];
       if (condItems.length === 0) continue; // 0-item → all miss (S already notified)
       const dir = cond.direction || null; // 「南側にアパホテル」→ item must be south of candidate
-      for (const main of mainCandidates) {
-        const { matched, nearestM } = await this.mcp.evaluateDistance(main, condItems, distParams, isoCache, dir);
-        if (matched) {
-          const t = tracker.get(String(main.id));
-          if (t) addHit(t, label, nearestM, refM);
-        }
+      // Build reach polygons on the fewer-cardinality side (fewer isochrone calls,
+      // and centers the reach on the fixed reference — correct for "X分以内 from anchor").
+      const matches = await this.mcp.evaluateDistanceBatch(mainCandidates, condItems, distParams, isoCache, dir);
+      for (const [mid, nearestM] of matches) {
+        const t = tracker.get(mid);
+        if (t) addHit(t, label, nearestM, refM);
       }
     }
 
