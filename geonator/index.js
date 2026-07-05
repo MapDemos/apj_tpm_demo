@@ -1091,7 +1091,7 @@ class LocationFinderApp {
       { layer: 'dbg-search-hits-c',  step: 'step-collect',   label: f => `target候補: ${f?.properties?.name || ''}` },
       { layer: 'dbg-tq-hits-c',      step: 'step-collect',   label: f => `条件候補: ${f?.properties?.name || ''}` },
     ];
-    const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 8 });
+    const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 8, className: 'dbg-tip-popup' });
     for (const { layer, step, label } of specs) {
       if (!this.map.getLayer(layer)) continue;
       this.map.on('mouseenter', layer, () => { this.map.getCanvas().style.cursor = 'pointer'; });

@@ -385,6 +385,28 @@ html, body {
   color: #0f172a;
   white-space: nowrap;
 }
+/* Debug hover tooltip: white background, black text (override dark popup theme) */
+.dbg-tip-popup .mapboxgl-popup-content {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+}
+.dbg-tip-popup.mapboxgl-popup-anchor-top .mapboxgl-popup-tip,
+.dbg-tip-popup.mapboxgl-popup-anchor-top-left .mapboxgl-popup-tip,
+.dbg-tip-popup.mapboxgl-popup-anchor-top-right .mapboxgl-popup-tip {
+  border-bottom-color: #ffffff !important;
+}
+.dbg-tip-popup.mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip,
+.dbg-tip-popup.mapboxgl-popup-anchor-bottom-left .mapboxgl-popup-tip,
+.dbg-tip-popup.mapboxgl-popup-anchor-bottom-right .mapboxgl-popup-tip {
+  border-top-color: #ffffff !important;
+}
+.dbg-tip-popup.mapboxgl-popup-anchor-left .mapboxgl-popup-tip {
+  border-right-color: #ffffff !important;
+}
+.dbg-tip-popup.mapboxgl-popup-anchor-right .mapboxgl-popup-tip {
+  border-left-color: #ffffff !important;
+}
 
 /* Example chips */
 
