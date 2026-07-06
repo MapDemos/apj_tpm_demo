@@ -69,14 +69,24 @@
         <button class="preset-btn" data-preset="cautious">🧭 慎重型</button>
       </div>
 
-      <!-- Slider 1: 意図 ⟷ 近さ -->
+      <!-- 3 weight sliders (相対値・内部で正規化) -->
       <div class="settings-slider-row">
-        <div class="slider-label"><span>意図の一致</span><span>近さ</span></div>
-        <input type="range" id="weightProxSlider" min="0" max="100" step="5">
-        <div class="slider-val" id="weightProxVal">-</div>
+        <div class="slider-label"><span>関連性（意図の一致）</span></div>
+        <input type="range" id="wRelSlider" min="0" max="100" step="5">
+        <div class="slider-val" id="wRelVal">-</div>
+      </div>
+      <div class="settings-slider-row">
+        <div class="slider-label"><span>条件からの距離（ローソン・バス停等）</span></div>
+        <input type="range" id="wCondSlider" min="0" max="100" step="5">
+        <div class="slider-val" id="wCondVal">-</div>
+      </div>
+      <div class="settings-slider-row">
+        <div class="slider-label"><span>Proximityからの距離（西大島等）</span></div>
+        <input type="range" id="wAnchorSlider" min="0" max="100" step="5">
+        <div class="slider-val" id="wAnchorVal">-</div>
       </div>
 
-      <!-- Slider 2: 言い切り度 -->
+      <!-- 言い切り度 -->
       <div class="settings-slider-row">
         <div class="slider-label"><span>慎重（同程度多め）</span><span>言い切り（gold積極）</span></div>
         <input type="range" id="decisivenessSlider" min="0" max="100" step="5">

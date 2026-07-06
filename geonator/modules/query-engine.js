@@ -30,7 +30,7 @@ class QueryEngine {
     this._clarifyCount = 0;
     this._previousText = null;    // for L1 re-parse
     this._awaitingClarify = false; // last run ended asking for more info (main-input answer merges)
-    this._ratingCache = new Map(); // L2 relevance cache: "intent||name" → exact|related|mismatch (session stability)
+    this._ratingCache = new Map(); // L2 relevance cache: "intent||name" → definitely|probably|unknown|no (session stability)
   }
 
   /** Localized message bundle for the current UI language. */
@@ -202,6 +202,10 @@ class QueryEngine {
 
     // [3-A4] compute dual bbox (C-2)
     const bboxes = this._computeDualBbox(this._cache.bbox, schema);
+
+    // anchorScore の参照半径 = target収集bboxの外接半径（幅の半分）。候補の c.distance
+    // (アンカー中心からの距離) をこの半径で正規化して「アンカーからの近さ」に使う。
+    this._anchorRefM = Math.max(1, this._bboxWidthM(bboxes.targetBbox) / 2);
 
     // Debug: proximity resolution info
     this._dbgReport.proximity = {
@@ -688,9 +692,9 @@ class QueryEngine {
   async _rateMain(target, candidates) {
     if (!candidates || candidates.length === 0) return { kept: [], excludedNames: [] };
 
-    // L2 relevance rating (all target types). Coarse buckets for stability:
-    // exact / mismatch(removed) / related(default). Cached by intent||name for the
-    // session so repeated queries stay stable (LLM rating is nondeterministic).
+    // L2 relevance rating (all target types). 4-level ordinal for stability:
+    // definitely / probably / unknown(default) / no(removed). Cached by intent||name
+    // for the session so repeated queries stay stable (LLM rating is nondeterministic).
     const intentLabel = this._buildIntentLabel(target);
     const keyOf = c => `${intentLabel}||${(c.name || '').trim()}`;
 
@@ -705,10 +709,13 @@ class QueryEngine {
       ));
       batches.forEach((b, bi) => {
         const r = results[bi];
-        if (!r) return; // failed batch → leave uncached (retry next time), default 'related' this run
+        if (!r) return; // failed batch → leave uncached (retry next time), default 'unknown' this run
         for (const c of b) {
           const id = String(c.id);
-          const rel = r.mismatch.has(id) ? 'mismatch' : (r.exact.has(id) ? 'exact' : 'related');
+          const rel = r.no.has(id)         ? 'no'
+                    : r.definitely.has(id) ? 'definitely'
+                    : r.probably.has(id)   ? 'probably'
+                    : 'unknown';
           this._ratingCache.set(keyOf(c), rel);
         }
       });
@@ -716,8 +723,8 @@ class QueryEngine {
 
     const kept = [], excludedNames = [];
     for (const c of candidates) {
-      const rel = this._ratingCache.get(keyOf(c)) ?? 'related';
-      if (rel === 'mismatch') { excludedNames.push(c.name || '(名前なし)'); continue; }
+      const rel = this._ratingCache.get(keyOf(c)) ?? 'unknown';
+      if (rel === 'no') { excludedNames.push(c.name || '(名前なし)'); continue; }
       c._relevance = rel;
       kept.push(c);
     }
@@ -765,18 +772,38 @@ class QueryEngine {
       tracker.set(String(c.id), { candidate: c, total: conditions.length, hit: 0, hitLabels: [], closenessSum: 0 });
     }
 
-    // Weighted-sum score: score = w_prox×condScore + w_rel×relScore.
-    // relScore = 意図一致度 (exact 1.0 / related SCORE_RELATED)。掛け算(旧)と違い related を
-    // ハードにgold不可にしない — 近ければ(condScore高)relatedでもgold到達可。バランス
-    // スライダー(SCORE_WEIGHT_PROXIMITY)で「意図⟷近さ」の重みを可変。mismatchは_rateMainで除外済み。
-    const wProx    = Math.max(0, Math.min(1, this.config.SCORE_WEIGHT_PROXIMITY ?? 0.65));
-    const wRel     = 1 - wProx;
-    const relScore = c => (c._relevance === 'exact' ? 1.0 : (this.config.SCORE_RELATED ?? 0.6));
+    // 3要素の重み付き和: score = normalize(w_rel×relScore + w_cond×condScore + w_anchor×anchorScore)。
+    // 利用可能な要素の重みだけで割る（条件なし→condを除外、距離不明→anchorを除外）。
+    // relScore は4段階(絶対そう/多分そう/わからない、「違う」は_rateMainで除外済み)。
+    const wRel    = Math.max(0, this.config.SCORE_WEIGHT_RELEVANCE ?? 0.3);
+    const wCond   = Math.max(0, this.config.SCORE_WEIGHT_CONDITION ?? 0.5);
+    const wAnchor = Math.max(0, this.config.SCORE_WEIGHT_ANCHOR    ?? 0.2);
+    const relScore = c => {
+      switch (c._relevance) {
+        case 'definitely': return this.config.SCORE_REL_DEFINITELY ?? 1.0;
+        case 'probably':   return this.config.SCORE_REL_PROBABLY   ?? 0.7;
+        default:           return this.config.SCORE_REL_UNKNOWN    ?? 0.4; // unknown
+      }
+    };
+    // anchorScore = proximityアンカーからの近さ。c.distance(アンカー中心からの距離) と
+    // this._anchorRefM(target収集bbox半径) から算出。距離不明なら null（重みから除外）。
+    const anchorScore = c => {
+      const d = c.distance;
+      if (d == null || !this._anchorRefM) return null;
+      return Math.max(0, Math.min(1, 1 - d / this._anchorRefM));
+    };
+    // 利用可能な要素だけで正規化した重み付き和
+    const weighted = (parts) => {
+      let num = 0, den = 0;
+      for (const [w, v] of parts) if (v != null && w > 0) { num += w * v; den += w; }
+      return den > 0 ? num / den : 0;
+    };
 
     if (conditions.length === 0) {
-      // No conditions — no proximity signal, so score = relScore only.
+      // No conditions — score = relevance + anchor closeness (no condition term).
       mainCandidates.forEach(c => {
-        c._matchInfo = { hit: 0, total: 0, labels: [], score: +relScore(c).toFixed(3), relevance: c._relevance };
+        const score = weighted([[wRel, relScore(c)], [wAnchor, anchorScore(c)]]);
+        c._matchInfo = { hit: 0, total: 0, labels: [], score: +score.toFixed(3), relevance: c._relevance };
       });
       this._assignTiers(mainCandidates, [], []);
       mainCandidates.sort((a, b) => b._matchInfo.score - a._matchInfo.score);
@@ -832,8 +859,7 @@ class QueryEngine {
     }
 
     // Classify (OR — all displayed) + attach continuous score.
-    // score = w_prox×condScore + w_rel×relScore（重み付き和）。バランススライダーで
-    // 「意図の一致」と「近さ」の効き具合を可変。
+    // score = normalize(w_rel×relScore + w_cond×condScore + w_anchor×anchorScore)。
     const full = [], partial = [], none = [];
     for (const [, t] of tracker) {
       // condScore = 全条件での平均closeness。分母は hit ではなく total（非ヒット条件を
@@ -841,8 +867,9 @@ class QueryEngine {
       // 極近な partial が全条件そこそこの full を上回る楽観バイアスが出る（統計レビュー §4）。
       // full は hit==total なので値は不変、partial の過大評価だけが是正される。
       const condScore = t.total > 0 ? t.closenessSum / t.total : 0;
-      const score = wProx * condScore + wRel * relScore(t.candidate);
-      t.candidate._matchInfo = { hit: t.hit, total: t.total, labels: t.hitLabels, score: +score.toFixed(3), relevance: t.candidate._relevance };
+      const c = t.candidate;
+      const score = weighted([[wRel, relScore(c)], [wCond, condScore], [wAnchor, anchorScore(c)]]);
+      c._matchInfo = { hit: t.hit, total: t.total, labels: t.hitLabels, score: +score.toFixed(3), relevance: c._relevance };
       if (t.hit === t.total)      full.push(t.candidate);
       else if (t.hit > 0)         partial.push(t.candidate);
       else                        none.push(t.candidate);
