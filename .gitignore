@@ -1,0 +1,7 @@
+# Claude Code local state (worktrees, jobs, etc.) — never commit.
+# Worktree dirs were being committed as phantom gitlinks and broke GitHub Pages
+# (actions/checkout submodule fetch failed: no .gitmodules entry).
+.claude/
+
+# macOS
+.DS_Store
