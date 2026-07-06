@@ -1728,29 +1728,35 @@ class MapboxMCPClient {
    */
   async filterSameBuilding(mains, items, tightM = 20) {
     const ll = o => [o.longitude ?? o.lng, o.latitude ?? o.lat];
-    const anchorIds = new Set();
-    for (const it of (items || [])) {
-      const p = ll(it);
-      if (p[0] == null || p[1] == null) continue;
-      const id = await this._getBuildingId(p[1], p[0]);
-      if (id) anchorIds.add(id);
-    }
-    if (anchorIds.size === 0) return { kept: mains, excluded: [] }; // 評価不能 → 全員残す
-    const kept = [], excluded = [];
-    for (const m of (mains || [])) {
+    const itemList = items || [];
+    const mainList = mains || [];
+    // building id 取得は各点独立 → 並列化（結果は同一）。
+    const anchorIds = new Set(
+      (await Promise.all(itemList.map(it => {
+        const p = ll(it);
+        return (p[0] == null || p[1] == null) ? null : this._getBuildingId(p[1], p[0]);
+      }))).filter(Boolean)
+    );
+    if (anchorIds.size === 0) return { kept: mainList, excluded: [] }; // 評価不能 → 全員残す
+    const mids = await Promise.all(mainList.map(m => {
       const mp = ll(m);
-      if (mp[0] == null || mp[1] == null) { kept.push(m); continue; } // 評価不能
-      const mid = await this._getBuildingId(mp[1], mp[0]);
-      if (mid == null) { kept.push(m); continue; }                    // 評価不能 → 残す
-      if (anchorIds.has(mid)) { kept.push(m); continue; }              // 同一ビル
+      return (mp[0] == null || mp[1] == null) ? null : this._getBuildingId(mp[1], mp[0]);
+    }));
+    const kept = [], excluded = [];
+    mainList.forEach((m, i) => {
+      const mp = ll(m);
+      if (mp[0] == null || mp[1] == null) { kept.push(m); return; } // 評価不能
+      const mid = mids[i];
+      if (mid == null) { kept.push(m); return; }                    // 評価不能 → 残す
+      if (anchorIds.has(mid)) { kept.push(m); return; }              // 同一ビル
       // 別ビルだが tightM 以内（隣接屋外・同一敷地）→ 救済
-      const near = (items || []).some(it => {
+      const near = itemList.some(it => {
         const ip = ll(it);
         return ip[0] != null && ip[1] != null &&
           turf.distance(turf.point(mp), turf.point(ip), { units: 'meters' }) <= tightM;
       });
       if (near) kept.push(m); else excluded.push(m);
-    }
+    });
     return { kept, excluded };
   }
 
@@ -2593,15 +2599,26 @@ class MapboxMCPClient {
       return matches;
     }
 
-    // Build reach polygons on the fewer-cardinality side.
+    // Build reach polygons on the fewer-cardinality side. 各anchorのpolygon取得は独立
+    // なので並列fetch。同一座標はbatch内でdedup（radiusはローカル即時／isochroneの重複API防止。
+    // isoCacheは条件をまたいで有効＝_evaluateがcondごとに逐次呼ぶため従来の再利用も維持）。
     const flip    = conditionItems.length <= mainCandidates.length;
     const anchors = flip ? conditionItems : mainCandidates;
 
-    for (const a of anchors) {
+    const polyByKey = new Map(); // "lat,lng" → Promise<poly>（batch内dedup）
+    const anchorPolys = await Promise.all(anchors.map(a => {
       const ap = ll(a);
-      if (ap[0] == null || ap[1] == null) continue;
-      const poly = await this._reachPolygon(ap, distParams, isoCache);
-      if (!poly) continue;
+      if (ap[0] == null || ap[1] == null) return null;
+      const key = `${ap[1]},${ap[0]}`;
+      if (!polyByKey.has(key)) polyByKey.set(key, this._reachPolygon(ap, distParams, isoCache));
+      return polyByKey.get(key);
+    }));
+
+    for (let ai = 0; ai < anchors.length; ai++) {
+      const a  = anchors[ai];
+      const ap = ll(a);
+      const poly = anchorPolys[ai];
+      if (ap[0] == null || ap[1] == null || !poly) continue;
       this._evalPolygons.push(poly);
 
       if (flip) {

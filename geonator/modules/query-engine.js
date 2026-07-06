@@ -853,19 +853,23 @@ class QueryEngine {
       const refM = distParams.radiusM
         ?? (distParams.minutes ? distParams.minutes * (speed[distParams.profile] || 80) : 250);
 
-      // road / water: per-candidate layer check (streets-v8 road/water layers)
+      // road / water: per-candidate layer check (streets-v8 road/water layers).
+      // 候補ごとに独立なので並列化（結果は候補順に同期適用するので挙動は同一）。
       if (cond.type === 'road' || cond.type === 'water') {
         const roadOpts = cond.type === 'road' ? this._roadOpts(cond.text) : null;
-        for (const main of mainCandidates) {
+        const results = await Promise.all(mainCandidates.map(main => {
           const lat = main.latitude ?? main.lat, lng = main.longitude ?? main.lng;
-          const res = cond.type === 'road'
-            ? await this.mcp.roadNear(lat, lng, refM, roadOpts)
-            : await this.mcp.waterNear(lat, lng, refM);
+          return cond.type === 'road'
+            ? this.mcp.roadNear(lat, lng, refM, roadOpts)
+            : this.mcp.waterNear(lat, lng, refM);
+        }));
+        mainCandidates.forEach((main, i) => {
+          const res = results[i];
           if (res.matched && res.nearestM != null && res.nearestM <= refM) {
             const t = tracker.get(String(main.id));
             if (t) addHit(t, label, res.nearestM, refM);
           }
-        }
+        });
         continue;
       }
 
