@@ -140,67 +140,83 @@ class LocationFinderApp {
   }
 
   /**
-   * Scoring settings: 2 sliders (意図⟷近さ weight / 言い切り度) + 3 presets.
-   * Values live in CONFIG (read by QueryEngine on the NEXT search) and persist to
-   * localStorage. Presets set both sliders at once (推論スタイル).
+   * Scoring settings: 3 weight sliders (関連性 / 条件距離 / アンカー距離) + 言い切り度
+   * + 3 presets. Weights are relative (normalized internally at scoring time, so they
+   * need not sum to 1). Values live in CONFIG (read by QueryEngine on the NEXT search)
+   * and persist to localStorage. Presets set all four at once (推論スタイル).
    */
   _initScoringSettings() {
-    // Preset profiles: [weightProximity(0..1), decisiveness(0..1)]
+    // Preset profiles: [wRel, wCond, wAnchor, decisiveness] (0..1 相対値)
     const PRESETS = {
-      decisive: [0.95, 0.85],  // 言い切り型: 近さ95%/関連5%＝ほぼ近さ全振り＋僅差でもgoldを立てる
-      balanced: [0.65, 0.40],  // バランス型（既定）
-      cautious: [0.60, 0.10],  // 慎重型: 僅差は同程度、goldは高信頼のみ
+      decisive: [0.05, 0.60, 0.35, 0.85], // 言い切り型: 意図ほぼ無視・距離全振り・僅差でもgold
+      balanced: [0.30, 0.50, 0.20, 0.40], // バランス型（既定）
+      cautious: [0.40, 0.40, 0.20, 0.10], // 慎重型: 意図も重視・僅差は同程度
     };
 
     // Restore saved scoring prefs
     try {
       const s = JSON.parse(localStorage.getItem('geonator_scoring') || '{}');
-      if (typeof s.wProx === 'number') this.config.SCORE_WEIGHT_PROXIMITY = s.wProx;
-      if (typeof s.dec   === 'number') this.config.SCORE_DECISIVENESS     = s.dec;
+      if (typeof s.wRel    === 'number') this.config.SCORE_WEIGHT_RELEVANCE = s.wRel;
+      if (typeof s.wCond   === 'number') this.config.SCORE_WEIGHT_CONDITION = s.wCond;
+      if (typeof s.wAnchor === 'number') this.config.SCORE_WEIGHT_ANCHOR    = s.wAnchor;
+      if (typeof s.dec     === 'number') this.config.SCORE_DECISIVENESS     = s.dec;
     } catch (_) {}
 
-    const proxSlider = document.getElementById('weightProxSlider');
-    const decSlider  = document.getElementById('decisivenessSlider');
-    const proxVal    = document.getElementById('weightProxVal');
-    const decVal     = document.getElementById('decisivenessVal');
+    const els = {
+      wRel:    [document.getElementById('wRelSlider'),    document.getElementById('wRelVal'),    'SCORE_WEIGHT_RELEVANCE'],
+      wCond:   [document.getElementById('wCondSlider'),   document.getElementById('wCondVal'),   'SCORE_WEIGHT_CONDITION'],
+      wAnchor: [document.getElementById('wAnchorSlider'), document.getElementById('wAnchorVal'), 'SCORE_WEIGHT_ANCHOR'],
+      dec:     [document.getElementById('decisivenessSlider'), document.getElementById('decisivenessVal'), 'SCORE_DECISIVENESS'],
+    };
 
     const syncUI = () => {
-      const p = this.config.SCORE_WEIGHT_PROXIMITY ?? 0.65;
-      const d = this.config.SCORE_DECISIVENESS     ?? 0.4;
-      if (proxSlider) proxSlider.value = String(Math.round(p * 100));
-      if (decSlider)  decSlider.value  = String(Math.round(d * 100));
-      if (proxVal) proxVal.textContent = `近さ ${Math.round(p * 100)}% / 意図 ${Math.round((1 - p) * 100)}%`;
-      if (decVal)  decVal.textContent  = `言い切り度 ${Math.round(d * 100)}%`;
-      // Highlight the matching preset (if any)
+      const wr = this.config.SCORE_WEIGHT_RELEVANCE ?? 0.3;
+      const wc = this.config.SCORE_WEIGHT_CONDITION ?? 0.5;
+      const wa = this.config.SCORE_WEIGHT_ANCHOR    ?? 0.2;
+      const d  = this.config.SCORE_DECISIVENESS     ?? 0.4;
+      const sum = (wr + wc + wa) || 1;
+      const set = (key, raw, label) => {
+        const [sl, vl] = els[key];
+        if (sl) sl.value = String(Math.round(raw * 100));
+        if (vl) vl.textContent = label;
+      };
+      set('wRel',    wr, `${Math.round(wr*100)}（実効 ${Math.round(wr/sum*100)}%）`);
+      set('wCond',   wc, `${Math.round(wc*100)}（実効 ${Math.round(wc/sum*100)}%）`);
+      set('wAnchor', wa, `${Math.round(wa*100)}（実効 ${Math.round(wa/sum*100)}%）`);
+      set('dec',     d,  `言い切り度 ${Math.round(d*100)}%`);
       document.querySelectorAll('#scorePresets .preset-btn').forEach(b => {
         const pr = PRESETS[b.dataset.preset];
-        b.classList.toggle('active', pr && Math.abs(pr[0] - p) < 0.001 && Math.abs(pr[1] - d) < 0.001);
+        b.classList.toggle('active', pr &&
+          Math.abs(pr[0]-wr)<0.001 && Math.abs(pr[1]-wc)<0.001 &&
+          Math.abs(pr[2]-wa)<0.001 && Math.abs(pr[3]-d)<0.001);
       });
     };
 
     const persistScoring = () => {
       try {
         localStorage.setItem('geonator_scoring', JSON.stringify({
-          wProx: this.config.SCORE_WEIGHT_PROXIMITY,
-          dec:   this.config.SCORE_DECISIVENESS,
+          wRel:    this.config.SCORE_WEIGHT_RELEVANCE,
+          wCond:   this.config.SCORE_WEIGHT_CONDITION,
+          wAnchor: this.config.SCORE_WEIGHT_ANCHOR,
+          dec:     this.config.SCORE_DECISIVENESS,
         }));
       } catch (_) {}
     };
 
-    proxSlider?.addEventListener('input', e => {
-      this.config.SCORE_WEIGHT_PROXIMITY = Number(e.target.value) / 100;
-      persistScoring(); syncUI();
-    });
-    decSlider?.addEventListener('input', e => {
-      this.config.SCORE_DECISIVENESS = Number(e.target.value) / 100;
-      persistScoring(); syncUI();
-    });
+    for (const [key, [slider, , cfgKey]] of Object.entries(els)) {
+      slider?.addEventListener('input', e => {
+        this.config[cfgKey] = Number(e.target.value) / 100;
+        persistScoring(); syncUI();
+      });
+    }
     document.querySelectorAll('#scorePresets .preset-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const pr = PRESETS[btn.dataset.preset];
         if (!pr) return;
-        this.config.SCORE_WEIGHT_PROXIMITY = pr[0];
-        this.config.SCORE_DECISIVENESS     = pr[1];
+        this.config.SCORE_WEIGHT_RELEVANCE = pr[0];
+        this.config.SCORE_WEIGHT_CONDITION = pr[1];
+        this.config.SCORE_WEIGHT_ANCHOR    = pr[2];
+        this.config.SCORE_DECISIVENESS     = pr[3];
         persistScoring(); syncUI();
       });
     });
@@ -710,11 +726,12 @@ class LocationFinderApp {
 
       const mi = place._matchInfo || {};
       const scorePct = mi.score != null ? Math.round(mi.score * 100) : null;
-      // L2 relevance (意図への文脈適合): exact = 意図のど真ん中 / related = 関連はするが中心でない。
-      // mismatch は評価前に除外済みなので、ここに来るのは exact / related のみ。
+      // L2 relevance (4段階): definitely=絶対そう / probably=多分そう / unknown=わからない。
+      // 「違う」は評価前に除外済みなので、ここに来るのは上記3つのみ。
       const REL = {
-        exact:   { stars: '★★★', text: 'ど真ん中', color: '#16a34a' },
-        related: { stars: '★★☆', text: '関連',     color: '#64748b' },
+        definitely: { stars: '★★★', text: '絶対そう',   color: '#16a34a' },
+        probably:   { stars: '★★☆', text: '多分そう',   color: '#84cc16' },
+        unknown:    { stars: '★☆☆', text: 'わからない', color: '#64748b' },
       };
       const rel = REL[mi.relevance];
       const popupHTML =
@@ -864,8 +881,9 @@ class LocationFinderApp {
       score:        mi.score ?? '',
       tier:         candidate?._tier ?? '',
       relevance:    candidate?._relevance ?? '',
-      w_prox:       this.config.SCORE_WEIGHT_PROXIMITY ?? '',
-      related:      this.config.SCORE_RELATED ?? '',
+      w_rel:        this.config.SCORE_WEIGHT_RELEVANCE ?? '',
+      w_cond:       this.config.SCORE_WEIGHT_CONDITION ?? '',
+      w_anchor:     this.config.SCORE_WEIGHT_ANCHOR ?? '',
       decisiveness: this.config.SCORE_DECISIVENESS ?? '',
       gold_min:     this.config.GOLD_MIN_SCORE ?? '',
     };
@@ -881,7 +899,7 @@ class LocationFinderApp {
     try { all = JSON.parse(localStorage.getItem('geonator_feedback') || '[]'); } catch (_) {}
     if (!all.length) { this.addMessage('assistant', 'フィードバックはまだ記録されていません。'); return; }
 
-    const cols = ['ts','query','label','candidate_id','name','lat','lng','rank','score','tier','relevance','w_prox','related','decisiveness','gold_min'];
+    const cols = ['ts','query','label','candidate_id','name','lat','lng','rank','score','tier','relevance','w_rel','w_cond','w_anchor','decisiveness','gold_min'];
     const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const csv = [cols.join(',')].concat(all.map(r => cols.map(c => esc(r[c])).join(','))).join('\n');
 

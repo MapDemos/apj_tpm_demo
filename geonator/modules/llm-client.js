@@ -63,11 +63,12 @@ class LLMClient {
    * @returns {Promise<Array<number|string>|null>} mismatch_ids, or null on failure
    */
   /**
-   * Rate candidates against the intent: returns { exact:Set, mismatch:Set } of ids.
-   * Unlisted ids = 'related' (kept, medium). null on parse failure (caller keeps all).
+   * Rate candidates against the intent (4-level). Returns
+   * { definitely:Set, probably:Set, no:Set } of ids. Unlisted ids = 'unknown'
+   * (kept, low). null on parse failure (caller keeps all as 'unknown').
    */
   async rateCandidates(intentLabel, candidates) {
-    if (!candidates || candidates.length === 0) return { exact: new Set(), mismatch: new Set() };
+    if (!candidates || candidates.length === 0) return { definitely: new Set(), probably: new Set(), no: new Set() };
 
     const result = await this._callClaude(
       this._buildL2Prompt(intentLabel, candidates),
@@ -79,11 +80,12 @@ class LLMClient {
       const json = this._extractJSON(result);
       if (!json) return null;
       return {
-        exact:    new Set((json.exact    || []).map(String)),
-        mismatch: new Set((json.mismatch || []).map(String)),
+        definitely: new Set((json.definitely || []).map(String)),
+        probably:   new Set((json.probably   || []).map(String)),
+        no:         new Set((json.no         || []).map(String)),
       };
     } catch {
-      return null; // parse failure → caller keeps all as 'related'
+      return null; // parse failure → caller keeps all as 'unknown'
     }
   }
 

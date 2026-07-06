@@ -74,19 +74,25 @@ const CONFIG = {
   BBOX_MAX_HALF_M:     2000,         // max half-width of primary search bbox in meters (§6-3)
 
   // ============================================
-  // SCORING / TIERING (統計レビュー 2026-07-05)
-  // score = w_prox×condScore + w_rel×relScore の重み付き和。
-  //   condScore = 条件との近さ(0..1、非ヒットは0で算入)
-  //   relScore  = 意図一致度: exact=1.0 / related=SCORE_RELATED
-  //   w_prox    = SCORE_WEIGHT_PROXIMITY, w_rel = 1 - w_prox
+  // SCORING / TIERING (統計レビュー 2026-07-05 / 3要素化 2026-07-06)
+  // score = (w_rel×relScore + w_cond×condScore + w_anchor×anchorScore) を利用可能な
+  //   要素だけで正規化(重みの合計で割る)した重み付き和。
+  //   relScore   = 意図一致度(4段階): 絶対そう1.0 / 多分そう / わからない（「違う」はrateで除外）
+  //   condScore  = 条件(ローソン・バス停等)との近さ平均(0..1、非ヒットは0)
+  //   anchorScore= proximityアンカー(例:西大島)からの近さ = 1 − 距離/アンカー参照半径
   // ティアは「絶対ゲート(GOLD_MIN_SCORE)＋マージン(1位-2位)」で決定。
   //   range(max-min)はnと外れ値に交絡、zスコア/パーセンタイルはn≤3で破綻のため不採用。
-  // ※ 下記は暫定既定値。設定画面のスライダー/プリセットで調整、最終は検証セット(#5)で較正。
-  //   スライダー2本 = SCORE_WEIGHT_PROXIMITY（意図⟷近さ）と SCORE_DECISIVENESS（言い切り度）。
+  // ※ 暫定既定値。設定画面のスライダー3本(関連性/条件距離/アンカー距離)＋言い切り度で調整、
+  //   最終は検証セット(#5)で較正。重みは相対値で内部正規化するので合計1でなくてよい。
   // ============================================
-  SCORE_WEIGHT_PROXIMITY: 0.65,  // バランス: 近さの重み(0=意図重視 … 1=近さ重視)。既定は近さ寄り＝relevance関与ダウン
-  SCORE_RELATED:          0.6,   // relatedの意図スコア(exact=1.0固定)。重み付き和なのでrelatedでも近ければgold到達可
-  SCORE_DECISIVENESS:     0.4,   // 言い切り度(0=慎重…1=言い切り)。高いほど僅差でもgoldを立てる→GOLD_MARGINを縮める
+  SCORE_WEIGHT_RELEVANCE: 0.30,  // 関連性(意図一致)の重み
+  SCORE_WEIGHT_CONDITION: 0.50,  // 条件(ローソン・バス停等)からの距離の重み
+  SCORE_WEIGHT_ANCHOR:    0.20,  // proximityアンカー(西大島等)からの距離の重み
+  SCORE_DECISIVENESS:     0.40,  // 言い切り度(0=慎重…1=言い切り)。高いほど僅差でもgoldを立てる→GOLD_MARGINを縮める
+  // 4段階relevanceのスコア(「違う」はrateで除外)。ネガティブ強め: わからないは控えめに低く。
+  SCORE_REL_DEFINITELY:   1.0,   // 絶対そう
+  SCORE_REL_PROBABLY:     0.7,   // 多分そう
+  SCORE_REL_UNKNOWN:      0.4,   // わからない（既定・不確実は控えめ）
   GOLD_MIN_SCORE:         0.5,   // gold候補の絶対スコア下限（固定のゴミ足切り。全件低スコアなら単独fullでもgold不可）
 
   DEBUG: true,
