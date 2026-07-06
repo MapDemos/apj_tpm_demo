@@ -283,11 +283,11 @@ class LocationFinderApp {
         self._updateAPICountDisplay();
       },
       drawProximityPoints(points) {
+        // proximityアンカー（基準点）の地図表示は無効化（分かりづらいとの指摘）。
+        // 検索エリアは drawBBox(targetBbox/condBbox) で引き続き表示する。
+        // アンカー由来の bbox だけは範囲把握に有用なので残す。
         (points || []).forEach(p => {
-          if (p.bbox) { self._dbgAddBbox(p.bbox); return; }
-          if (p.lng != null && p.lat != null) {
-            self._dbgAddPoint('dbg-proximity', 'proximity', p.lng, p.lat, { type: 'proximity' });
-          }
+          if (p.bbox) self._dbgAddBbox(p.bbox);
         });
       },
       drawBBox(bbox) {
