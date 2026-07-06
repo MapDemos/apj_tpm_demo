@@ -816,9 +816,15 @@ class QueryEngine {
     // [FF] isochrone optimization: compute polygon once per anchor+level
     const isoCache = new Map();
 
+    // Track which conditions were hit by ≥1 candidate. A condition hit by NOBODY
+    // (0件/データ未収録/周辺に実在しない) carries zero ranking info and only drags
+    // every candidate down uniformly — so it's excluded from the effective total below
+    // (treated like 'unsupported': 注記のみ・非採点)。condNotFound already notified.
+    const conditionHit = new Set();
     const addHit = (t, label, nearestM, refM) => {
       t.hit++;
       t.hitLabels.push(label);
+      conditionHit.add(label);
       const closeness = nearestM != null ? Math.max(0, Math.min(1, 1 - nearestM / refM)) : 0.5;
       t.closenessSum += closeness;
     };
@@ -858,21 +864,27 @@ class QueryEngine {
       }
     }
 
+    // 有効条件数 = 少なくとも1候補がヒットした条件のみ。全員0ヒットの条件（0件/データ
+    // 未収録/周辺に実在しない）は分母から除外する。こうしないと評価不能な条件が全候補を
+    // 一律 partial(bronze) に落とし、condScore も薄める。type を問わず適用（poi/road/水域/
+    // 出口/バス停…）。除外条件は condNotFound で既に注記済み。
+    const effTotal = conditions.filter(c => conditionHit.has(c.text ?? c.type)).length;
+
     // Classify (OR — all displayed) + attach continuous score.
     // score = normalize(w_rel×relScore + w_cond×condScore + w_anchor×anchorScore)。
     const full = [], partial = [], none = [];
     for (const [, t] of tracker) {
-      // condScore = 全条件での平均closeness。分母は hit ではなく total（非ヒット条件を
-      // 0で算入する）。hit で割ると「近かった条件だけの条件付き平均」になり、1条件だけ
-      // 極近な partial が全条件そこそこの full を上回る楽観バイアスが出る（統計レビュー §4）。
-      // full は hit==total なので値は不変、partial の過大評価だけが是正される。
-      const condScore = t.total > 0 ? t.closenessSum / t.total : 0;
+      // condScore = 有効条件での平均closeness（分母=effTotal、非ヒット条件は0算入）。
+      // hit で割る条件付き平均は partial を楽観評価するため effTotal で割る（統計レビュー §4）。
+      // effTotal===0（有効条件なし）は null にして weighted の重みから除外＝relevance/anchorのみ。
+      const condScore = effTotal > 0 ? t.closenessSum / effTotal : null;
       const c = t.candidate;
       const score = weighted([[wRel, relScore(c)], [wCond, condScore], [wAnchor, anchorScore(c)]]);
-      c._matchInfo = { hit: t.hit, total: t.total, labels: t.hitLabels, score: +score.toFixed(3), relevance: c._relevance };
-      if (t.hit === t.total)      full.push(t.candidate);
-      else if (t.hit > 0)         partial.push(t.candidate);
-      else                        none.push(t.candidate);
+      c._matchInfo = { hit: t.hit, total: effTotal, labels: t.hitLabels, score: +score.toFixed(3), relevance: c._relevance };
+      // effTotal===0 のとき hit(0)===effTotal(0) で full 扱い（＝条件なしと同じ挙動）。
+      if (t.hit === effTotal)     full.push(c);
+      else if (t.hit > 0)         partial.push(c);
+      else                        none.push(c);
     }
 
     // Tiering (JS, deterministic): 絶対ゲート＋マージン。絶対水準を満たし単独突出のときのみ
