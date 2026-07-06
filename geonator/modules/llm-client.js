@@ -54,18 +54,11 @@ class LLMClient {
   // ─────────────────────────────────────────────
 
   /**
-   * Given an intent label and candidate list, return the IDs that CLEARLY do NOT
-   * match the intent (to be removed). Judgment is intent-based, but only clear
-   * mismatches are returned — ambiguous candidates are kept (recall priority, R).
-   * Returns null on parse failure so the caller can keep all (conservative).
-   * @param {string} intentLabel - human-readable description of what is being searched
-   * @param {Array<{id: number|string, name: string}>} candidates
-   * @returns {Promise<Array<number|string>|null>} mismatch_ids, or null on failure
-   */
-  /**
    * Rate candidates against the intent (4-level). Returns
    * { definitely:Set, probably:Set, no:Set } of ids. Unlisted ids = 'unknown'
    * (kept, low). null on parse failure (caller keeps all as 'unknown').
+   * @param {string} intentLabel - human-readable description of what is being searched
+   * @param {Array<{id: number|string, name: string}>} candidates
    */
   async rateCandidates(intentLabel, candidates) {
     if (!candidates || candidates.length === 0) return { definitely: new Set(), probably: new Set(), no: new Set() };
@@ -151,7 +144,7 @@ class LLMClient {
     const list = candidates.map(c => `{"id":${JSON.stringify(c.id)},"name":${JSON.stringify(c.name ?? '')}}`).join('\n');
     return {
       system: PROMPT_L2,
-      user:   `探しているもの（意図）：${intentLabel}\n\n候補:\n${list}\n\nこの意図に【明らかに】合致しない候補のIDだけを{"mismatch_ids":[...]}形式で返してください。判断が曖昧なものは含めないでください（残します）。`,
+      user:   `探しているもの（意図）：${intentLabel}\n\n候補:\n${list}\n\n各候補が「意図そのもの（意図のインスタンス）か」を判定し、{"definitely":[...],"probably":[...],"no":[...]} 形式でIDを返してください。unknown（判断つかない）は記載不要＝未記載はunknown扱い。JSONのみ。`,
     };
   }
 }

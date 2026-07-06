@@ -662,7 +662,7 @@ class QueryEngine {
       }));
     }
 
-    // [3-B1] L2 relevance rating: remove mismatches, tag kept as exact/related
+    // [3-B1] L2 relevance rating: remove 'no', tag kept as definitely/probably/unknown
     const { kept, excludedNames } = await this._rateMain(target, mainRaw);
 
     // Debug: target + condition collection breakdown
