@@ -338,8 +338,16 @@ html, body {
 }
 .settings-actions { margin-top: 16px; text-align: right; }
 .settings-divider { border-top: 1px solid var(--border, #334155); margin: 16px 0 12px; }
-.settings-subtitle { font-size: 13px; font-weight: 700; margin-bottom: 10px; }
+.settings-subtitle { font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
 .settings-hint { font-size: 11px; font-weight: 400; color: var(--text-2, #94a3b8); }
+.settings-grouplabel { font-size: 11px; font-weight: 700; color: var(--text-2, #94a3b8); margin: 12px 0 6px; }
+.slider-pct { color: var(--text-1, #e5e7eb); font-weight: 700; }
+.score-reset-btn {
+  margin-left: auto; font-size: 11px; padding: 3px 8px; cursor: pointer; white-space: nowrap;
+  background: var(--bg-1, #0f172a); color: var(--text-2, #94a3b8);
+  border: 1px solid var(--border, #334155); border-radius: 6px;
+}
+.score-reset-btn:hover { border-color: #f59e0b; color: #f59e0b; }
 .settings-presets { display: flex; gap: 6px; margin-bottom: 14px; }
 .preset-btn {
   flex: 1; padding: 6px 4px; font-size: 12px; cursor: pointer;

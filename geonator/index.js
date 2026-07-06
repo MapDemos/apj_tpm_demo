@@ -140,18 +140,23 @@ class LocationFinderApp {
   }
 
   /**
-   * Scoring settings: 3 weight sliders (関連性 / 条件距離 / アンカー距離) + 言い切り度
-   * + 3 presets. Weights are relative (normalized internally at scoring time, so they
-   * need not sum to 1). Values live in CONFIG (read by QueryEngine on the NEXT search)
-   * and persist to localStorage. Presets set all four at once (推論スタイル).
+   * Scoring settings UI:
+   *  - 推論スタイル presets (3 buttons) — set weights + decisiveness at once
+   *  - 重み: 3 weight sliders that ALWAYS sum to 100% (moving one redistributes the
+   *    other two proportionally). Stored as fractions summing to 1.0.
+   *  - 言い切り度: separate slider (not a weight).
+   *  - デフォルトに戻す: restores DEFAULTS and clears the localStorage override.
+   * Values live in CONFIG (read by QueryEngine on the NEXT search) + persist to localStorage.
    */
   _initScoringSettings() {
-    // Preset profiles: [wRel, wCond, wAnchor, decisiveness] (0..1 相対値)
+    // [wRel, wCond, wAnchor, decisiveness] — weights sum to 1.0.
     const PRESETS = {
-      decisive: [0.05, 0.60, 0.35, 0.85], // 言い切り型: 意図ほぼ無視・距離全振り・僅差でもgold
-      balanced: [0.30, 0.50, 0.20, 0.40], // バランス型（既定）
-      cautious: [0.40, 0.40, 0.20, 0.10], // 慎重型: 意図も重視・僅差は同程度
+      decisive: [0.05, 0.60, 0.35, 0.85], // 意図ほぼ無視・距離全振り・僅差でもgold
+      balanced: [0.30, 0.50, 0.20, 0.40], // 既定（DEFAULTS）
+      cautious: [0.40, 0.40, 0.20, 0.10], // 意図も重視・僅差は同程度
     };
+    const DEFAULTS = { wRel: 0.30, wCond: 0.50, wAnchor: 0.20, dec: 0.40 };
+    const WKEYS = ['SCORE_WEIGHT_RELEVANCE', 'SCORE_WEIGHT_CONDITION', 'SCORE_WEIGHT_ANCHOR'];
 
     // Restore saved scoring prefs
     try {
@@ -162,53 +167,68 @@ class LocationFinderApp {
       if (typeof s.dec     === 'number') this.config.SCORE_DECISIVENESS     = s.dec;
     } catch (_) {}
 
-    const els = {
-      wRel:    [document.getElementById('wRelSlider'),    document.getElementById('wRelVal'),    'SCORE_WEIGHT_RELEVANCE'],
-      wCond:   [document.getElementById('wCondSlider'),   document.getElementById('wCondVal'),   'SCORE_WEIGHT_CONDITION'],
-      wAnchor: [document.getElementById('wAnchorSlider'), document.getElementById('wAnchorVal'), 'SCORE_WEIGHT_ANCHOR'],
-      dec:     [document.getElementById('decisivenessSlider'), document.getElementById('decisivenessVal'), 'SCORE_DECISIVENESS'],
+    const el = id => document.getElementById(id);
+    const wSlider = { SCORE_WEIGHT_RELEVANCE: el('wRelSlider'), SCORE_WEIGHT_CONDITION: el('wCondSlider'), SCORE_WEIGHT_ANCHOR: el('wAnchorSlider') };
+    const wVal    = { SCORE_WEIGHT_RELEVANCE: el('wRelVal'),    SCORE_WEIGHT_CONDITION: el('wCondVal'),    SCORE_WEIGHT_ANCHOR: el('wAnchorVal') };
+    const decSlider = el('decisivenessSlider'), decVal = el('decisivenessVal'), resetBtn = el('scoreResetBtn');
+
+    // Integer percentages summing to exactly 100 (largest-remainder rounding).
+    const pctInts = fracs => {
+      const raw = fracs.map(f => f * 100);
+      const out = raw.map(Math.floor);
+      let rem = 100 - out.reduce((a, b) => a + b, 0);
+      const order = raw.map((r, i) => [r - Math.floor(r), i]).sort((a, b) => b[0] - a[0]);
+      for (let k = 0; k < rem && k < order.length; k++) out[order[k][1]]++;
+      return out;
     };
 
     const syncUI = () => {
-      const wr = this.config.SCORE_WEIGHT_RELEVANCE ?? 0.3;
-      const wc = this.config.SCORE_WEIGHT_CONDITION ?? 0.5;
-      const wa = this.config.SCORE_WEIGHT_ANCHOR    ?? 0.2;
-      const d  = this.config.SCORE_DECISIVENESS     ?? 0.4;
-      const sum = (wr + wc + wa) || 1;
-      const set = (key, raw, label) => {
-        const [sl, vl] = els[key];
-        if (sl) sl.value = String(Math.round(raw * 100));
-        if (vl) vl.textContent = label;
-      };
-      set('wRel',    wr, `${Math.round(wr*100)}（実効 ${Math.round(wr/sum*100)}%）`);
-      set('wCond',   wc, `${Math.round(wc*100)}（実効 ${Math.round(wc/sum*100)}%）`);
-      set('wAnchor', wa, `${Math.round(wa*100)}（実効 ${Math.round(wa/sum*100)}%）`);
-      set('dec',     d,  `言い切り度 ${Math.round(d*100)}%`);
+      const w = WKEYS.map(k => this.config[k] ?? 0);
+      const sum = w.reduce((a, b) => a + b, 0) || 1;
+      const norm = w.map(x => x / sum);            // render as shares of 100
+      const pct = pctInts(norm);
+      WKEYS.forEach((k, i) => {
+        if (wSlider[k]) wSlider[k].value = String(pct[i]);
+        if (wVal[k])    wVal[k].textContent = `${pct[i]}%`;
+      });
+      const d = this.config.SCORE_DECISIVENESS ?? 0.4;
+      if (decSlider) decSlider.value = String(Math.round(d * 100));
+      if (decVal)    decVal.textContent = `言い切り度 ${Math.round(d * 100)}%`;
       document.querySelectorAll('#scorePresets .preset-btn').forEach(b => {
         const pr = PRESETS[b.dataset.preset];
-        b.classList.toggle('active', pr &&
-          Math.abs(pr[0]-wr)<0.001 && Math.abs(pr[1]-wc)<0.001 &&
-          Math.abs(pr[2]-wa)<0.001 && Math.abs(pr[3]-d)<0.001);
+        b.classList.toggle('active', !!pr &&
+          Math.abs(pr[0] - norm[0]) < 0.005 && Math.abs(pr[1] - norm[1]) < 0.005 &&
+          Math.abs(pr[2] - norm[2]) < 0.005 && Math.abs(pr[3] - d) < 0.005);
       });
     };
 
-    const persistScoring = () => {
+    const persist = () => {
       try {
         localStorage.setItem('geonator_scoring', JSON.stringify({
-          wRel:    this.config.SCORE_WEIGHT_RELEVANCE,
-          wCond:   this.config.SCORE_WEIGHT_CONDITION,
-          wAnchor: this.config.SCORE_WEIGHT_ANCHOR,
-          dec:     this.config.SCORE_DECISIVENESS,
+          wRel: this.config.SCORE_WEIGHT_RELEVANCE, wCond: this.config.SCORE_WEIGHT_CONDITION,
+          wAnchor: this.config.SCORE_WEIGHT_ANCHOR, dec: this.config.SCORE_DECISIVENESS,
         }));
       } catch (_) {}
     };
 
-    for (const [key, [slider, , cfgKey]] of Object.entries(els)) {
-      slider?.addEventListener('input', e => {
-        this.config[cfgKey] = Number(e.target.value) / 100;
-        persistScoring(); syncUI();
-      });
-    }
+    // Redistribute so the 3 weights always sum to 1.0 (UI shows 100%).
+    const setWeight = (changedKey, frac) => {
+      frac = Math.max(0, Math.min(1, frac));
+      const others = WKEYS.filter(k => k !== changedKey);
+      const oldOther = others.map(k => this.config[k] ?? 0);
+      const oldSum = oldOther[0] + oldOther[1];
+      const remaining = 1 - frac;
+      this.config[changedKey] = frac;
+      if (oldSum > 1e-9) others.forEach((k, i) => { this.config[k] = remaining * (oldOther[i] / oldSum); });
+      else               others.forEach(k => { this.config[k] = remaining / 2; });
+    };
+
+    WKEYS.forEach(k => {
+      wSlider[k]?.addEventListener('input', e => { setWeight(k, Number(e.target.value) / 100); persist(); syncUI(); });
+    });
+    decSlider?.addEventListener('input', e => {
+      this.config.SCORE_DECISIVENESS = Number(e.target.value) / 100; persist(); syncUI();
+    });
     document.querySelectorAll('#scorePresets .preset-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const pr = PRESETS[btn.dataset.preset];
@@ -217,8 +237,16 @@ class LocationFinderApp {
         this.config.SCORE_WEIGHT_CONDITION = pr[1];
         this.config.SCORE_WEIGHT_ANCHOR    = pr[2];
         this.config.SCORE_DECISIVENESS     = pr[3];
-        persistScoring(); syncUI();
+        persist(); syncUI();
       });
+    });
+    resetBtn?.addEventListener('click', () => {
+      this.config.SCORE_WEIGHT_RELEVANCE = DEFAULTS.wRel;
+      this.config.SCORE_WEIGHT_CONDITION = DEFAULTS.wCond;
+      this.config.SCORE_WEIGHT_ANCHOR    = DEFAULTS.wAnchor;
+      this.config.SCORE_DECISIVENESS     = DEFAULTS.dec;
+      try { localStorage.removeItem('geonator_scoring'); } catch (_) {} // 次回ロードはconfig既定
+      syncUI();
     });
 
     syncUI();

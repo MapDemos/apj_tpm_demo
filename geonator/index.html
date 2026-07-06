@@ -60,33 +60,36 @@
       </label>
 
       <div class="settings-divider"></div>
-      <div class="settings-subtitle">スコアリング調整 <span class="settings-hint">（次の検索から反映）</span></div>
+      <div class="settings-subtitle">
+        スコアリング調整 <span class="settings-hint">（次の検索から反映）</span>
+        <button id="scoreResetBtn" class="score-reset-btn" title="スコアリング設定をデフォルトに戻す">↺ デフォルトに戻す</button>
+      </div>
 
       <!-- Preset buttons (推論スタイル) -->
+      <div class="settings-grouplabel">推論スタイル（プリセット）</div>
       <div class="settings-presets" id="scorePresets">
         <button class="preset-btn" data-preset="decisive">🎯 言い切り型</button>
         <button class="preset-btn" data-preset="balanced">⚖️ バランス型</button>
         <button class="preset-btn" data-preset="cautious">🧭 慎重型</button>
       </div>
 
-      <!-- 3 weight sliders (相対値・内部で正規化) -->
+      <!-- 3 weight sliders — sum always 100% (moving one redistributes the others) -->
+      <div class="settings-grouplabel">重み <span class="settings-hint">（合計100%）</span></div>
       <div class="settings-slider-row">
-        <div class="slider-label"><span>関連性（意図の一致）</span></div>
-        <input type="range" id="wRelSlider" min="0" max="100" step="5">
-        <div class="slider-val" id="wRelVal">-</div>
+        <div class="slider-label"><span>関連性（意図の一致）</span><span class="slider-pct" id="wRelVal">-</span></div>
+        <input type="range" id="wRelSlider" min="0" max="100" step="1">
       </div>
       <div class="settings-slider-row">
-        <div class="slider-label"><span>条件からの距離（ローソン・バス停等）</span></div>
-        <input type="range" id="wCondSlider" min="0" max="100" step="5">
-        <div class="slider-val" id="wCondVal">-</div>
+        <div class="slider-label"><span>条件からの距離（ローソン・バス停等）</span><span class="slider-pct" id="wCondVal">-</span></div>
+        <input type="range" id="wCondSlider" min="0" max="100" step="1">
       </div>
       <div class="settings-slider-row">
-        <div class="slider-label"><span>Proximityからの距離（西大島等）</span></div>
-        <input type="range" id="wAnchorSlider" min="0" max="100" step="5">
-        <div class="slider-val" id="wAnchorVal">-</div>
+        <div class="slider-label"><span>Proximityからの距離（西大島等）</span><span class="slider-pct" id="wAnchorVal">-</span></div>
+        <input type="range" id="wAnchorSlider" min="0" max="100" step="1">
       </div>
 
-      <!-- 言い切り度 -->
+      <!-- 言い切り度 — separate control (not a weight) -->
+      <div class="settings-grouplabel">言い切り度 <span class="settings-hint">（gold判定の積極性）</span></div>
       <div class="settings-slider-row">
         <div class="slider-label"><span>慎重（同程度多め）</span><span>言い切り（gold積極）</span></div>
         <input type="range" id="decisivenessSlider" min="0" max="100" step="5">
