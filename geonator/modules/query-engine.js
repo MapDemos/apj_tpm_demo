@@ -55,7 +55,7 @@ class QueryEngine {
     this._previousText = merged;
     this._awaitingClarify = false;
     this._clarifyCount = 0;
-    this._dbgReport = { schema: null, proximity: null, target: null, conditions: [], evaluation: null };
+    this._dbgReport = { schema: null, proximity: null, target: null, conditions: [], evaluation: null, excludedByHardFilter: [] };
     this.llm.resetStats?.();
     this._runStart = Date.now();
     this.ui.clearResults();
@@ -764,7 +764,25 @@ class QueryEngine {
       return { full: [], partial: [], none: [] };
     }
 
-    const conditions = schema.conditions ?? [];
+    const allConditions = schema.conditions ?? [];
+
+    // ── 絶対条件フィルタ（ハードフィルタ・スコアリング前に候補を除外）──
+    // 現状 same_building(method=building_id) が対象。評価不能なら除外しない(graceful)。
+    // 除外候補は共通の excludedByHardFilter に記録（過剰除外の検知用）。
+    const isAbsolute = c => resolveDistanceParams(c.distance, this.config.DEFAULT_LEVEL).useBuildingId;
+    const hardConds  = allConditions.filter(isAbsolute);
+    const conditions = allConditions.filter(c => !isAbsolute(c)); // ← 採点対象（ハードは除く）
+    for (const hc of hardConds) {
+      const label = hc.text ?? hc.type;
+      const items = condCandidates[label] ?? [];
+      if (items.length === 0) continue; // アンカー未取得＝評価不能 → フィルタしない
+      const { kept, excluded } = await this.mcp.filterSameBuilding(mainCandidates, items);
+      excluded.forEach(c => this._dbgReport.excludedByHardFilter.push({
+        name: c.name || '(名前なし)', reason: `絶対条件「${label}」(同じビル)を満たさない`,
+      }));
+      mainCandidates = kept;
+    }
+    if (mainCandidates.length === 0) return { full: [], partial: [], none: [] };
 
     // conditionTracker: candidateId → { total, hit, closenessSum }
     const tracker = new Map();

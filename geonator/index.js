@@ -423,6 +423,13 @@ class LocationFinderApp {
       e.partial.slice(0, 12).forEach(p => L.push(`　${icon(p.tier)} ${p.name} (${p.hit}/${p.total}) [${p.rel || '-'}] score=${p.score} ← [${p.labels.join(', ')}]`));
     }
 
+    // ── 絶対条件フィルタで除外された候補（過剰除外の検知用）──
+    if (r.excludedByHardFilter?.length) {
+      L.push('');
+      L.push(`【絶対条件フィルタで除外 ${r.excludedByHardFilter.length}件】`);
+      r.excludedByHardFilter.slice(0, 20).forEach(x => L.push(`　✖ ${x.name}：${x.reason}`));
+    }
+
     return L.join('\n');
   }
 

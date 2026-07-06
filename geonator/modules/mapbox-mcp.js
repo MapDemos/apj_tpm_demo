@@ -1690,6 +1690,25 @@ class MapboxMCPClient {
     } catch (_) { return null; }
   }
 
+  /**
+   * All building ids whose polygon comes within radiusM of (lat,lng).
+   * Tilequery measures distance to the nearest part of the polygon, so a building
+   * whose EDGE is within radiusM is returned (used by A-2 edge-aware distance join).
+   */
+  async _getBuildingIdsWithin(lat, lng, radiusM) {
+    const r = Math.min(Math.max(Math.ceil(radiusM), 10), 500);
+    const url = `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
+      `?access_token=${this.token}&radius=${r}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=building`;
+    try {
+      const res = await this._fetchTilequeryWithCache(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.features || [])
+        .filter(f => f.properties?.tilequery?.layer === 'building' && f.id != null)
+        .map(f => f.id);
+    } catch (_) { return []; }
+  }
+
   async _checkSameBuilding(anchorLat, anchorLng, candidates) {
     const anchorId = await this._getBuildingId(anchorLat, anchorLng);
 
@@ -1715,6 +1734,43 @@ class MapboxMCPClient {
       same_building:        results.filter(r => r.same_building).map(({ name, latitude, longitude }) => ({ name, latitude, longitude })),
       other_building:       results.filter(r => !r.same_building).map(({ name }) => ({ name })),
     });
+  }
+
+  /**
+   * Absolute filter for same_building: keep only candidates in the same building
+   * polygon as any anchor item. Fallback (graceful degradation):
+   *  - no anchor building id resolvable → UNEVALUABLE → keep all (never exclude)
+   *  - candidate building id null → UNEVALUABLE → keep
+   *  - candidate id ≠ anchor id BUT within tightM (隣接屋外/同一敷地) → keep (rescue)
+   *  - candidate id ≠ anchor id and far → EXCLUDE
+   * @returns {Promise<{kept:Array, excluded:Array}>}
+   */
+  async filterSameBuilding(mains, items, tightM = 20) {
+    const ll = o => [o.longitude ?? o.lng, o.latitude ?? o.lat];
+    const anchorIds = new Set();
+    for (const it of (items || [])) {
+      const p = ll(it);
+      if (p[0] == null || p[1] == null) continue;
+      const id = await this._getBuildingId(p[1], p[0]);
+      if (id) anchorIds.add(id);
+    }
+    if (anchorIds.size === 0) return { kept: mains, excluded: [] }; // 評価不能 → 全員残す
+    const kept = [], excluded = [];
+    for (const m of (mains || [])) {
+      const mp = ll(m);
+      if (mp[0] == null || mp[1] == null) { kept.push(m); continue; } // 評価不能
+      const mid = await this._getBuildingId(mp[1], mp[0]);
+      if (mid == null) { kept.push(m); continue; }                    // 評価不能 → 残す
+      if (anchorIds.has(mid)) { kept.push(m); continue; }              // 同一ビル
+      // 別ビルだが tightM 以内（隣接屋外・同一敷地）→ 救済
+      const near = (items || []).some(it => {
+        const ip = ll(it);
+        return ip[0] != null && ip[1] != null &&
+          turf.distance(turf.point(mp), turf.point(ip), { units: 'meters' }) <= tightM;
+      });
+      if (near) kept.push(m); else excluded.push(m);
+    }
+    return { kept, excluded };
   }
 
   // Tool impl: compute_bbox_from_points
@@ -2592,6 +2648,33 @@ class MapboxMCPClient {
         }
       }
     }
+
+    // ── A-2: edge-aware building-id join (tight radius only, ADDITIVE) ──
+    // 大きい建物はラベル点が半径外でも「端」が半径内のことがある。条件アイテム側(少数側)で
+    // 半径内のbuilding id集合を取り、候補のbuilding idが含まれれば match に追加する。
+    // 純加点（既存matchを消さない）＝building idが不安定/取得不可でもリグレッションしない。
+    // isochrone・広半径は対象外（うまみ薄・コスト/タイル境界リスク増）。
+    const EDGE_MAX_R = 300;
+    if (distParams.radiusM != null && !distParams.minutes && distParams.radiusM <= EDGE_MAX_R) {
+      const itemBuildingIds = new Set();
+      for (const c of conditionItems) {
+        const ip = ll(c);
+        if (ip[0] == null || ip[1] == null) continue;
+        for (const id of await this._getBuildingIdsWithin(ip[1], ip[0], distParams.radiusM)) itemBuildingIds.add(id);
+      }
+      if (itemBuildingIds.size) {
+        for (const main of mainCandidates) {
+          if (matches.has(String(main.id))) continue; // 既に点距離でmatch済み
+          const mp = ll(main);
+          if (mp[0] == null || mp[1] == null) continue;
+          const mid = await this._getBuildingId(mp[1], mp[0]);
+          if (!mid || !itemBuildingIds.has(mid)) continue;
+          const nm = nearestFor(mp); // dirOK込み。方角条件を満たすアイテムが無ければ null
+          if (nm != null) matches.set(String(main.id), nm);
+        }
+      }
+    }
+
     return matches;
   }
 }
