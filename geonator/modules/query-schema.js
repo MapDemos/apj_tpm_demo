@@ -94,6 +94,11 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
   if (schema.proximity && schema.proximity.scope === undefined) {
     schema.proximity.scope = null;
   }
+  // proximity.within: 明示的な到達距離/時間（「駅から徒歩5分以内」「500m以内」）。
+  // 指定があれば探索bboxをこの範囲で引く。曖昧な「近く/付近」は null（=既定半径）。
+  if (schema.proximity && schema.proximity.within === undefined) {
+    schema.proximity.within = null;
+  }
 
   // target queries default (QE) → fall back to [text]
   if (schema.target) {

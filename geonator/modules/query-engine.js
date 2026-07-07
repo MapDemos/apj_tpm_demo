@@ -83,7 +83,7 @@ class QueryEngine {
       return `  展開${expanded ? '' : '(未展開)'}=[${qs.join(', ')}]`;
     };
     await this._step('step-schema', '⓪ クエリ解釈 (QuerySchema)', [
-      `proximity: ${anchors || '(なし)'}${schema.proximity?.bearing_filter ? ' 方角=' + schema.proximity.bearing_filter : ''}`,
+      `proximity: ${anchors || '(なし)'}${schema.proximity?.bearing_filter ? ' 方角=' + schema.proximity.bearing_filter : ''}${(() => { const w = schema.proximity?.within; if (!w) return ''; if (w.meters != null) return `  範囲=${w.meters}m以内`; if (w.minutes != null) return `  範囲=${w.profile || 'walking'} ${w.minutes}分以内`; return ''; })()}`,
       `target: ${schema.target?.text}  intent=${schema.target?.query_intent}${schema.target?.floors ? '  階数=' + JSON.stringify(schema.target.floors) : ''}${qeStr(schema.target)}`,
       ...(schema.conditions || []).map(c => {
         const d = c.distance || {};
@@ -344,6 +344,21 @@ class QueryEngine {
         return null;
       }
       resolvedPoints.push(...points);
+    }
+
+    // proximity.within: explicit reach ("駅から徒歩5分以内" / "500m以内") drives the bbox
+    // radius. Overrides each anchor's default extent (e.g. station 700m). Vague "近く/付近"
+    // has within=null → keep the default (meaning is landmark-dependent, per design).
+    const within = schema.proximity.within;
+    if (within && (within.meters != null || within.minutes != null)) {
+      const SPEED = { walking: 80, cycling: 250, driving: 500 }; // m/min
+      const reachM = within.meters != null
+        ? within.meters
+        : within.minutes * (SPEED[within.profile] || SPEED.walking);
+      if (reachM > 0) resolvedPoints.forEach(p => { p.radiusM = reachM; });
+      this._withinReachM = reachM > 0 ? Math.round(reachM) : null;
+    } else {
+      this._withinReachM = null;
     }
 
     // [AA] compute base bbox from all resolved points
@@ -831,7 +846,8 @@ class QueryEngine {
     let m;
     if ((m = text.match(/(\d{1,3})\s*階以上/)))            return { min: parseInt(m[1], 10) };
     if ((m = text.match(/(\d{1,3})\s*階以下/)))            return { max: parseInt(m[1], 10) };
-    if ((m = text.match(/(\d{1,3})\s*階(建て|だて|の)/)))  return { value: parseInt(m[1], 10) };
+    // 「12階建て/12階建/12階だて/12階立て(建ての誤記)/12階の」→ value:12
+    if ((m = text.match(/(\d{1,3})\s*階\s*(建て|建|だて|立て|の)/))) return { value: parseInt(m[1], 10) };
     // タワマン系（「タマワン」等のよくある表記ゆれ／タイプミスも吸収）
     if (/(タワマン|タマワン|タワーマンション|タワマンション|超高層|高層(マンション|ビル|階|階建)?)/.test(text)) return { min: 20 };
     if (/(背の高い|(高い|でかい)(建物|ビル|マンション))/.test(text))                    return { min: 10 };
