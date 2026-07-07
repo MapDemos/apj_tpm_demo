@@ -733,14 +733,13 @@ class QueryEngine {
     return s;
   }
 
-  /** Basis pool for narrow suggestions = candidates of the highest present tier. */
+  /** Basis pool for narrow suggestions = full-match candidates (else partial). */
   _basisTier(cands) {
     if (!cands?.length) return [];
-    for (const tier of ['gold', 'silver', 'match', 'bronze']) {
-      const g = cands.filter(c => c._tier === tier);
-      if (g.length) return g;
-    }
-    return cands;
+    const full = cands.filter(c => ['full1', 'full2', 'full3', 'full'].includes(c._tier));
+    if (full.length) return full;
+    const partial = cands.filter(c => c._tier === 'partial');
+    return partial.length ? partial : cands;
   }
 
   /**
@@ -1362,47 +1361,18 @@ class QueryEngine {
   }
 
   /**
-   * Assign _tier to candidates: 'gold' | 'silver' | 'match' | 'bronze' | 'none'.
-   *
-   * 絶対ゲート（主）＋マージン（従）方式。旧 range(max-min)ゲートは
-   *   ① 期待レンジがサンプル数 n とともに増大 → n と交絡（多い時に金乱発 / 少ない時に潰す）
-   *   ② min 側の外れ値1件で range が広がり誤分割（「最下位の悪さ」を見てしまう）
-   * のため廃止。zスコア/パーセンタイルは n≤3 で破綻するため採用しない（統計レビュー参照）。
-   *
-   * 判定（full マッチのみが gold/silver 対象）:
-   *   - top < GOLD_MIN_SCORE           → 絶対ゲート不通過。全員 match（"全件イマイチ"で
-   *                                       単独 full でも gold にしない。best-of-garbage 防止）
-   *   - n==1 または (top−2nd) ≥ MARGIN → top を gold（絶対水準を満たし単独突出）。
-   *                                       残りは GOLD_MIN_SCORE 以上なら silver、未満は match。
-   *   - それ以外（絶対水準は満たすが僅差）→ 同程度。全員 match（どんぐり＝勝者なし）
-   *   - partial → 'bronze', none → 'none'
+   * Rank-based tiers (clearer than score-distribution). Within full-match, rank by score:
+   *   #1 → full1 (最有力), #2 → full2, #3 → full3, #4+ → full (全一致).
+   *   partial → partial (部分一致), none → none (参考).
+   * (Decisiveness/margin no longer used — the top is always declared as 最有力.)
    */
   _assignTiers(full, partial, none) {
-    const GOLD_MIN = this.config.GOLD_MIN_SCORE ?? 0.5;
-    // MARGIN は言い切り度スライダーから導出：言い切り(1.0)ほど小さく(僅差でもgold)、
-    // 慎重(0.0)ほど大きく(同程度に倒す)。decisiveness 0→0.30, 1→0.05 に線形マップ。
-    const dec    = Math.max(0, Math.min(1, this.config.SCORE_DECISIVENESS ?? 0.4));
-    const MARGIN = 0.30 - 0.25 * dec;
-
-    if (full.length >= 1) {
-      const sorted = [...full].sort((a, b) => b._matchInfo.score - a._matchInfo.score);
-      const top    = sorted[0]._matchInfo.score;
-      const second = sorted.length > 1 ? sorted[1]._matchInfo.score : -Infinity;
-      const margin = top - second; // n==1 のとき +Infinity 相当
-
-      if (top < GOLD_MIN) {
-        // 絶対ゲート不通過：全条件を満たしていても実力が低い → 勝者を立てない
-        full.forEach(c => { c._tier = 'match'; c._flatTier = true; });
-      } else if (margin >= MARGIN) {
-        // 絶対水準を満たし、1位が単独で突出 → gold
-        sorted[0]._tier = 'gold';
-        sorted.slice(1).forEach(c => { c._tier = c._matchInfo.score >= GOLD_MIN ? 'silver' : 'match'; });
-      } else {
-        // 絶対水準は満たすが僅差（どんぐりの背比べ）→ 同程度、gold なし
-        full.forEach(c => { c._tier = 'match'; c._flatTier = true; });
-      }
-    }
-    partial.forEach(c => { c._tier = 'bronze'; });
+    const sorted = [...full].sort((a, b) => (b._matchInfo?.score ?? 0) - (a._matchInfo?.score ?? 0));
+    sorted.forEach((c, i) => {
+      c._rank = i + 1;
+      c._tier = i === 0 ? 'full1' : i === 1 ? 'full2' : i === 2 ? 'full3' : 'full';
+    });
+    partial.forEach(c => { c._tier = 'partial'; });
     none.forEach(c => { c._tier = 'none'; });
   }
 
@@ -1444,11 +1414,9 @@ class QueryEngine {
     } else if (full.length === 1) {
       msg = M.resultSingle(partial.length);
     } else {
-      const goldCount = full.filter(c => c._tier === 'gold').length;
-      const isFlat    = full.length > 1 && full[0]._tier === 'match';
-      if (goldCount > 0)      msg = M.resultGold(goldCount, full.length, partial.length);
-      else if (isFlat)        msg = M.resultFlat(full.length, partial.length);
-      else                    msg = M.resultPlain(full.length, partial.length);
+      // Rank-based: full-match count + the top (最有力) candidate's name.
+      const topName = full[0]?.name || '(名前なし)';
+      msg = M.resultRanked(full.length, topName, partial.length);
     }
     this.ui.showMessage(msg);
   }
@@ -1665,9 +1633,7 @@ const MESSAGES = {
     condNotFound:    k => `「${k}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`,
     mainZero:        t => `${t}の近くに候補は見つかりませんでした。追加の情報を教えていただけますか？`,
     resultSingle: p => `条件に合う候補を1件特定しました${p > 0 ? `（部分マッチ：${p}件）` : ''}。`,
-    resultGold:  (g, f, p) => `最有力${g}件を特定しました（全マッチ：${f}件、部分マッチ：${p}件）。金色マーカーが最も条件に近い候補です。`,
-    resultFlat:  (f, p)    => `${f}件が同程度に条件を満たしています（部分マッチ：${p}件）。甲乙つけがたいため全て同格で表示します。`,
-    resultPlain: (f, p)    => `${f + p}件見つかりました（全マッチ：${f}件、部分マッチ：${p}件）`,
+    resultRanked: (f, top, p) => `全一致 ${f}件・部分一致 ${p}件。最有力は「${top}」です（上位3件に吹き出し、最有力に地図をフォーカスしました）。`,
     resultRefOnly: n       => `条件に一致する候補はありませんでしたが、範囲内の候補${n}件を参考として表示します。`,
   },
   en: {
@@ -1692,9 +1658,7 @@ const MESSAGES = {
     condNotFound:    k => `"${k}" wasn't found in this area (it may not be in the map data).`,
     mainZero:        t => `No "${t}" found nearby. Could you give more information?`,
     resultSingle: p => `Found 1 matching candidate${p > 0 ? ` (partial: ${p})` : ''}.`,
-    resultGold:  (g, f, p) => `Identified ${g} top candidate(s) (full match: ${f}, partial: ${p}). The gold markers best fit the conditions.`,
-    resultFlat:  (f, p)    => `${f} candidates match the conditions about equally (partial: ${p}). Shown as equals since none clearly stands out.`,
-    resultPlain: (f, p)    => `Found ${f + p} (full match: ${f}, partial: ${p}).`,
+    resultRanked: (f, top, p) => `${f} full match, ${p} partial. Top candidate: "${top}" (top 3 get callouts; map focused on the top).`,
     resultRefOnly: n       => `No candidate matched the conditions; showing ${n} in-area candidate(s) for reference.`,
   },
 };

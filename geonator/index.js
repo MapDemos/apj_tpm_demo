@@ -490,7 +490,7 @@ class LocationFinderApp {
     // ── Step2 評価（スコア・ティア） ──
     if (r.evaluation) {
       const e = r.evaluation;
-      const icon = t => ({ gold:'🥇', silver:'🥈', match:'🟢', bronze:'🥉', none:'⚪' }[t] || '🟢');
+      const icon = t => ({ full1:'🥇', full2:'🥈', full3:'🥉', full:'🟢', partial:'🔸', none:'⚪' }[t] || '🟢');
       L.push('');
       L.push('【Step2: 距離評価（スコア/ティア）】');
       L.push(`・全一致 ${e.full.length}件 / 部分一致 ${e.partial.length}件 / 参考 ${e.noneCount}件`);
@@ -832,21 +832,21 @@ class LocationFinderApp {
     this.candidateMarkers = [];
     if (!candidates || candidates.length === 0) return;
 
-    // Sizes kept small to reduce map clutter; gold pulses (CSS radar ring) to stand out.
+    // Rank-based tiers. Full-match (full1/2/3/full) pulse; top 3 get callouts; #1 focused.
     const TIER = {
-      gold:   { size: 22, color: '#f59e0b', ring: '#fde68a', z: 5, glow: true,  label: '🏅 最有力', badge: '★' },
-      silver: { size: 15, color: '#60a5fa', ring: '#bfdbfe', z: 3, glow: true,  label: '全一致',   badge: '' },
-      match:  { size: 17, color: '#f59e0b', ring: '#fcd34d', z: 4, glow: true,  label: '条件一致', badge: '' },
-      bronze: { size: 12, color: '#94a3b8', ring: '#cbd5e1', z: 2, glow: false, label: '部分一致', badge: '' },
-      none:   { size: 9,  color: '#64748b', ring: '#475569', z: 1, glow: false, label: '参考',     badge: '' },
+      full1: { size: 22, color: '#f59e0b', ring: '#fde68a', z: 6, glow: true,  label: '🏅 最有力(全一致)', badge: '1' },
+      full2: { size: 18, color: '#f59e0b', ring: '#fcd34d', z: 5, glow: true,  label: '2番目(全一致)',    badge: '2' },
+      full3: { size: 16, color: '#f59e0b', ring: '#fcd34d', z: 4, glow: true,  label: '3番目(全一致)',    badge: '3' },
+      full:  { size: 13, color: '#60a5fa', ring: '#bfdbfe', z: 3, glow: true,  label: '全一致',           badge: '' },
+      partial:{ size: 11, color: '#94a3b8', ring: '#cbd5e1', z: 2, glow: false, label: '部分一致',         badge: '' },
+      none:  { size: 9,  color: '#64748b', ring: '#475569', z: 1, glow: false, label: '参考',             badge: '' },
     };
 
-    // Draw lower tiers first so gold ends up on top
-    const order = ['none', 'bronze', 'silver', 'match', 'gold'];
+    // Draw lower tiers first so #1 ends up on top
+    const order = ['none', 'partial', 'full', 'full3', 'full2', 'full1'];
     const sorted = [...candidates].sort((a, b) => order.indexOf(a._tier) - order.indexOf(b._tier));
 
-    let goldNum = 0;
-    const goldMarkers = []; // {marker, score, lng, lat} — for top-3 callouts + focus
+    const topMarkers = {}; // tier → marker (full1/2/3) for callouts + focus
     for (const place of sorted) {
       const tier = TIER[place._tier] || TIER.none;
       const lng = place.longitude ?? place.lng;
@@ -871,7 +871,7 @@ class LocationFinderApp {
         `cursor:pointer;display:flex;align-items:center;justify-content:center;` +
         `font-size:${Math.round(tier.size*0.5)}px;color:#1a1000;font-weight:700;line-height:1;`;
       if (tier.glow) dot.style.setProperty('--pulse', tier.color);
-      if (place._tier === 'gold') { goldNum++; dot.textContent = String(goldNum); }
+      if (tier.badge) dot.textContent = tier.badge; // rank number on top-3
       el.title = `${tier.label}: ${place.name || '(名前なし)'}（クリックで評価ステップを表示）`;
       el.appendChild(dot);
 
@@ -901,15 +901,15 @@ class LocationFinderApp {
         if (this._debugMode) this._highlightStep('step-eval');
       });
       this.candidateMarkers.push(marker);
-      if (place._tier === 'gold') goldMarkers.push({ marker, score: mi.score ?? 0, lng, lat });
+      if (['full1', 'full2', 'full3'].includes(place._tier)) topMarkers[place._tier] = { marker, lng, lat };
     }
 
-    // Gold: pulse on ALL gold (CSS radar via .tier-glow, applied above). Open callouts on
-    // the TOP-3 gold by score, and focus the map on the single highest.
-    if (goldMarkers.length) {
-      goldMarkers.sort((a, b) => b.score - a.score);
-      goldMarkers.slice(0, 3).forEach((g, i) => setTimeout(() => g.marker.togglePopup(), 500 + i * 250));
-      const top = goldMarkers[0];
+    // Callouts on the top 3 full-match (最有力/2番目/3番目), map focus on the #1.
+    ['full1', 'full2', 'full3'].forEach((t, i) => {
+      if (topMarkers[t]) setTimeout(() => topMarkers[t].marker.togglePopup(), 500 + i * 250);
+    });
+    if (topMarkers.full1) {
+      const top = topMarkers.full1;
       try { this.map.flyTo({ center: _safeLL(top.lng, top.lat), zoom: 16, duration: 900, essential: true }); } catch (_) {}
     }
   }
@@ -918,7 +918,7 @@ class LocationFinderApp {
   // Candidate list in dialogue panel + feedback (ground-truth capture)
   // ─────────────────────────────────────────────────────────────
 
-  static _TIER_ICON = { gold: '🥇', silver: '🥈', match: '🟢', bronze: '🥉', none: '⚪' };
+  static _TIER_ICON = { full1: '🥇', full2: '🥈', full3: '🥉', full: '🟢', partial: '🔸', none: '⚪' };
 
   // Per-condition colors for Step1 collection (distinct from target=teal, proximity=orange,
   // eval=violet). Indexed by condition order (ci); MAX_CONDITIONS caps at 5.
