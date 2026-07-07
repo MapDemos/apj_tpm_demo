@@ -6,7 +6,6 @@
 const SCHEMA_ENUMS = {
   anchor_type:    ['station', 'poi', 'address', 'locality', 'intersection'],
   specificity:    ['specific', 'generic'],
-  target_type:    ['residential_building', 'commercial_building', 'general_poi'],
   query_intent:   ['category_mansion', 'category_apartment', 'category_building', 'specific', 'category_busstop', 'category_busstop_location', 'intersection', 'signal'],
   condition_type: ['poi', 'road', 'water', 'intersection', 'signal', 'transit_entrance', 'category_busstop'],
   distance_method: ['radius', 'isochrone'],
@@ -46,7 +45,6 @@ function validateQuerySchema(schema) {
   if (!schema.target || typeof schema.target !== 'object') {
     errors.push('target is required');
   } else {
-    if (!SCHEMA_ENUMS.target_type.includes(schema.target.type))   errors.push(`target.type invalid: ${schema.target.type}`);
     if (!schema.target.text || typeof schema.target.text !== 'string') errors.push('target.text missing');
     if (schema.target.query_intent && !SCHEMA_ENUMS.query_intent.includes(schema.target.query_intent)) {
       errors.push(`target.query_intent invalid: ${schema.target.query_intent}`);
