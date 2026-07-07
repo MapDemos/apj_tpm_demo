@@ -72,6 +72,7 @@
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
         </select>
       </label>
+      <div class="settings-modelwhy" id="set-l1-why">自然文→構造化スキーマの最重要工程。目印(proximity)と対象(target)の切り分け、「AとBの間」等の解釈に推論力が要る → Sonnet推奨。</div>
       <label class="settings-row">
         <span id="set-l2_1-label">L2-1（通常クエリの関連性・カテゴリ）</span>
         <select id="l2_1ModelSelect">
@@ -79,6 +80,7 @@
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
         </select>
       </label>
+      <div class="settings-modelwhy" id="set-l2_1-why">カテゴリの分野判断（ラーメン屋＝「レストラン>和食」を残す等）にニュアンスが要る → Sonnet推奨。</div>
       <label class="settings-row">
         <span id="set-l2_2-label">L2-2（Targetの関連性）</span>
         <select id="l2_2ModelSelect">
@@ -86,6 +88,7 @@
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
         </select>
       </label>
+      <div class="settings-modelwhy" id="set-l2_2-why">店名の機微から意図一致を4段階判定（definitely/probably/…） → Sonnet推奨。</div>
       <label class="settings-row">
         <span id="set-l3-label">L3（絞り込みの目印提案）</span>
         <select id="l3ModelSelect">
@@ -93,6 +96,7 @@
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
         </select>
       </label>
+      <div class="settings-modelwhy" id="set-l3-why">近傍の目印から区別しやすいものを選ぶ軽量・定型タスク → Haikuで十分・高速。</div>
 
       <div class="settings-divider"></div>
 

@@ -183,7 +183,7 @@ class LocationFinderApp {
     this._initScoringSettings();
 
     // Single "↺ すべてデフォルトに戻す" — models + scoring weights + decisiveness at once.
-    const MODEL_DEFAULTS = { L1: 'claude-haiku-4-5-20251001', L2_1: 'claude-sonnet-4-6', L2_2: 'claude-sonnet-4-6', L3: 'claude-haiku-4-5-20251001' };
+    const MODEL_DEFAULTS = { L1: 'claude-sonnet-4-6', L2_1: 'claude-sonnet-4-6', L2_2: 'claude-sonnet-4-6', L3: 'claude-haiku-4-5-20251001' };
     document.getElementById('settingsResetBtn')?.addEventListener('click', () => {
       this.config.L1_MODEL   = MODEL_DEFAULTS.L1;
       this.config.L2_1_MODEL = MODEL_DEFAULTS.L2_1;
@@ -229,7 +229,7 @@ class LocationFinderApp {
     const suffix = this._lang === 'en' ? ' (Recommended)' : '（推奨）';
     // MODEL_DEFAULTS と一致させること（役割ごとの既定＝推奨）
     const rec = {
-      l1ModelSelect:   'claude-haiku-4-5-20251001',
+      l1ModelSelect:   'claude-sonnet-4-6',
       l2_1ModelSelect: 'claude-sonnet-4-6',
       l2_2ModelSelect: 'claude-sonnet-4-6',
       l3ModelSelect:   'claude-haiku-4-5-20251001',
@@ -3112,6 +3112,10 @@ class LocationFinderApp {
       setText('set-l2_1-label', st.l2_1);
       setText('set-l2_2-label', st.l2_2);
       setText('set-l3-label', st.l3);
+      setText('set-l1-why', st.l1Why);
+      setText('set-l2_1-why', st.l2_1Why);
+      setText('set-l2_2-why', st.l2_2Why);
+      setText('set-l3-why', st.l3Why);
       setLead('set-l2null-title', st.l2nullTitle);   setText('set-l2null-hint', st.l2nullHint);
       setText('set-l2null-row', st.l2nullRow);
       setText('set-l2null-inc', st.l2nullInclude);
@@ -3363,6 +3367,10 @@ const LANG = {
       l2_1:        'L2-1（通常クエリの関連性・カテゴリ）',
       l2_2:        'L2-2（Targetの関連性）',
       l3:          'L3（絞り込みの目印提案）',
+      l1Why:       '自然文→構造化スキーマの最重要工程。目印(proximity)と対象(target)の切り分け、「AとBの間」等の解釈に推論力が要る → Sonnet推奨。',
+      l2_1Why:     'カテゴリの分野判断（ラーメン屋＝「レストラン>和食」を残す等）にニュアンスが要る → Sonnet推奨。',
+      l2_2Why:     '店名の機微から意図一致を4段階判定（definitely/probably/…） → Sonnet推奨。',
+      l3Why:       '近傍の目印から区別しやすいものを選ぶ軽量・定型タスク → Haikuで十分・高速。',
       l2nullTitle: 'L2-1：カテゴリ未設定の扱い',
       l2nullHint:  '（カテゴリ情報が無い候補）',
       l2nullRow:   'カテゴリ=null の候補',
@@ -3458,6 +3466,10 @@ const LANG = {
       l2_1:        'L2-1 (general-query relevance · category)',
       l2_2:        'L2-2 (target relevance)',
       l3:          'L3 (refinement landmark suggestions)',
+      l1Why:       'The heaviest reasoning step: free text → structured schema (proximity vs target, "between A and B", etc.). Sonnet recommended.',
+      l2_1Why:     'Judging category domains needs nuance (keep "restaurant>Japanese" for a ramen shop). Sonnet recommended.',
+      l2_2Why:     'Rates intent match from subtle name cues (4 levels: definitely/probably/…). Sonnet recommended.',
+      l3Why:       'Lightweight, templated: pick distinguishing nearby landmarks. Haiku is enough and fast.',
       l2nullTitle: 'L2-1: category=null handling',
       l2nullHint:  '(candidates with no category info)',
       l2nullRow:   'Candidates with category=null',

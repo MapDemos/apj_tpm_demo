@@ -26,7 +26,7 @@ const CONFIG = {
   MAX_TOOL_TURNS:  20,   // max agentic loop iterations
 
   // Per-role models (JS-driven arch). Changeable from the ⚙️ settings modal.
-  L1_MODEL:        'claude-haiku-4-5-20251001', // query parsing（構造化・軽量でHaiku既定）
+  L1_MODEL:        'claude-sonnet-4-6',         // query parsing（最も推論が重い工程。proximity/target切り分け・「AとBの間」・intent等の判断精度が全体を左右→Sonnet既定）
   // L2 is split into two independent checks (both changeable in settings):
   //   L2-1 = 通常クエリのcategory妥当性チェック（poi_category/class を見る・軽量→Haiku既定）
   //   L2-2 = Targetの関連性チェック（名前ベースのニュアンス判定→Sonnet既定）

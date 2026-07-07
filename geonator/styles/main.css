@@ -348,6 +348,7 @@ html, body {
 .settings-divider { border-top: 1px solid var(--border, #334155); margin: 16px 0 12px; }
 .settings-subtitle { font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
 .settings-hint { font-size: 11px; font-weight: 400; color: var(--text-2, #94a3b8); }
+.settings-modelwhy { font-size: 11px; color: var(--text-2, #94a3b8); margin: -6px 0 12px; line-height: 1.4; }
 .settings-grouplabel { font-size: 11px; font-weight: 700; color: var(--text-2, #94a3b8); margin: 12px 0 6px; }
 .slider-pct { color: var(--text-1, #e5e7eb); font-weight: 700; }
 .score-reset-btn {
