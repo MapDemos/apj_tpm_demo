@@ -530,25 +530,16 @@ class LocationFinderApp {
         const fmt = n => (n || 0).toLocaleString('ja-JP');
         const secs = (stats.ms / 1000).toFixed(1);
         const shortModel = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
-        // モデル別 概算単価（$/1M tokens: [入力, 出力]）。名前で判定。
-        const PRICE = { opus: [5, 25], fable: [10, 50], sonnet: [3, 15], haiku: [1, 5] };
-        const costOf = s => {
-          const m = (s.model || '').toLowerCase();
-          const p = m.includes('opus') ? PRICE.opus : m.includes('fable') ? PRICE.fable : m.includes('sonnet') ? PRICE.sonnet : PRICE.haiku;
-          return (s.inTok / 1e6) * p[0] + (s.outTok / 1e6) * p[1];
-        };
         const roleLines = [];
-        let totIn = 0, totOut = 0, totCost = 0;
+        let totIn = 0, totOut = 0;
         // 全ロールを表示（0回=そのクエリで未実行）。L1-1=確認文の先出し / L1-2=クエリ解析。
         for (const [role, s] of [['L1-1', stats.llm?.L1c], ['L1-2', stats.llm?.L1], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
           if (!s) continue;
           roleLines.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
-          totIn += s.inTok; totOut += s.outTok; totCost += costOf(s);
+          totIn += s.inTok; totOut += s.outTok;
         }
-        const en = self._lang === 'en';
         const parts = [
-          en ? `⏱ ${secs}s ・ 💰 ~$${totCost.toFixed(4)} (≈¥${Math.round(totCost * 155)})`
-             : `⏱ 処理時間 ${secs}s ・ 💰 概算コスト $${totCost.toFixed(4)}（≈¥${Math.round(totCost * 155)}）`,
+          self._lang === 'en' ? `⏱ ${secs}s` : `⏱ 処理時間 ${secs}s`,
           ...roleLines,
           `API: SB ${self.mapboxMCP?._sbRequests ?? 0} / TQ ${self.mapboxMCP?._tqRequests ?? 0} / ISO ${self.mapboxMCP?._isoRequests ?? 0}`,
         ];
