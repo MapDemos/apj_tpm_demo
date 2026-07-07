@@ -853,13 +853,14 @@ class QueryEngine {
         if (ds[1] && ds[1].d - ds[0].d < MARGIN) continue; // 複数候補に同程度に近い → 区別に使えない
         seenName.add(key);
         const arr = byCand.get(ds[0].i);                  // 最寄り候補固有の目印として割り当て
-        if (arr.length < 15) arr.push(g.name);
+        // class(cls/maki) も同梱：LLMが「ガソスタ>マンション」のような目印の質を判断できる。
+        if (arr.length < 15) arr.push({ name: g.name, cls: g.cls || g.maki || null });
       }
       const candList = pts.map(p => ({ name: p.name, nearby: byCand.get(p.i) })).filter(c => c.nearby.length);
       if (!candList.length) return []; // 幾何的に区別できる目印が無い → 出さない（絞り込めないので）
 
-      // LLM は「区別できる候補群」の中から知名度で選ぶだけ。allowed 以外は採用しない。
-      const allowed = new Set(candList.flatMap(c => c.nearby.map(norm)));
+      // LLM は「区別できる候補群」の中から知名度・目印の分かりやすさで選ぶだけ。allowed 以外は不採用。
+      const allowed = new Set(candList.flatMap(c => c.nearby.map(n => norm(n.name))));
       const names = await this.llm.suggestLandmarks(candList, this._langCode());
       if (!names.length) return [];
       const out = [];
