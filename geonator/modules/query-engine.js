@@ -1166,6 +1166,17 @@ class QueryEngine {
     // [3-B1] L2-2 relevance rating: remove 'no', tag kept as definitely/probably/unknown
     const { kept, excludedNames } = await this._rateMain(target, mainRaw);
 
+    // [3-B1'] poi条件にも同じ名前ベース関連性(L2-2)を適用し「no」を除外。
+    // L2-1（カテゴリ）は同分野を残す方針のため、スーパー条件に八百屋が残る等が起きる。
+    // 通常クエリの一部（target/condition）として挙動を揃えるため、条件も名前で弾く。
+    await Promise.all((schema.conditions || []).filter(c => c.type === 'poi').map(async c => {
+      const key = c.text ?? c.type;
+      const items = condResults[key];
+      if (!items?.length) return;
+      const { kept: keptCond } = await this._rateMain({ text: c.text, query_intent: c.query_intent || 'specific' }, items);
+      condResults[key] = keptCond;
+    }));
+
     // Debug: target + condition collection breakdown
     const tdbg = this.mcp._lastTargetDebug || null;
     // Pre-slice raw count → overflow signal (target too dense for the proximity bbox).
