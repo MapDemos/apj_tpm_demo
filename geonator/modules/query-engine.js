@@ -849,17 +849,32 @@ class QueryEngine {
       // Resolve each suggested NAME back to the known grid poi_label items (coords already
       // known) so choosing a suggestion never triggers a re-query. Names that don't map to
       // a real grid POI are dropped (avoids "アクロス福岡" → "…アクロス福岡店" noise).
-      const out = [];
+      // Deterministic distinctiveness backstop: a good narrowing hint must be near only
+      // SOME candidates. The L3 prompt asks for this, but we don't trust it — recompute
+      // per-candidate proximity from coords and drop hints near "more than half" (and
+      // always those near ALL). Geometry is exact, so JS enforces it, not the LLM.
+      const basisPts = basis.slice(0, 8)
+        .map(c => [c.longitude ?? c.lng, c.latitude ?? c.lat])
+        .filter(([a, b]) => a != null && b != null);
+      const nearCountOf = items => basisPts.filter(([blng, blat]) =>
+        items.some(it => distM(blat, blng, it.latitude ?? it.lat, it.longitude ?? it.lng) <= NEAR_M)
+      ).length;
+
       const usedNames = new Set();
+      const scored = [];
       for (const nm of names) {
         const key = norm(nm);
         if (!key || usedNames.has(key) || usedCond.has(key)) continue; // skip dups / existing conditions
         const items = grid.filter(g => g.name && norm(g.name) === key);
         if (!items.length) continue; // unresolvable → skip (no re-query)
         usedNames.add(key);
-        out.push({ text: this._landmarkPhrase(nm), landmark: nm, items });
+        scored.push({ nm, items, near: nearCountOf(items) });
       }
-      return out;
+      const N = basisPts.length;
+      // 区別に使える＝過半数の候補には無い。空になったら「全候補共通」だけ落として救済。
+      let kept = N >= 2 ? scored.filter(s => s.near * 2 <= N) : scored;
+      if (!kept.length) kept = scored.filter(s => s.near < N);
+      return kept.map(s => ({ text: this._landmarkPhrase(s.nm), landmark: s.nm, items: s.items }));
     } catch { return []; }
   }
 
