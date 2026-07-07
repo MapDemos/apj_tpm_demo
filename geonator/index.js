@@ -245,6 +245,38 @@ class LocationFinderApp {
     if (!this._mapOff && this.map) setTimeout(() => { try { this.map.resize(); } catch (_) {} }, 60);
   }
 
+  /** 地図OFF時に候補パネルへ差し込む静的地図URL（Static Images API）。上位5件をティア色ピンで。
+   *  色は共有 TIER_STYLE、bbox は1次検索の _lastResultBbox を使い、interactive と表示を揃える。 */
+  _buildStaticMapUrl(candidates) {
+    const token = this.config.MAPBOX_ACCESS_TOKEN;
+    const style = (this.config.MAP_STYLE || '').replace('mapbox://styles/', '');
+    if (!token || !style) return null;
+    const top = (candidates || [])
+      .filter(c => (c.longitude ?? c.lng) != null && (c.latitude ?? c.lat) != null)
+      .slice(0, 5); // 注記どおり上位5件まで
+    if (!top.length) return null;
+    const TIER = LocationFinderApp.TIER_STYLE;
+    const pins = top.map((c, i) => {
+      const lng = (c.longitude ?? c.lng).toFixed(5), lat = (c.latitude ?? c.lat).toFixed(5);
+      const color = (TIER[c._tier]?.color || TIER.none.color).replace('#', '');
+      return `pin-s-${i + 1}+${color}(${lng},${lat})`; // ラベル=順位(1〜5)、色=ティア
+    }).join(',');
+    const view = this._staticView(top, this._lastResultBbox);
+    return `https://api.mapbox.com/styles/v1/${style}/static/${pins}/${view}/480x300@2x?access_token=${token}`;
+  }
+
+  /** 静的地図の視野: ピンが固まっていれば 'auto'（フィット）、散っていれば1次検索bbox（軽くパディング）。 */
+  _staticView(pins, bbox) {
+    const lls = pins.map(c => [c.longitude ?? c.lng, c.latitude ?? c.lat]);
+    if (!bbox || bbox.length < 4) return 'auto';
+    const pW = Math.max(...lls.map(p => p[0])) - Math.min(...lls.map(p => p[0]));
+    const pH = Math.max(...lls.map(p => p[1])) - Math.min(...lls.map(p => p[1]));
+    const bW = Math.abs(bbox[2] - bbox[0]) || 1, bH = Math.abs(bbox[3] - bbox[1]) || 1;
+    if (Math.max(pW / bW, pH / bH) < 0.35) return 'auto'; // 固まってる → autoでフィット
+    const padLng = bW * 0.06, padLat = bH * 0.06;         // 枠固定: 端の切れ防止
+    return `[${(bbox[0] - padLng).toFixed(5)},${(bbox[1] - padLat).toFixed(5)},${(bbox[2] + padLng).toFixed(5)},${(bbox[3] + padLat).toFixed(5)}]`;
+  }
+
   _updateModelBadge() {
     const el = document.getElementById('model-badge');
     if (!el) return;
@@ -420,6 +452,8 @@ class LocationFinderApp {
       refreshCounts() {
         self._updateAPICountDisplay();
       },
+      // 1次検索bbox（within到達圏で絞られていればその値）を保持。地図OFF時の静的地図の枠に使う。
+      setResultBbox(bbox) { self._lastResultBbox = bbox || null; },
       drawProximityPoints(points) {
         if (!self._mapActive()) return; // 地図OFF: 描画スキップ
         // proximityアンカー（基準点）の地図表示は無効化（分かりづらいとの指摘）。
@@ -927,14 +961,8 @@ class LocationFinderApp {
     if (!candidates || candidates.length === 0) return;
 
     // Rank-based tiers. Full-match (full1/2/3/full) pulse; top 3 get callouts; #1 focused.
-    const TIER = {
-      full1: { size: 22, color: '#f59e0b', ring: '#fde68a', z: 6, glow: true,  label: '🏅 最有力(全一致)', badge: '1' },
-      full2: { size: 18, color: '#f59e0b', ring: '#fcd34d', z: 5, glow: true,  label: '2番目(全一致)',    badge: '2' },
-      full3: { size: 16, color: '#f59e0b', ring: '#fcd34d', z: 4, glow: true,  label: '3番目(全一致)',    badge: '3' },
-      full:  { size: 13, color: '#60a5fa', ring: '#bfdbfe', z: 3, glow: true,  label: '全一致',           badge: '' },
-      partial:{ size: 11, color: '#94a3b8', ring: '#cbd5e1', z: 2, glow: false, label: '部分一致',         badge: '' },
-      none:  { size: 9,  color: '#64748b', ring: '#475569', z: 1, glow: false, label: '参考',             badge: '' },
-    };
+    // 色・サイズ等は共有の TIER_STYLE を単一ソースとして参照（static画像と表示を揃える）。
+    const TIER = LocationFinderApp.TIER_STYLE;
 
     // Draw lower tiers first so #1 ends up on top
     const order = ['none', 'partial', 'full', 'full3', 'full2', 'full1'];
@@ -1015,6 +1043,17 @@ class LocationFinderApp {
 
   static _TIER_ICON = { full1: '🥇', full2: '🥈', full3: '🥉', full: '🟢', partial: '🔸', none: '⚪' };
 
+  // ティア別の見た目（色・サイズ等）の【単一ソース】。interactive マーカーと Static Images API
+  // の両方がこれを参照する（仕様変更時に両者がブレないように）。color は #RRGGBB。
+  static TIER_STYLE = {
+    full1: { size: 22, color: '#f59e0b', ring: '#fde68a', z: 6, glow: true,  label: '🏅 最有力(全一致)', badge: '1' },
+    full2: { size: 18, color: '#f59e0b', ring: '#fcd34d', z: 5, glow: true,  label: '2番目(全一致)',    badge: '2' },
+    full3: { size: 16, color: '#f59e0b', ring: '#fcd34d', z: 4, glow: true,  label: '3番目(全一致)',    badge: '3' },
+    full:  { size: 13, color: '#60a5fa', ring: '#bfdbfe', z: 3, glow: true,  label: '全一致',           badge: '' },
+    partial:{ size: 11, color: '#94a3b8', ring: '#cbd5e1', z: 2, glow: false, label: '部分一致',         badge: '' },
+    none:  { size: 9,  color: '#64748b', ring: '#475569', z: 1, glow: false, label: '参考',             badge: '' },
+  };
+
   // Per-condition colors for Step1 collection (distinct from target=teal, proximity=orange,
   // eval=violet). Indexed by condition order (ci); MAX_CONDITIONS caps at 5.
   static COND_PALETTE = ['#a855f7', '#ec4899', '#eab308', '#22c55e', '#f43f5e'];
@@ -1042,6 +1081,21 @@ class LocationFinderApp {
       sum.className = 'candidate-summary';
       sum.textContent = summary;
       panel.appendChild(sum);
+    }
+
+    // 地図OFF時: 候補パネル先頭に静的地図（Static Images API）を差し込む。上位5件をピン表示。
+    if (this._mapOff) {
+      const url = this._buildStaticMapUrl([...(full || []), ...(partial || []), ...(none || [])]);
+      if (url) {
+        const fig = document.createElement('figure');
+        fig.className = 'static-map';
+        const img = document.createElement('img');
+        img.src = url; img.alt = LANG[this._lang].staticMapAlt; img.loading = 'lazy';
+        const cap = document.createElement('figcaption');
+        cap.textContent = LANG[this._lang].staticMapCap;
+        fig.appendChild(img); fig.appendChild(cap);
+        panel.appendChild(fig);
+      }
     }
 
     // Header + export
@@ -3351,6 +3405,8 @@ const LANG = {
     debugOn:       '🔍 デバッグ ON',
     mapHide:       '🗺 地図表示OFF',
     mapShow:       '🗺 地図表示ON',
+    staticMapCap:  '上位5件まで表示',
+    staticMapAlt:  '検索結果の地図（上位5件）',
     examplesLabel: '入力例',
     mapReady:      '地図の準備ができました',
     mapLoading:    '地図を読み込み中…',
@@ -3457,6 +3513,8 @@ const LANG = {
     debugOn:       '🔍 Debug ON',
     mapHide:       '🗺 Map OFF',
     mapShow:       '🗺 Map ON',
+    staticMapCap:  'Showing up to top 5',
+    staticMapAlt:  'Result map (top 5)',
     examplesLabel: 'Examples',
     mapReady:      'Map ready',
     mapLoading:    'Loading map…',

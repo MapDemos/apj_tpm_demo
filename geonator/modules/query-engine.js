@@ -226,6 +226,7 @@ class QueryEngine {
     // anchorScore の参照半径 = target収集bboxの外接半径（幅の半分）。候補の c.distance
     // (アンカー中心からの距離) をこの半径で正規化して「アンカーからの近さ」に使う。
     this._anchorRefM = Math.max(1, this._bboxWidthM(bboxes.targetBbox) / 2);
+    this.ui.setResultBbox?.(bboxes.targetBbox); // 地図OFF時の静的地図の枠（within絞り込み反映済み）
 
     // Debug: proximity resolution info
     this._dbgReport.proximity = {

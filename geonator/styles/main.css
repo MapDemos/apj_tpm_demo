@@ -362,6 +362,10 @@ html, body {
 .settings-subtitle { font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
 .settings-hint { font-size: 11px; font-weight: 400; color: var(--text-2, #94a3b8); }
 .settings-modelwhy { font-size: 11px; color: var(--text-2, #94a3b8); margin: -6px 0 12px; line-height: 1.4; }
+/* 地図OFF時に候補パネル先頭へ出す静的地図 */
+.static-map { margin: 0 0 10px; }
+.static-map img { width: 100%; height: auto; display: block; border-radius: 8px; border: 1px solid var(--border, #334155); }
+.static-map figcaption { font-size: 11px; color: var(--text-2, #94a3b8); margin-top: 4px; text-align: right; }
 .settings-grouplabel { font-size: 11px; font-weight: 700; color: var(--text-2, #94a3b8); margin: 12px 0 6px; }
 .slider-pct { color: var(--text-1, #e5e7eb); font-weight: 700; }
 .score-reset-btn {
