@@ -961,6 +961,7 @@ class LocationFinderApp {
     header.appendChild(exportBtn);
     panel.appendChild(header);
 
+    const rowEls = [];
     rows.forEach((c, i) => {
       const mi = c._matchInfo || {};
       const lng = c.longitude ?? c.lng, lat = c.latitude ?? c.lat;
@@ -996,7 +997,20 @@ class LocationFinderApp {
       fb.appendChild(mk('✗ 違う', 'wrong', 'ng'));
       row.appendChild(fb);
       panel.appendChild(row);
+      rowEls.push(row);
     });
+
+    // Show only the top 5; reveal the rest via "もっと表示".
+    const LIMIT = 5;
+    if (rowEls.length > LIMIT) {
+      rowEls.slice(LIMIT).forEach(r => { r.style.display = 'none'; });
+      const more = document.createElement('button');
+      more.className = 'cand-more-btn';
+      const en = this._lang === 'en';
+      more.textContent = en ? `▼ Show more (${rowEls.length - LIMIT} more)` : `▼ もっと表示（残り${rowEls.length - LIMIT}件）`;
+      more.onclick = () => { rowEls.slice(LIMIT).forEach(r => { r.style.display = ''; }); more.remove(); };
+      panel.appendChild(more);
+    }
 
     // Panel-level: no correct candidate exists (critical for the all_far regime)
     const footer = document.createElement('div');

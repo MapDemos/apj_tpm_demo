@@ -1042,3 +1042,11 @@ html, body {
 
 /* Result summary line at the top of the candidate-list bubble */
 .candidate-summary { font-size: 13px; font-weight: 600; color: #e2e8f0; margin: 0 0 8px; line-height: 1.5; }
+
+/* Candidate list "show more" toggle */
+.cand-more-btn {
+  width: 100%; margin-top: 6px; padding: 6px; background: var(--bg-input);
+  border: 1px dashed var(--border); border-radius: 6px; color: var(--text-2);
+  font-size: 12px; cursor: pointer;
+}
+.cand-more-btn:hover { background: #1e3050; color: var(--text-1); }
