@@ -814,7 +814,10 @@ class QueryEngine {
       // Landmarks already used as conditions must not be re-suggested → exclude them from
       // the L3 input entirely (most efficient: no extra tokens, can't be picked).
       const usedCond = new Set((schema?.conditions || []).map(c => norm(c.text ?? c.type)).filter(Boolean));
-      const ASSIGN_MAX = 250; // この距離以内の候補にだけ「近い目印」として割り当てる
+      // 目印の探索半径・文言・選択時の適用条件を1つのレベルで統一（ズレ防止）。
+      // very_close=150m「すぐ近く」。nearby=400m「近く」に緩めたい場合はここだけ変える。
+      const SUGGEST_LEVEL = 'very_close';
+      const ASSIGN_MAX = DISTANCE_TABLE[SUGGEST_LEVEL].radius_m; // この距離以内の候補にだけ割り当てる
       const MARGIN     = 60;  // 最寄り候補が2番目より これ以上近い＝その候補固有と判定
       // poi_label grid over the basis candidates' area (+margin), no Search Box.
       const lats = basis.map(c => c.latitude ?? c.lat).filter(v => v != null);
@@ -874,15 +877,19 @@ class QueryEngine {
         const items = grid.filter(g => g.name && norm(g.name) === key);
         if (!items.length) continue; // unresolvable → skip (no re-query)
         usedNames.add(key);
-        out.push({ text: this._landmarkPhrase(nm), landmark: nm, items });
+        out.push({ text: this._landmarkPhrase(nm, SUGGEST_LEVEL), landmark: nm, items, level: SUGGEST_LEVEL });
       }
       return out;
     } catch { return []; }
   }
 
   /** Localized "right nearby" phrasing for a resolved landmark suggestion. */
-  _landmarkPhrase(name) {
-    return this._langCode() === 'en' ? `${name} is right nearby` : `すぐ近くに${name}がある`;
+  _landmarkPhrase(name, level = 'very_close') {
+    const en = this._langCode() === 'en';
+    // adjacent/very_close → 「すぐ近く」、それ以上（nearby等）→ 「近く」
+    const tight = level === 'adjacent' || level === 'very_close';
+    if (en) return tight ? `${name} is right nearby` : `${name} is nearby`;
+    return tight ? `すぐ近くに${name}がある` : `近くに${name}がある`;
   }
 
   /** Infer a target floor constraint from raw text (fallback when L1 omits target.floors). */
@@ -1668,7 +1675,8 @@ class QueryEngine {
       const cond = {
         type: 'poi', text: hint.landmark, query_intent: 'specific', queries: [hint.landmark],
         direction: null,
-        distance: { method: 'radius', level: 'very_close', profile: null, minutes: null, meters: null },
+        // 探索・文言と同じレベルで条件化（ズレ防止。既定 very_close=150m）
+        distance: { method: 'radius', level: hint.level || 'very_close', profile: null, minutes: null, meters: null },
       };
       await this._narrowWithin(schema, [cond], { [hint.landmark]: hint.items });
       return;
