@@ -58,6 +58,7 @@ class QueryEngine {
     this._clarifyCount = 0;
     this._dbgReport = { schema: null, proximity: null, target: null, conditions: [], categoryFilter: [], evaluation: null, excludedByHardFilter: [] };
     this.llm.resetStats?.();
+    this.mcp.resetRequestCounts?.(); // per-query API caps
     this._runStart = Date.now();
     this.ui.clearResults();
 

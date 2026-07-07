@@ -81,6 +81,10 @@ const CONFIG = {
   CANDIDATE_LIMIT:     150,          // max candidates collected per query
   MAX_CONDITIONS:      3,            // conditionの最大数（0-5、設定画面で変更可・超過分は切り捨て）
   BBOX_MAX_HALF_M:     2000,         // max half-width of primary search bbox in meters (§6-3)
+  // API safety caps per query (reset each query / on page refresh). Prevents runaway usage.
+  TQ_MAX_PER_QUERY:    2000,         // Tilequery
+  SB_MAX_PER_QUERY:    100,          // Search Box
+  ISO_MAX_PER_QUERY:   100,          // Isochrone
 
   // ============================================
   // SCORING / TIERING (統計レビュー 2026-07-05 / 3要素化 2026-07-06)

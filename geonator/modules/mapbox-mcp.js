@@ -40,6 +40,15 @@ class MapboxMCPClient {
     this._evalPolygons      = []; // Step2 evaluation reach polygons (circle/isochrone) for map drawing
   }
 
+  /** Reset per-query API request counters (called at each new query; caps are per-query). */
+  resetRequestCounts() {
+    this._sbRequests = 0;
+    this._tqRequests = 0;
+    this._tqCacheHits = 0;
+    this._isoRequests = 0;
+    this._isoCacheHits = 0;
+  }
+
   /**
    * Initialize the client.
    * Mapbox APIs require no static data pre-load, so this is a no-op.
@@ -430,6 +439,11 @@ class MapboxMCPClient {
         console.log(`[TQ cache HIT #${this._tqCacheHits}] saves=${this._tqCacheHits} actual=${this._tqRequests}`);
       return { ok: true, json: async () => cached };
     }
+    // Safety cap: once the per-query Tilequery budget is hit, skip real requests.
+    if (this._tqRequests >= (this.config.TQ_MAX_PER_QUERY ?? 2000)) {
+      if (this.config.DEBUG) console.warn('[MapboxMCP] Tilequery cap reached — skipping request');
+      return { ok: true, json: async () => ({ features: [] }) };
+    }
     this._tqRequests++;
     const res = await this._fetchWithRetry(snappedUrl);
     if (!res.ok) return res;
@@ -532,6 +546,11 @@ class MapboxMCPClient {
       url += `&bbox=${this._capBBox(bbox, this.config.BBOX_MAX_HALF_M || 2000).join(',')}`;
     }
 
+    // Safety cap: skip Search Box requests once the per-query budget is hit.
+    if (this._sbRequests >= (this.config.SB_MAX_PER_QUERY ?? 100)) {
+      if (this.config.DEBUG) console.warn('[MapboxMCP] Search Box cap reached — skipping request');
+      return [];
+    }
     try {
       this._sbRequests++;
       const res  = await this._fetchWithRetry(url);
@@ -1954,6 +1973,9 @@ class MapboxMCPClient {
         polygon = turf.circle(turf.point([anchorLng, anchorLat]), radiusMeters / 1000, { units: 'kilometers', steps: 64 });
       } else {
         // isochroneモード: Mapbox Isochrone API
+        if (this._isoRequests >= (this.config.ISO_MAX_PER_QUERY ?? 100)) {
+          return JSON.stringify({ error: 'Isochrone cap reached' });
+        }
         const url =
           `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${anchorLng},${anchorLat}` +
           `?contours_minutes=${minutes}&polygons=true&access_token=${this.token}`;
@@ -2533,6 +2555,10 @@ class MapboxMCPClient {
     const cacheKey = `${lat},${lng},${mins},${prof}`;
     const cached = isoCache.get(cacheKey);
     if (cached) { this._isoCacheHits++; return cached; }
+    if (this._isoRequests >= (this.config.ISO_MAX_PER_QUERY ?? 100)) {
+      if (this.config.DEBUG) console.warn('[MapboxMCP] Isochrone cap reached — skipping request');
+      return null;
+    }
     const url =
       `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${lng},${lat}` +
       `?contours_minutes=${mins}&polygons=true&access_token=${this.token}`;
