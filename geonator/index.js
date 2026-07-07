@@ -835,8 +835,8 @@ class LocationFinderApp {
     // Sizes kept small to reduce map clutter; gold pulses (CSS radar ring) to stand out.
     const TIER = {
       gold:   { size: 22, color: '#f59e0b', ring: '#fde68a', z: 5, glow: true,  label: '🏅 最有力', badge: '★' },
-      silver: { size: 15, color: '#60a5fa', ring: '#bfdbfe', z: 3, glow: false, label: '全一致',   badge: '' },
-      match:  { size: 17, color: '#f59e0b', ring: '#fcd34d', z: 4, glow: false, label: '条件一致', badge: '' },
+      silver: { size: 15, color: '#60a5fa', ring: '#bfdbfe', z: 3, glow: true,  label: '全一致',   badge: '' },
+      match:  { size: 17, color: '#f59e0b', ring: '#fcd34d', z: 4, glow: true,  label: '条件一致', badge: '' },
       bronze: { size: 12, color: '#94a3b8', ring: '#cbd5e1', z: 2, glow: false, label: '部分一致', badge: '' },
       none:   { size: 9,  color: '#64748b', ring: '#475569', z: 1, glow: false, label: '参考',     badge: '' },
     };
@@ -862,12 +862,15 @@ class LocationFinderApp {
       // Inner element: all visual styling + hover/pulse animation live here.
       const dot = document.createElement('div');
       dot.className = `tier-dot${tier.glow ? ' tier-glow' : ''}`;
+      // Full-match tiers (gold/silver/match) pulse in their OWN color (--pulse drives the
+      // radar ring + halo). Partial/参考 don't pulse.
       dot.style.cssText =
         `width:${tier.size}px;height:${tier.size}px;background:${tier.color};` +
         `border:2px solid ${tier.ring};border-radius:50%;` +
-        `box-shadow:${tier.glow ? '0 0 0 4px rgba(245,158,11,.35), 0 0 16px 4px rgba(245,158,11,.6)' : '0 1px 4px rgba(0,0,0,.4)'};` +
+        `box-shadow:${tier.glow ? `0 0 0 4px ${tier.color}59, 0 0 16px 4px ${tier.color}99` : '0 1px 4px rgba(0,0,0,.4)'};` +
         `cursor:pointer;display:flex;align-items:center;justify-content:center;` +
         `font-size:${Math.round(tier.size*0.5)}px;color:#1a1000;font-weight:700;line-height:1;`;
+      if (tier.glow) dot.style.setProperty('--pulse', tier.color);
       if (place._tier === 'gold') { goldNum++; dot.textContent = String(goldNum); }
       el.title = `${tier.label}: ${place.name || '(名前なし)'}（クリックで評価ステップを表示）`;
       el.appendChild(dot);
