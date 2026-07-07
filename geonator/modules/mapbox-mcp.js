@@ -1732,9 +1732,15 @@ class MapboxMCPClient {
       const res  = await this._fetchTilequeryWithCache(url);
       if (!res.ok) return null;
       const data = await res.json();
-      const building = (data.features || []).find(f => f.properties?.tilequery?.layer === 'building');
-      const h = building?.properties?.height;
-      return (typeof h === 'number' && h > 0) ? Math.max(1, Math.round(h / 3)) : null;
+      // Pick the CLOSEST building that actually has a height (not just the first feature —
+      // in dense areas a small heightless building can be returned before the tower the
+      // point sits in). height ≈ floors × 3m → ÷3.
+      const buildings = (data.features || [])
+        .filter(f => f.properties?.tilequery?.layer === 'building'
+                  && typeof f.properties?.height === 'number' && f.properties.height > 0)
+        .sort((a, b) => (a.properties.tilequery?.distance ?? 9) - (b.properties.tilequery?.distance ?? 9));
+      if (!buildings.length) return null;
+      return Math.max(1, Math.round(buildings[0].properties.height / 3));
     } catch (_) { return null; }
   }
 

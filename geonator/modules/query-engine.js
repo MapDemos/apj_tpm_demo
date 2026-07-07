@@ -278,7 +278,7 @@ class QueryEngine {
     this.ui.drawPolygons?.(this.mcp._evalPolygons);
 
     // Debug: evaluation breakdown (with score + tier)
-    const dbgRow = c => ({ name: c.name || '(名前なし)', score: c._matchInfo?.score ?? 0, tier: c._tier, rel: c._relevance, hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [] });
+    const dbgRow = c => ({ name: c.name || '(名前なし)', score: c._matchInfo?.score ?? 0, tier: c._tier, rel: c._relevance, hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [], floors: c._matchInfo?.floors ?? null });
     this._dbgReport.evaluation = {
       full:    results.full.map(dbgRow),
       partial: results.partial.map(dbgRow),
@@ -1618,7 +1618,7 @@ class QueryEngine {
     this.ui.fitToBBox?.(bboxes.condBbox);
     this.ui.refreshCounts?.();
 
-    const dbgRow = c => ({ name: c.name || '(名前なし)', score: c._matchInfo?.score ?? 0, tier: c._tier, rel: c._relevance, hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [] });
+    const dbgRow = c => ({ name: c.name || '(名前なし)', score: c._matchInfo?.score ?? 0, tier: c._tier, rel: c._relevance, hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [], floors: c._matchInfo?.floors ?? null });
     this._dbgReport.evaluation = { full: results.full.map(dbgRow), partial: results.partial.map(dbgRow), noneCount: results.none.length };
 
     this._showResults(results, merged);
