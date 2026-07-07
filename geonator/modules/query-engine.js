@@ -183,6 +183,12 @@ class QueryEngine {
       const schema = await this.llm.parseQuery(combined, null, this._langCode());
       if (!validateQuerySchema(schema).ok) return null;
       fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
+      // Same floors fallback as _parseAndValidate: keep タワマン/階数 constraints alive
+      // across clarify/refine re-parses when L1 drops the structured target.floors.
+      if (schema.target && !schema.target.floors) {
+        const f = this._inferFloors(combined);
+        if (f) schema.target.floors = f;
+      }
       return schema;
     } catch {
       this.ui.showMessage(this._m().error_communication);
