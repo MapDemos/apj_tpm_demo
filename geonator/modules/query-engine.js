@@ -121,13 +121,9 @@ class QueryEngine {
 
     fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
 
-    // Fallback: L1 (esp. Haiku) sometimes describes building height in the confirmation
-    // but forgets the structured target.floors. Infer it from the raw text so the floor
-    // scoring actually runs (タワマンの中のファミマ 等).
-    if (schema.target && !schema.target.floors) {
-      const f = this._inferFloors(userText);
-      if (f) schema.target.floors = f;
-    }
+    // Fallback: L1 sometimes drops the structured target.floors, or mis-classifies a
+    // building-height container ("タワマンの中の…") as a literal POI condition. Recover both.
+    this._applyFloorsInference(schema, userText);
 
     // [A] structural checks
     const issues = structuralChecks(schema);
@@ -183,12 +179,8 @@ class QueryEngine {
       const schema = await this.llm.parseQuery(combined, null, this._langCode());
       if (!validateQuerySchema(schema).ok) return null;
       fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
-      // Same floors fallback as _parseAndValidate: keep タワマン/階数 constraints alive
-      // across clarify/refine re-parses when L1 drops the structured target.floors.
-      if (schema.target && !schema.target.floors) {
-        const f = this._inferFloors(combined);
-        if (f) schema.target.floors = f;
-      }
+      // Same floors recovery as _parseAndValidate across clarify/refine re-parses.
+      this._applyFloorsInference(schema, combined);
       return schema;
     } catch {
       this.ui.showMessage(this._m().error_communication);
@@ -831,10 +823,35 @@ class QueryEngine {
     if ((m = text.match(/(\d{1,3})\s*階以上/)))            return { min: parseInt(m[1], 10) };
     if ((m = text.match(/(\d{1,3})\s*階以下/)))            return { max: parseInt(m[1], 10) };
     if ((m = text.match(/(\d{1,3})\s*階(建て|だて|の)/)))  return { value: parseInt(m[1], 10) };
-    if (/(タワマン|タワーマンション|超高層|高層(マンション|ビル|階|階建)?)/.test(text)) return { min: 20 };
+    // タワマン系（「タマワン」等のよくある表記ゆれ／タイプミスも吸収）
+    if (/(タワマン|タマワン|タワーマンション|タワマンション|超高層|高層(マンション|ビル|階|階建)?)/.test(text)) return { min: 20 };
     if (/(背の高い|(高い|でかい)(建物|ビル|マンション))/.test(text))                    return { min: 10 };
     if (/(低層|背の低い|平屋)/.test(text))                                              return { max: 3 };
     return null;
+  }
+
+  // Recover building-height intent that L1 didn't emit as target.floors:
+  //  (1) a "〜の中(same_building)" poi condition whose text is a height keyword
+  //      ("タワマンの中の…") is really about the target's OWN building → fold into
+  //      target.floors and drop the bogus POI search;
+  //  (2) otherwise infer from the raw query text.
+  // Nearby/adjacent towers ("すぐ近くのタワマン") stay as real conditions — only
+  // same_building containers are folded.
+  _applyFloorsInference(schema, text) {
+    if (!schema?.target) return;
+    if (Array.isArray(schema.conditions)) {
+      schema.conditions = schema.conditions.filter(c => {
+        if (c?.type === 'poi' && c.distance?.level === 'same_building') {
+          const f = this._inferFloors(c.text || '');
+          if (f) { if (!schema.target.floors) schema.target.floors = f; return false; }
+        }
+        return true;
+      });
+    }
+    if (!schema.target.floors) {
+      const f = this._inferFloors(text);
+      if (f) schema.target.floors = f;
+    }
   }
 
   // ─────────────────────────────────────────────
