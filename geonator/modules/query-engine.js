@@ -871,9 +871,11 @@ class QueryEngine {
         scored.push({ nm, items, near: nearCountOf(items) });
       }
       const N = basisPts.length;
-      // 区別に使える＝過半数の候補には無い。空になったら「全候補共通」だけ落として救済。
-      let kept = N >= 2 ? scored.filter(s => s.near * 2 <= N) : scored;
-      if (!kept.length) kept = scored.filter(s => s.near < N);
+      // 区別に使える＝ごく一部の候補にしか無い（選べば候補が確実に大きく減る）。
+      // 「絞り込めない目印は出さない」— 救済フォールバックは廃止（無意味なヒントを出す方が害）。
+      // near*2<=N: 過半数の候補に共通する目印は除外（N=2→near1のみ, N=3→near1のみ, N=8→near≦4）。
+      const kept = N >= 2 ? scored.filter(s => s.near > 0 && s.near * 2 <= N) : scored;
+      kept.sort((a, b) => a.near - b.near); // 少数の候補にしか無い＝区別力が高い順
       return kept.map(s => ({ text: this._landmarkPhrase(s.nm), landmark: s.nm, items: s.items }));
     } catch { return []; }
   }
