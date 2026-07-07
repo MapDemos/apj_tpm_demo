@@ -878,10 +878,16 @@ class QueryEngine {
   // [3-C] Step2: evaluate distances
   // ─────────────────────────────────────────────
 
-  async _evaluate(schema, mainCandidates, condCandidates) {
+  async _evaluate(schema, mainCandidates, condCandidates, frozenLabels = null) {
     if (!mainCandidates || mainCandidates.length === 0) {
       return { full: [], partial: [], none: [] };
     }
+
+    // frozenLabels: condition labels already evaluated in a previous run (「更に絞り込む」).
+    // Their per-candidate result is reused from c._condEval instead of re-evaluated, so
+    // the confirmed evaluation (e.g. distance to 天神中央公園) is never recomputed — this
+    // keeps narrow results consistent with the initial search (no reach-origin flip).
+    const isFrozen = label => !!(frozenLabels && frozenLabels.has(label));
 
     const allConditions = schema.conditions ?? [];
 
@@ -893,6 +899,7 @@ class QueryEngine {
     const conditions = allConditions.filter(c => !isAbsolute(c)); // ← 採点対象（ハードは除く）
     for (const hc of hardConds) {
       const label = hc.text ?? hc.type;
+      if (isFrozen(label)) continue; // already applied on the confirmed pool
       const items = condCandidates[label] ?? [];
       if (items.length === 0) continue; // アンカー未取得＝評価不能 → フィルタしない
       const { kept, excluded } = await this.mcp.filterSameBuilding(mainCandidates, items);
@@ -958,16 +965,32 @@ class QueryEngine {
     // every candidate down uniformly — so it's excluded from the effective total below
     // (treated like 'unsupported': 注記のみ・非採点)。condNotFound already notified.
     const conditionHit = new Set();
-    const addHit = (t, label, nearestM, refM) => {
+    // addHit records the hit on the tracker AND freezes the per-candidate result on the
+    // candidate (c._condEval[label]) so a later 「更に絞り込む」 can reuse it verbatim.
+    const addHit = (t, label, closeness) => {
       t.hit++;
       t.hitLabels.push(label);
       conditionHit.add(label);
-      const closeness = nearestM != null ? Math.max(0, Math.min(1, 1 - nearestM / refM)) : 0.5;
       t.closenessSum += closeness;
+      (t.candidate._condEval ||= {})[label] = closeness;
     };
+    const closenessOf = (nearestM, refM) => nearestM != null ? Math.max(0, Math.min(1, 1 - nearestM / refM)) : 0.5;
 
     for (const cond of conditions) {
       const label = cond.text ?? cond.type;
+
+      // Frozen condition → reuse the confirmed per-candidate result (no re-evaluation).
+      if (isFrozen(label)) {
+        for (const main of mainCandidates) {
+          const stored = main._condEval && main._condEval[label];
+          if (stored != null) {
+            const t = tracker.get(String(main.id));
+            if (t) addHit(t, label, stored);
+          }
+        }
+        continue;
+      }
+
       const distParams = resolveDistanceParams(cond.distance, this.config.DEFAULT_LEVEL);
       const refM = distParams.radiusM
         ?? (distParams.minutes ? distParams.minutes * (speed[distParams.profile] || 80) : 250);
@@ -986,7 +1009,7 @@ class QueryEngine {
           const res = results[i];
           if (res.matched && res.nearestM != null && res.nearestM <= refM) {
             const t = tracker.get(String(main.id));
-            if (t) addHit(t, label, res.nearestM, refM);
+            if (t) addHit(t, label, closenessOf(res.nearestM, refM));
           }
         });
         continue;
@@ -1001,7 +1024,7 @@ class QueryEngine {
       const matches = await this.mcp.evaluateDistanceBatch(mainCandidates, condItems, distParams, isoCache, dir);
       for (const [mid, nearestM] of matches) {
         const t = tracker.get(mid);
-        if (t) addHit(t, label, nearestM, refM);
+        if (t) addHit(t, label, closenessOf(nearestM, refM));
       }
     }
 
@@ -1242,9 +1265,13 @@ class QueryEngine {
       return { label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: isLine ? '候補ごと評価' : (condResults[key]?.length ?? 0) };
     });
 
-    // Evaluate with the FIXED pool (no target re-collection).
+    // Evaluate with the FIXED pool. FREEZE the existing conditions (reuse each candidate's
+    // confirmed per-condition result from the previous run) and evaluate ONLY the newly
+    // added conditions — so the confirmed evaluation (e.g. distance to 天神中央公園) is
+    // never recomputed and narrow stays consistent with the initial search.
+    const frozenLabels = new Set((schema.conditions || []).map(c => c.text ?? c.type));
     this.mcp._evalPolygons = [];
-    const results = await this._evaluate(merged, keptPool, condResults);
+    const results = await this._evaluate(merged, keptPool, condResults, frozenLabels);
     this.ui.drawHits?.(keptPool);
     Object.values(condResults).forEach(items => this.ui.drawConditionHits?.(items));
     this.ui.drawPolygons?.(this.mcp._evalPolygons);

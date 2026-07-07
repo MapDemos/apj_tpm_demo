@@ -2602,13 +2602,7 @@ class MapboxMCPClient {
     // Build reach polygons on the fewer-cardinality side. 各anchorのpolygon取得は独立
     // なので並列fetch。同一座標はbatch内でdedup（radiusはローカル即時／isochroneの重複API防止。
     // isoCacheは条件をまたいで有効＝_evaluateがcondごとに逐次呼ぶため従来の再利用も維持）。
-    // Radius is symmetric → build reach on the fewer side (fewer calls). Isochrone is
-    // ASYMMETRIC, so the reach must always be centered on the condition landmark (the
-    // fixed reference) — otherwise a shrunk candidate pool (e.g. during「更に絞り込む」)
-    // would flip the origin to the candidates and change which candidates match, so a
-    // candidate that matched in the initial search would drop out. Keep the landmark as
-    // the origin regardless of counts, matching the initial evaluation.
-    const flip    = distParams.useIsochrone ? true : (conditionItems.length <= mainCandidates.length);
+    const flip    = conditionItems.length <= mainCandidates.length;
     const anchors = flip ? conditionItems : mainCandidates;
 
     const polyByKey = new Map(); // "lat,lng" → Promise<poly>（batch内dedup）
