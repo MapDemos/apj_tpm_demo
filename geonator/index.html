@@ -92,6 +92,22 @@
 
       <div class="settings-divider"></div>
 
+      <!-- 条件の上限 -->
+      <div class="settings-subtitle" id="set-maxcond-title">条件の上限 <span class="settings-hint" id="set-maxcond-hint">（近くにあるものの数・0〜5）</span></div>
+      <label class="settings-row">
+        <span id="set-maxcond-row">conditionの最大数</span>
+        <select id="maxConditionsSelect">
+          <option value="0">0</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+        </select>
+      </label>
+
+      <div class="settings-divider"></div>
+
       <!-- ② スコアの重みづけ — 3 weights, always sum to 100% (moving one redistributes) -->
       <div class="settings-subtitle" id="set-weight-title">スコアの重みづけ <span class="settings-hint" id="set-weight-hint">（何を重視するか・合計100%）</span></div>
       <div class="settings-slider-row">

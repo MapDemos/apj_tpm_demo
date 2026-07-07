@@ -78,6 +78,7 @@ const CONFIG = {
   API_MAX_RETRY:       1,            // retries on timeout (GG)
   L1_MAX_RETRY:        1,            // L1 JSON invalid → retry count (II)
   CANDIDATE_LIMIT:     150,          // max candidates collected per query
+  MAX_CONDITIONS:      3,            // conditionの最大数（0-5、設定画面で変更可・超過分は切り捨て）
   BBOX_MAX_HALF_M:     2000,         // max half-width of primary search bbox in meters (§6-3)
 
   // ============================================

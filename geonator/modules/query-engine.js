@@ -66,6 +66,10 @@ class QueryEngine {
 
     this._dbgReport.schema = schema;
 
+    // User-facing confirmation (LLM-generated NL) shown immediately, in parallel with
+    // the heavy processing that follows. States what we understood + what couldn't be included.
+    if (schema.confirmation) this.ui.showMessage(schema.confirmation);
+
     // [STEP] QuerySchema — show the parsed intent early so the operator can sanity-check
     // L1's interpretation (target / conditions / distances) before any search runs.
     const anchors = (schema.proximity?.anchors || []).map(a => `${a.text}[${a.type}/${a.specificity}]`).join(', ');
@@ -76,7 +80,6 @@ class QueryEngine {
         const d = c.distance || {};
         return `condition: ${c.text ?? c.type} [${c.type}] 距離=${d.level ?? '-'}/${d.method ?? '-'}${d.minutes ? ' ' + d.minutes + '分' : ''}`;
       }),
-      ...(schema.unsupported?.length ? [`unsupported: ${schema.unsupported.join('、')}`] : []),
     ]);
 
     await this._executeSearch(schema, merged);
@@ -115,7 +118,7 @@ class QueryEngine {
       return null;
     }
 
-    fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL);
+    fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
 
     // [A] structural checks
     const issues = structuralChecks(schema);
@@ -170,7 +173,7 @@ class QueryEngine {
     try {
       const schema = await this.llm.parseQuery(combined, null);
       if (!validateQuerySchema(schema).ok) return null;
-      fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL);
+      fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
       return schema;
     } catch {
       this.ui.showMessage(this._m().error_communication);
@@ -1100,7 +1103,7 @@ class QueryEngine {
     const displayNone = hasMatch ? [] : none;
 
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
-    this.ui.showResults(full, partial, displayNone, schema.unsupported, conditionLabels);
+    this.ui.showResults(full, partial, displayNone, null, conditionLabels);
 
     const M = this._m();
     let msg;

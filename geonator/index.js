@@ -113,16 +113,23 @@ class LocationFinderApp {
       const b = JSON.parse(localStorage.getItem('geonator_l2_1') || '{}');
       if (typeof b.keepNull === 'boolean') this.config.L2_1_KEEP_NULL_CATEGORY = b.keepNull;
     } catch (_) {}
+    // Search behavior: max conditions (0-5)
+    try {
+      const b = JSON.parse(localStorage.getItem('geonator_search') || '{}');
+      if (Number.isFinite(b.maxConditions)) this.config.MAX_CONDITIONS = Math.max(0, Math.min(5, b.maxConditions));
+    } catch (_) {}
 
     const l1Sel  = document.getElementById('l1ModelSelect');
     const l21Sel = document.getElementById('l2_1ModelSelect');
     const l22Sel = document.getElementById('l2_2ModelSelect');
     const nullSel = document.getElementById('l2_1NullSelect');
+    const maxCondSel = document.getElementById('maxConditionsSelect');
     const modal  = document.getElementById('settingsModal');
     if (l1Sel)  l1Sel.value  = this.config.L1_MODEL;
     if (l21Sel) l21Sel.value = this.config.L2_1_MODEL;
     if (l22Sel) l22Sel.value = this.config.L2_2_MODEL;
     if (nullSel) nullSel.value = this.config.L2_1_KEEP_NULL_CATEGORY === false ? 'exclude' : 'include';
+    if (maxCondSel) maxCondSel.value = String(this.config.MAX_CONDITIONS);
 
     const persist = () => {
       try {
@@ -135,10 +142,14 @@ class LocationFinderApp {
     const persistNull = () => {
       try { localStorage.setItem('geonator_l2_1', JSON.stringify({ keepNull: this.config.L2_1_KEEP_NULL_CATEGORY })); } catch (_) {}
     };
+    const persistSearch = () => {
+      try { localStorage.setItem('geonator_search', JSON.stringify({ maxConditions: this.config.MAX_CONDITIONS })); } catch (_) {}
+    };
     l1Sel?.addEventListener('change',  e => { this.config.L1_MODEL   = e.target.value; persist(); });
     l21Sel?.addEventListener('change', e => { this.config.L2_1_MODEL = e.target.value; persist(); });
     l22Sel?.addEventListener('change', e => { this.config.L2_2_MODEL = e.target.value; persist(); });
     nullSel?.addEventListener('change', e => { this.config.L2_1_KEEP_NULL_CATEGORY = e.target.value !== 'exclude'; persistNull(); });
+    maxCondSel?.addEventListener('change', e => { this.config.MAX_CONDITIONS = parseInt(e.target.value, 10); persistSearch(); });
 
     this._initScoringSettings();
 
@@ -149,11 +160,13 @@ class LocationFinderApp {
       this.config.L2_1_MODEL = MODEL_DEFAULTS.L2_1;
       this.config.L2_2_MODEL = MODEL_DEFAULTS.L2_2;
       this.config.L2_1_KEEP_NULL_CATEGORY = false; // default: exclude null-category candidates (strict)
+      this.config.MAX_CONDITIONS = 3;              // default condition cap
       if (l1Sel)  l1Sel.value  = MODEL_DEFAULTS.L1;
       if (l21Sel) l21Sel.value = MODEL_DEFAULTS.L2_1;
       if (l22Sel) l22Sel.value = MODEL_DEFAULTS.L2_2;
       if (nullSel) nullSel.value = 'exclude';
-      try { localStorage.removeItem('geonator_models'); localStorage.removeItem('geonator_l2_1'); } catch (_) {}
+      if (maxCondSel) maxCondSel.value = '3';
+      try { localStorage.removeItem('geonator_models'); localStorage.removeItem('geonator_l2_1'); localStorage.removeItem('geonator_search'); } catch (_) {}
       this._updateModelBadge();
       this._resetScoring?.(); // weights + decisiveness (defined in _initScoringSettings)
     });
@@ -298,17 +311,14 @@ class LocationFinderApp {
         if (!self._debugMode) return Promise.resolve();
         return new Promise(resolve => self._showStepPanel(stepId, label, lines, resolve));
       },
-      showResults(full, partial, none, unsupported, conditionLabels) {
+      showResults(full, partial, none, _unsupported, conditionLabels) {
         // Tier-aware markers (gold/silver/match/bronze). QueryEngine set _tier + _matchInfo.score.
         self._renderTierMarkers([...full, ...partial, ...none]);
 
         // Candidate list in the dialogue panel (clickable + feedback for ground truth)
         self._renderCandidatePanel(full, partial, none);
-
-        // Show unsupported note
-        if (unsupported && unsupported.length > 0) {
-          self.addMessage('assistant', `以下の条件は現在対応していませんが、他の情報で検索を進めます：${unsupported.join('、')}`);
-        }
+        // Note: non-mappable conditions are now surfaced via the L1-generated
+        // confirmation message (schema.confirmation), so no separate unsupported note here.
       },
       async showFeedback() {
         return new Promise(resolve => {
@@ -417,7 +427,7 @@ class LocationFinderApp {
         const d = c.distance || {};
         L.push(`・condition: ${c.text ?? c.type} [${c.type}]  距離=${d.level}/${d.method}${d.minutes ? ' ' + d.minutes + '分' : ''}${d.profile ? ' ' + d.profile : ''}`);
       });
-      if (s.unsupported?.length) L.push(`・unsupported: ${s.unsupported.join('、')}`);
+      if (s.confirmation) L.push(`・確認文: ${s.confirmation}`);
     }
 
     // ── 一次検索 ──
@@ -2909,6 +2919,8 @@ class LocationFinderApp {
       setText('set-l2null-row', st.l2nullRow);
       setText('set-l2null-inc', st.l2nullInclude);
       setText('set-l2null-exc', st.l2nullExclude);
+      setLead('set-maxcond-title', st.maxcondTitle); setText('set-maxcond-hint', st.maxcondHint);
+      setText('set-maxcond-row', st.maxcondRow);
       setLead('set-weight-title', st.weightTitle);   setText('set-weight-hint', st.weightHint);
       setText('set-wrel-label', st.wRel);
       setText('set-wcond-label', st.wCond);
@@ -3146,6 +3158,9 @@ const LANG = {
       l2nullRow:   'カテゴリ=null の候補',
       l2nullInclude: '候補に含める',
       l2nullExclude: '候補に含めない',
+      maxcondTitle: '条件の上限',
+      maxcondHint:  '（近くにあるものの数・0〜5）',
+      maxcondRow:   'conditionの最大数',
       weightTitle: 'スコアの重みづけ',
       weightHint:  '（何を重視するか・合計100%）',
       wRel:        '関連性（意図の一致）',
@@ -3227,6 +3242,9 @@ const LANG = {
       l2nullRow:   'Candidates with category=null',
       l2nullInclude: 'Include as candidates',
       l2nullExclude: 'Exclude from candidates',
+      maxcondTitle: 'Condition limit',
+      maxcondHint:  '(number of nearby features · 0–5)',
+      maxcondRow:   'Max conditions',
       weightTitle: 'Score weighting',
       weightHint:  '(what to prioritize · sums to 100%)',
       wRel:        'Relevance (intent match)',

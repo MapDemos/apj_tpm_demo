@@ -69,11 +69,6 @@ function validateQuerySchema(schema) {
     });
   }
 
-  // unsupported
-  if (schema.unsupported && !Array.isArray(schema.unsupported)) {
-    errors.push('unsupported must be an array');
-  }
-
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }
 
@@ -85,7 +80,7 @@ function validateQuerySchema(schema) {
  * @param {string} defaultLevel
  * @returns {object} mutated schema
  */
-function fillSchemaDefaults(schema, defaultLevel = 'very_close') {
+function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions = 3) {
   if (!schema) return schema;
 
   // anchor specificity default
@@ -111,10 +106,11 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close') {
     }
   }
 
-  // Hard cap: at most 3 conditions (JS-side block). Keeps scoring quality and LLM
-  // cost bounded; extras beyond the first 3 are dropped here.
-  if (Array.isArray(schema.conditions) && schema.conditions.length > 3) {
-    schema.conditions = schema.conditions.slice(0, 3);
+  // Hard cap: at most `maxConditions` conditions (JS-side block, configurable 0-5).
+  // Keeps scoring quality and LLM cost bounded; extras are dropped here.
+  const cap = Number.isFinite(maxConditions) ? Math.max(0, Math.min(5, maxConditions)) : 3;
+  if (Array.isArray(schema.conditions) && schema.conditions.length > cap) {
+    schema.conditions = schema.conditions.slice(0, cap);
   }
 
   // condition distance + queries defaults
@@ -139,7 +135,6 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close') {
     }
   }
 
-  if (!schema.unsupported) schema.unsupported = [];
   return schema;
 }
 

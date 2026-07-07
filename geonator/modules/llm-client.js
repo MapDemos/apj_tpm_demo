@@ -170,11 +170,13 @@ class LLMClient {
 
   _buildL1Prompt(userText) {
     // Full prompt text lives in prompts/prompt-l1.js (loaded separately).
-    // Here we just compose the call structure.
+    // Here we just compose the call structure. The condition cap is injected at call
+    // time (configurable) so L1 emits ≤N conditions and the confirmation stays consistent.
     if (typeof PROMPT_L1 === 'undefined') throw new Error('PROMPT_L1 not loaded');
+    const maxC = Number.isFinite(this.config.MAX_CONDITIONS) ? this.config.MAX_CONDITIONS : 3;
     return {
       system: PROMPT_L1,
-      user:   `ユーザー入力：「${userText}」\n\nQuerySchema JSONのみを返してください。`,
+      user:   `ユーザー入力：「${userText}」\n\nconditionは重要な順に最大${maxC}件まで採用してください（入り切らない条件は confirmation で言及）。QuerySchema JSONのみを返してください。`,
     };
   }
 
