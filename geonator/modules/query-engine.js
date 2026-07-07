@@ -1629,15 +1629,18 @@ class QueryEngine {
     this._cache.surfaced = [...full, ...partial];
 
     // Summary shown as the header INSIDE the candidate-list bubble (not a separate message).
+    // 全一致(F)の件数でMECEに分岐。条件の有無で語を出し分け。
     const M = this._m();
+    const hasCond = (schema.conditions?.length || 0) > 0;
+    const F = full.length;
     let summary;
-    if (!hasMatch) {
-      summary = M.resultRefOnly(displayNone.length);
-    } else if (full.length === 1) {
-      summary = M.resultSingle(partial.length);
-    } else {
-      summary = M.resultRanked(full.length, full[0]?.name || '(名前なし)', partial.length);
-    }
+    if (F === 1)                summary = M.resultPinpoint(hasCond);
+    else if (F >= 2 && F <= 5)  summary = M.resultFew(F, hasCond);
+    else if (F >= 6 && F <= 10) summary = M.resultSomewhat(F, hasCond);
+    else if (F >= 11)           summary = M.resultMany(hasCond);
+    else if (partial.length > 0 || displayNone.length > 0)
+                                summary = M.resultNoExact(partial.length + displayNone.length);
+    else                        summary = M.resultNone(hasCond);
 
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
     this.ui.showResults(full, partial, displayNone, summary, conditionLabels);
@@ -1865,9 +1868,12 @@ const MESSAGES = {
     intersectionNotFound: t => `「${t}」という名前の交差点が見つかりませんでした。`,
     condNotFound:    k => `「${k}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`,
     mainZero:        t => `${t}の近くに候補は見つかりませんでした。追加の情報を教えていただけますか？`,
-    resultSingle: p => `条件に合う候補を1件特定しました${p > 0 ? `（部分マッチ：${p}件）` : ''}。`,
-    resultRanked: (f, top, p) => `全一致 ${f}件・部分一致 ${p}件。最有力は「${top}」です。`,
-    resultRefOnly: n       => `条件に一致する候補はありませんでしたが、範囲内の候補${n}件を参考として表示します。`,
+    resultPinpoint: hc => hc ? '条件を1つに絞り込めました！' : '候補を1つに特定できました！',
+    resultFew:      (n, hc) => `${hc ? '条件に合う候補' : '候補'}が ${n}件 見つかりました。`,
+    resultSomewhat: (n, hc) => `${hc ? '条件に合う候補' : '候補'}が少し多めに（${n}件）見つかりました。上位5件を表示します。`,
+    resultMany:     hc => `${hc ? '条件に合う候補' : '候補'}が多数見つかりました。上位5件を表示します。`,
+    resultNoExact:  n => `条件に完全一致する候補はありませんでした。近い候補を${n}件表示します。`,
+    resultNone:     hc => hc ? '条件に合う候補を見つけられませんでした。' : '候補が見つかりませんでした。',
   },
   en: {
     searching:            'Searching for candidates…',
@@ -1890,8 +1896,11 @@ const MESSAGES = {
     intersectionNotFound: t => `No intersection named "${t}" was found.`,
     condNotFound:    k => `"${k}" wasn't found in this area (it may not be in the map data).`,
     mainZero:        t => `No "${t}" found nearby. Could you give more information?`,
-    resultSingle: p => `Found 1 matching candidate${p > 0 ? ` (partial: ${p})` : ''}.`,
-    resultRanked: (f, top, p) => `${f} full match, ${p} partial. Top candidate: "${top}".`,
-    resultRefOnly: n       => `No candidate matched the conditions; showing ${n} in-area candidate(s) for reference.`,
+    resultPinpoint: hc => hc ? 'Narrowed down to a single match!' : 'Pinpointed a single candidate!',
+    resultFew:      (n, hc) => `Found ${n} ${hc ? 'matching candidates' : 'candidates'}.`,
+    resultSomewhat: (n, hc) => `Found quite a few ${hc ? 'matching candidates' : 'candidates'} (${n}). Showing the top 5.`,
+    resultMany:     hc => `Found many ${hc ? 'matching candidates' : 'candidates'}. Showing the top 5.`,
+    resultNoExact:  n => `No exact match; showing ${n} close candidate(s).`,
+    resultNone:     hc => hc ? 'No matching candidates found.' : 'No candidates found.',
   },
 };
