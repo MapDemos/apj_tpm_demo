@@ -1107,9 +1107,10 @@ class QueryEngine {
     // 参考(none) is only shown when there is NO full/partial match (else too many).
     const displayNone = hasMatch ? [] : none;
 
-    // Remember the SURFACED candidates (what the user actually sees as results) so that
-    // "更に絞り込む" narrows within these — not within the full pre-evaluation pool.
-    this._cache.surfaced = [...full, ...partial, ...displayNone];
+    // Remember the MATCHED candidates (full+partial) so that "更に絞り込む" narrows within
+    // these. 参考(none) is excluded on purpose — it matched no condition and is only a
+    // fallback display, so it must not become part of the narrow pool.
+    this._cache.surfaced = [...full, ...partial];
 
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
     this.ui.showResults(full, partial, displayNone, null, conditionLabels);
