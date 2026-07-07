@@ -1714,8 +1714,12 @@ class MapboxMCPClient {
       const res  = await this._fetchTilequeryWithCache(url);
       if (!res.ok) return null;
       const data = await res.json();
-      const building = (data.features || []).find(f => f.properties?.tilequery?.layer === 'building');
-      return building?.id ?? null;
+      // 点を「含む」建物を優先（tilequery.distance 昇順＝distance0=内包）。find(先頭)だと
+      // 密集地で近傍の別ビルを拾い、same_building判定が誤マッチする原因になっていた。
+      const buildings = (data.features || [])
+        .filter(f => f.properties?.tilequery?.layer === 'building')
+        .sort((a, b) => (a.properties.tilequery?.distance ?? 9) - (b.properties.tilequery?.distance ?? 9));
+      return buildings[0]?.id ?? null;
     } catch (_) { return null; }
   }
 
@@ -1780,7 +1784,7 @@ class MapboxMCPClient {
    *  - candidate id ≠ anchor id and far → EXCLUDE
    * @returns {Promise<{kept:Array, excluded:Array}>}
    */
-  async filterSameBuilding(mains, items, tightM = 20) {
+  async filterSameBuilding(mains, items, tightM = 8) {
     const ll = o => [o.longitude ?? o.lng, o.latitude ?? o.lat];
     const itemList = items || [];
     const mainList = mains || [];
