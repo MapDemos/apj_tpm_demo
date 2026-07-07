@@ -43,7 +43,10 @@
   <!-- Settings modal (model selection) -->
   <div id="settingsModal" class="settings-modal" style="display:none;">
     <div class="settings-panel">
-      <div class="settings-title">モデル設定</div>
+      <div class="settings-title">設定</div>
+
+      <!-- ① モデル -->
+      <div class="settings-subtitle">モデル</div>
       <label class="settings-row">
         <span>L1（クエリ解析）</span>
         <select id="l1ModelSelect">
@@ -60,21 +63,9 @@
       </label>
 
       <div class="settings-divider"></div>
-      <div class="settings-subtitle">
-        スコアリング調整 <span class="settings-hint">（次の検索から反映）</span>
-        <button id="scoreResetBtn" class="score-reset-btn" title="スコアリング設定をデフォルトに戻す">↺ デフォルトに戻す</button>
-      </div>
 
-      <!-- Preset buttons (推論スタイル) -->
-      <div class="settings-grouplabel">推論スタイル（プリセット）</div>
-      <div class="settings-presets" id="scorePresets">
-        <button class="preset-btn" data-preset="decisive">🎯 言い切り型</button>
-        <button class="preset-btn" data-preset="balanced">⚖️ バランス型</button>
-        <button class="preset-btn" data-preset="cautious">🧭 慎重型</button>
-      </div>
-
-      <!-- 3 weight sliders — sum always 100% (moving one redistributes the others) -->
-      <div class="settings-grouplabel">重み <span class="settings-hint">（合計100%）</span></div>
+      <!-- ② スコアの重みづけ — 3 weights, always sum to 100% (moving one redistributes) -->
+      <div class="settings-subtitle">スコアの重みづけ <span class="settings-hint">（何を重視するか・合計100%）</span></div>
       <div class="settings-slider-row">
         <div class="slider-label"><span>関連性（意図の一致）</span><span class="slider-pct" id="wRelVal">-</span></div>
         <input type="range" id="wRelSlider" min="0" max="100" step="1">
@@ -88,15 +79,20 @@
         <input type="range" id="wAnchorSlider" min="0" max="100" step="1">
       </div>
 
-      <!-- 言い切り度 — separate control (not a weight) -->
-      <div class="settings-grouplabel">言い切り度 <span class="settings-hint">（gold判定の積極性）</span></div>
+      <div class="settings-divider"></div>
+
+      <!-- ③ 結論の出し方 — decisiveness (言い切り ⇔ 慎重) -->
+      <div class="settings-subtitle">結論の出し方 <span class="settings-hint">（言い切り ⇔ 慎重）</span></div>
       <div class="settings-slider-row">
         <div class="slider-label"><span>慎重（同程度多め）</span><span>言い切り（gold積極）</span></div>
         <input type="range" id="decisivenessSlider" min="0" max="100" step="5">
         <div class="slider-val" id="decisivenessVal">-</div>
       </div>
 
+      <div class="settings-hint" style="margin-top:12px">※ スコアの変更は次の検索から反映されます</div>
+
       <div class="settings-actions">
+        <button id="settingsResetBtn" class="control-btn">↺ すべてデフォルトに戻す</button>
         <button id="settingsCloseBtn" class="control-btn">閉じる</button>
       </div>
     </div>
