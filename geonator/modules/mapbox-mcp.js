@@ -1987,6 +1987,57 @@ class MapboxMCPClient {
     return clipped;
   }
 
+  /**
+   * proximity.within(isochrone) 用: 1点の等時間到達ポリゴン(GeoJSON)を返す。
+   * ISOキャップ内でのみ実API発行。取得失敗/上限は null。
+   */
+  async getIsochronePolygon(lat, lng, minutes, profile = 'walking') {
+    const prof = ['walking', 'cycling', 'driving'].includes(profile) ? profile : 'walking';
+    if (this._isoRequests >= (this.config.ISO_MAX_PER_QUERY ?? 100)) return null;
+    try {
+      const url =
+        `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${lng},${lat}` +
+        `?contours_minutes=${minutes}&polygons=true&access_token=${this.token}`;
+      this._isoRequests++;
+      const res = await this._fetchWithRetry(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.features?.[0] || null;
+    } catch (_) { return null; }
+  }
+
+  /**
+   * 複数アンカー点の等時間ポリゴンをまとめ、外接bboxと各ポリゴンを返す。
+   * @returns {Promise<{ bbox: number[]|null, polygons: object[] }>}
+   */
+  async isochroneReach(points, minutes, profile = 'walking') {
+    const polygons = [];
+    for (const p of (points || [])) {
+      const poly = await this.getIsochronePolygon(p.lat, p.lng, minutes, profile);
+      if (poly) polygons.push(poly);
+    }
+    if (!polygons.length) return { bbox: null, polygons: [] };
+    let bb = turf.bbox(polygons[0]);
+    for (let i = 1; i < polygons.length; i++) {
+      const b = turf.bbox(polygons[i]);
+      bb = [Math.min(bb[0], b[0]), Math.min(bb[1], b[1]), Math.max(bb[2], b[2]), Math.max(bb[3], b[3])];
+    }
+    return { bbox: bb, polygons };
+  }
+
+  /** items のうち、いずれかのポリゴン内にある点だけ残す（proximity.within=isochrone のハード足切り）。 */
+  filterInsidePolygons(items, polygons) {
+    if (!polygons?.length) return { kept: items || [], excluded: [] };
+    const kept = [], excluded = [];
+    for (const it of (items || [])) {
+      const lng = it.longitude ?? it.lng, lat = it.latitude ?? it.lat;
+      const inside = (lng != null && lat != null) &&
+        polygons.some(poly => turf.booleanPointInPolygon(turf.point([lng, lat]), poly));
+      (inside ? kept : excluded).push(it);
+    }
+    return { kept, excluded };
+  }
+
   async _filterByIsochrone(anchorLat, anchorLng, minutes, profile, candidates, direction = null, radiusMeters = null) {
     const prof = profile === 'driving' ? 'driving' : 'walking';
 

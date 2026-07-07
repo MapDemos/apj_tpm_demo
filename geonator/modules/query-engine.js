@@ -239,6 +239,7 @@ class QueryEngine {
     // Visualize search area (target = tight, condition = wide) + fit map
     this.ui.drawBBox?.(bboxes.condBbox);
     this.ui.drawBBox?.(bboxes.targetBbox);
+    if (this._reachPolygons?.length) this.ui.drawPolygons?.(this._reachPolygons); // proximity.within 到達圏
     this.ui.fitToBBox?.(bboxes.condBbox);
     this.ui.refreshCounts?.();
 
@@ -346,23 +347,31 @@ class QueryEngine {
       resolvedPoints.push(...points);
     }
 
-    // proximity.within: explicit reach ("駅から徒歩5分以内" / "500m以内") drives the bbox
-    // radius. Overrides each anchor's default extent (e.g. station 700m). Vague "近く/付近"
-    // has within=null → keep the default (meaning is landmark-dependent, per design).
+    // proximity.within: explicit reach from the anchor drives the search area.
+    //  - 時間(minutes) → Isochrone: 実際の等時間到達ポリゴンを引き、その外接bboxで収集＋
+    //    ポリゴン内にハード足切り（徒歩n分“以内”を正確に反映）。
+    //  - 距離(meters)  → 半径: アンカーの radiusM を上書きした矩形bbox（円フィルタはしない）。
+    // 曖昧な「近く/付近」は within=null → 既定半径（意味が目印依存のため／設計方針）。
     const within = schema.proximity.within;
-    if (within && (within.meters != null || within.minutes != null)) {
+    this._reachPolygons = null;
+    this._withinReachM  = null;
+    let bbox = null;
+    const useIso = within && within.method === 'isochrone' && within.minutes != null && within.meters == null;
+    if (useIso) {
+      const reach = await this.mcp.isochroneReach(resolvedPoints, within.minutes, within.profile || 'walking');
+      if (reach.bbox) { bbox = reach.bbox; this._reachPolygons = reach.polygons; }
+    }
+    if (!bbox && within && (within.meters != null || within.minutes != null)) {
+      // 距離指定、または isochrone 取得不可時のフォールバック（minutes×速度の半径近似）。
       const SPEED = { walking: 80, cycling: 250, driving: 500 }; // m/min
       const reachM = within.meters != null
         ? within.meters
         : within.minutes * (SPEED[within.profile] || SPEED.walking);
-      if (reachM > 0) resolvedPoints.forEach(p => { p.radiusM = reachM; });
-      this._withinReachM = reachM > 0 ? Math.round(reachM) : null;
-    } else {
-      this._withinReachM = null;
+      if (reachM > 0) { resolvedPoints.forEach(p => { p.radiusM = reachM; }); this._withinReachM = Math.round(reachM); }
     }
 
-    // [AA] compute base bbox from all resolved points
-    let bbox = this.mcp.resolveBBox({ points: resolvedPoints, marginM: 0 });
+    // [AA] compute base bbox from all resolved points (unless isochrone already set it)
+    if (!bbox) bbox = this.mcp.resolveBBox({ points: resolvedPoints, marginM: 0 });
 
     // Upper-limit check (EE/§6-3): the dense building grid is infeasible over a
     // huge area, so only building-category targets get pushed back. General POI
@@ -1028,6 +1037,15 @@ class QueryEngine {
     let mainRaw = await this.mcp.collectTarget(target, targetBbox, sharedGrid);
     mainRaw = this._applyBuildingNameRules(target, mainRaw);
     mainRaw = this._dedupTargets(mainRaw); // [pre-scoring] drop duplicate candidates (see method)
+
+    // proximity.within=isochrone: hard-limit targets to the reachable polygon ("徒歩n分以内")。
+    if (this._reachPolygons?.length) {
+      const { kept, excluded } = this.mcp.filterInsidePolygons(mainRaw, this._reachPolygons);
+      excluded.forEach(c => this._dbgReport.excludedByHardFilter.push({
+        name: c.name || '(名前なし)', reason: `到達圏（proximity.within）外のため除外`,
+      }));
+      mainRaw = kept;
+    }
 
     // Conditions collection (partition shared grid to the wide condition bbox) — parallel
     const condResults = {};
