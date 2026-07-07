@@ -205,7 +205,7 @@ class LocationFinderApp {
    * Values live in CONFIG (read by QueryEngine on the NEXT search) + persist to localStorage.
    */
   _initScoringSettings() {
-    const DEFAULTS = { wRel: 0.30, wCond: 0.50, wAnchor: 0.20, dec: 0.40 };
+    const DEFAULTS = { wRel: 0.30, wCond: 0.50, wAnchor: 0.20, dec: 1.0 };
     const WKEYS = ['SCORE_WEIGHT_RELEVANCE', 'SCORE_WEIGHT_CONDITION', 'SCORE_WEIGHT_ANCHOR'];
 
     // Restore saved scoring prefs

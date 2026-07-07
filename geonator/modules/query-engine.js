@@ -389,11 +389,32 @@ class QueryEngine {
   }
 
   async _resolveStation(anchor) {
-    // 1. Search Box → station coordinate
+    // 1. Search Box → station coordinate (with homonym disambiguation)
     const sbResult = await this.mcp.searchBox(anchor.text, { types: 'poi,address,place' });
     if (!sbResult?.features?.length) return null;
 
-    const stationCoord = sbResult.features[0].geometry.coordinates; // [lng, lat]
+    // Same station name in different municipalities is a genuine homonym (県庁前駅 exists
+    // in 横浜/千葉/富山/那覇…). Prefer exact-name matches, group by municipality, and ask
+    // "which area?" when more than one — otherwise features[0] silently picks the wrong city.
+    const feats = sbResult.features;
+    const q = MapboxMCPClient._normalizeName(anchor.text);
+    const exact = feats.filter(f => MapboxMCPClient._normalizeName(f.properties?.name) === q);
+    const pool = exact.length ? exact : feats;
+    const byMuni = new Map();
+    for (const f of pool) {
+      const key = this._municipalityKey(f.properties?.full_address || f.properties?.name || '');
+      if (!byMuni.has(key)) byMuni.set(key, f);
+    }
+    const reps = [...byMuni.values()];
+    let chosenFeat = reps[0];
+    if (reps.length > 1 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
+      this._clarifyCount++;
+      const choices = reps.map(f => f.properties.full_address || f.properties.name);
+      const chosen = await this.ui.showChoices(this._m().whichArea(anchor.text), choices.slice(0, 4));
+      const idx = choices.indexOf(chosen);
+      chosenFeat = reps[idx >= 0 ? idx : 0];
+    }
+    const stationCoord = chosenFeat.geometry.coordinates; // [lng, lat]
 
     // 2. Tilequery → all transit entrances
     const entrances = await this.mcp.tilequeryTransitEntrances(stationCoord[1], stationCoord[0], 500);
@@ -513,7 +534,14 @@ class QueryEngine {
 
     // Distinct candidate locations (a POI anchor can resolve to several — e.g. 3
     // コメダ). proximity MUST be a single point → disambiguate to 1 via buttons.
-    const distinct = this._dedupByCoord(features);
+    let distinct = this._dedupByCoord(features);
+
+    // Prefer EXACT name matches: a unique landmark (東京タワー) shouldn't trigger a
+    // "which one?" just because Search Box fuzzy-returned similar names (東京タワー水族館
+    // 等). If exactly one exact-name match exists, use it without asking.
+    const q = MapboxMCPClient._normalizeName(anchor.text);
+    const exact = distinct.filter(f => MapboxMCPClient._normalizeName(f.properties?.name) === q);
+    if (exact.length) distinct = exact;
 
     if (distinct.length > 1 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
       this._clarifyCount++;

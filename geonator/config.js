@@ -97,7 +97,7 @@ const CONFIG = {
   SCORE_WEIGHT_RELEVANCE: 0.30,  // 関連性(意図一致)の重み
   SCORE_WEIGHT_CONDITION: 0.50,  // 条件(ローソン・バス停等)からの距離の重み
   SCORE_WEIGHT_ANCHOR:    0.20,  // proximityアンカー(西大島等)からの距離の重み
-  SCORE_DECISIVENESS:     0.40,  // 言い切り度(0=慎重…1=言い切り)。高いほど僅差でもgoldを立てる→GOLD_MARGINを縮める
+  SCORE_DECISIVENESS:     1.0,   // 言い切り度(0=慎重…1=言い切り)。既定は言い切り(100%)。高いほど僅差でもgoldを立てる→GOLD_MARGINを縮める
   // 4段階relevanceのスコア(「違う」はrateで除外)。ネガティブ強め: わからないは控えめに低く。
   SCORE_REL_DEFINITELY:   1.0,   // 絶対そう
   SCORE_REL_PROBABLY:     0.7,   // 多分そう
