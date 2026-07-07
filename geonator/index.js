@@ -486,6 +486,7 @@ class LocationFinderApp {
       L.push('');
       L.push('【Step1: target収集＋L2意図チェック】');
       L.push(`・意図: ${t.intent}`);
+      if (t.queries?.length) L.push(`・検索語(QE展開): [${t.queries.join(', ')}]${t.queries.length === 1 ? ' ← 未展開' : ''}`);
       if (t.sbCount != null || t.tqCount != null) {
         L.push(`・API内訳: Search Box ${t.sbCount ?? 0}件 / Tilequery採用 ${t.tqCount ?? 0}件 / Tilequery除外 ${t.tqDroppedCount ?? 0}件${t.wantClasses ? '（カテゴリclass=' + t.wantClasses.join(',') + '）' : ''}`);
       }

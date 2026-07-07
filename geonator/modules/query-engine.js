@@ -74,12 +74,21 @@ class QueryEngine {
     // [STEP] QuerySchema — show the parsed intent early so the operator can sanity-check
     // L1's interpretation (target / conditions / distances) before any search runs.
     const anchors = (schema.proximity?.anchors || []).map(a => `${a.text}[${a.type}/${a.specificity}]`).join(', ');
+    // Query Expansion (QE) の結果を可視化。展開語が text だけ（=未展開）なのか、同義語まで
+    // 出ているのかをデバッグで確認できるようにする（「ラーメン屋」で当たらない等の切り分け用）。
+    const qeStr = (o) => {
+      const qs = Array.isArray(o?.queries) ? o.queries : [];
+      if (!qs.length) return '  展開=（なし）';
+      const expanded = qs.length > 1 || (qs.length === 1 && qs[0] !== o.text);
+      return `  展開${expanded ? '' : '(未展開)'}=[${qs.join(', ')}]`;
+    };
     await this._step('step-schema', '⓪ クエリ解釈 (QuerySchema)', [
       `proximity: ${anchors || '(なし)'}${schema.proximity?.bearing_filter ? ' 方角=' + schema.proximity.bearing_filter : ''}`,
-      `target: ${schema.target?.text}  intent=${schema.target?.query_intent}${schema.target?.floors ? '  階数=' + JSON.stringify(schema.target.floors) : ''}`,
+      `target: ${schema.target?.text}  intent=${schema.target?.query_intent}${schema.target?.floors ? '  階数=' + JSON.stringify(schema.target.floors) : ''}${qeStr(schema.target)}`,
       ...(schema.conditions || []).map(c => {
         const d = c.distance || {};
-        return `condition: ${c.text ?? c.type} [${c.type}] 距離=${d.level ?? '-'}/${d.method ?? '-'}${d.minutes ? ' ' + d.minutes + '分' : ''}`;
+        const qe = c.type === 'poi' ? qeStr(c) : '';
+        return `condition: ${c.text ?? c.type} [${c.type}] 距離=${d.level ?? '-'}/${d.method ?? '-'}${d.minutes ? ' ' + d.minutes + '分' : ''}${qe}`;
       }),
     ]);
 
@@ -1041,6 +1050,7 @@ class QueryEngine {
     this._targetRaw = tdbg?.raw_count ?? mainRaw.length;
     this._dbgReport.target = {
       intent:        this._buildIntentLabel(target),
+      queries:       Array.isArray(target?.queries) ? target.queries : (target?.text ? [target.text] : []),
       raw:           mainRaw.length,
       excluded:      excludedNames.length,
       excludedNames: excludedNames.slice(0, 40),
