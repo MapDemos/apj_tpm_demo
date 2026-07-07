@@ -1039,3 +1039,6 @@ html, body {
 
 /* Debug: isolated step panel (click a step to show only its map elements) */
 .debug-step.step-isolated { outline: 2px solid #f59e0b; outline-offset: 1px; }
+
+/* Result summary line at the top of the candidate-list bubble */
+.candidate-summary { font-size: 13px; font-weight: 600; color: #e2e8f0; margin: 0 0 8px; line-height: 1.5; }

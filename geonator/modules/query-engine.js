@@ -1414,11 +1414,6 @@ class QueryEngine {
 
     const hasMatch = full.length > 0 || partial.length > 0;
 
-    if (!hasMatch && none.length > 0) {
-      // [L] main exists but 0 conditions matched → show 参考 as fallback
-      this.ui.showMessage(this._m().no_condition_match);
-    }
-
     // 参考(none) is only shown when there is NO full/partial match (else too many).
     const displayNone = hasMatch ? [] : none;
 
@@ -1427,21 +1422,19 @@ class QueryEngine {
     // fallback display, so it must not become part of the narrow pool.
     this._cache.surfaced = [...full, ...partial];
 
-    const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
-    this.ui.showResults(full, partial, displayNone, null, conditionLabels);
-
+    // Summary shown as the header INSIDE the candidate-list bubble (not a separate message).
     const M = this._m();
-    let msg;
+    let summary;
     if (!hasMatch) {
-      msg = M.resultRefOnly(displayNone.length);
+      summary = M.resultRefOnly(displayNone.length);
     } else if (full.length === 1) {
-      msg = M.resultSingle(partial.length);
+      summary = M.resultSingle(partial.length);
     } else {
-      // Rank-based: full-match count + the top (最有力) candidate's name.
-      const topName = full[0]?.name || '(名前なし)';
-      msg = M.resultRanked(full.length, topName, partial.length);
+      summary = M.resultRanked(full.length, full[0]?.name || '(名前なし)', partial.length);
     }
-    this.ui.showMessage(msg);
+
+    const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
+    this.ui.showResults(full, partial, displayNone, summary, conditionLabels);
   }
 
   // ─────────────────────────────────────────────
@@ -1656,7 +1649,7 @@ const MESSAGES = {
     condNotFound:    k => `「${k}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`,
     mainZero:        t => `${t}の近くに候補は見つかりませんでした。追加の情報を教えていただけますか？`,
     resultSingle: p => `条件に合う候補を1件特定しました${p > 0 ? `（部分マッチ：${p}件）` : ''}。`,
-    resultRanked: (f, top, p) => `全一致 ${f}件・部分一致 ${p}件。最有力は「${top}」です（上位3件に吹き出し、最有力に地図をフォーカスしました）。`,
+    resultRanked: (f, top, p) => `全一致 ${f}件・部分一致 ${p}件。最有力は「${top}」です。`,
     resultRefOnly: n       => `条件に一致する候補はありませんでしたが、範囲内の候補${n}件を参考として表示します。`,
   },
   en: {
@@ -1681,7 +1674,7 @@ const MESSAGES = {
     condNotFound:    k => `"${k}" wasn't found in this area (it may not be in the map data).`,
     mainZero:        t => `No "${t}" found nearby. Could you give more information?`,
     resultSingle: p => `Found 1 matching candidate${p > 0 ? ` (partial: ${p})` : ''}.`,
-    resultRanked: (f, top, p) => `${f} full match, ${p} partial. Top candidate: "${top}" (top 3 get callouts; map focused on the top).`,
+    resultRanked: (f, top, p) => `${f} full match, ${p} partial. Top candidate: "${top}".`,
     resultRefOnly: n       => `No candidate matched the conditions; showing ${n} in-area candidate(s) for reference.`,
   },
 };

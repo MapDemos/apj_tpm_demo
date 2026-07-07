@@ -317,14 +317,13 @@ class LocationFinderApp {
         if (!self._debugMode) return Promise.resolve();
         return new Promise(resolve => self._showStepPanel(stepId, label, lines, resolve));
       },
-      showResults(full, partial, none, _unsupported, conditionLabels) {
-        // Tier-aware markers (gold/silver/match/bronze). QueryEngine set _tier + _matchInfo.score.
+      showResults(full, partial, none, summary, conditionLabels) {
+        // Tier-aware markers. QueryEngine set _tier + _matchInfo.score.
         self._renderTierMarkers([...full, ...partial, ...none]);
 
-        // Candidate list in the dialogue panel (clickable + feedback for ground truth)
-        self._renderCandidatePanel(full, partial, none);
-        // Note: non-mappable conditions are now surfaced via the L1-generated
-        // confirmation message (schema.confirmation), so no separate unsupported note here.
+        // Candidate list in the dialogue panel (clickable + feedback for ground truth),
+        // with the result summary as the header of the SAME bubble.
+        self._renderCandidatePanel(full, partial, none, summary);
       },
       async showFeedback(proximityLabel) {
         return new Promise(resolve => {
@@ -931,9 +930,9 @@ class LocationFinderApp {
    * truth (shared between operator and Claude via CSV export). Available in both
    * normal and debug mode.
    */
-  _renderCandidatePanel(full, partial, none) {
+  _renderCandidatePanel(full, partial, none, summary) {
     const rows = [...(full || []), ...(partial || [])];
-    if (rows.length === 0 && (!none || none.length === 0)) return;
+    if (rows.length === 0 && (!none || none.length === 0) && !summary) return;
 
     const container = document.getElementById('chatMessages');
     const wrapper = document.createElement('div');
@@ -941,6 +940,14 @@ class LocationFinderApp {
 
     const panel = document.createElement('div');
     panel.className = 'candidate-panel';
+
+    // Result summary at the top of the bubble (before the candidate list).
+    if (summary) {
+      const sum = document.createElement('div');
+      sum.className = 'candidate-summary';
+      sum.textContent = summary;
+      panel.appendChild(sum);
+    }
 
     // Header + export
     const header = document.createElement('div');
