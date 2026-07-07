@@ -829,54 +829,46 @@ class QueryEngine {
         const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
         return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
       };
-      const candList = basis.slice(0, 8).map((c, i) => {
-        const cl = c.latitude ?? c.lat, cn = c.longitude ?? c.lng;
-        const nearby = [];
-        const seen = new Set();
-        for (const g of grid) {
-          if (!g.name || usedCond.has(norm(g.name))) continue; // skip landmarks already used as conditions
-          const gl = g.latitude ?? g.lat, gn = g.longitude ?? g.lng;
-          if (gl == null || gn == null) continue;
-          if (distM(cl, cn, gl, gn) <= NEAR_M && !seen.has(g.name)) { seen.add(g.name); nearby.push(g.name); }
-          if (nearby.length >= 15) break;
-        }
-        return { name: c.name || `候補${i + 1}`, nearby };
-      });
-      if (candList.every(c => c.nearby.length === 0)) return [];
+      // 役割分担: JS が「幾何的に区別できる目印」を各候補へ機械的に割り当て（重複排除）、
+      // LLM は「その中でどれを使うか（知名度）」を選ぶだけ。
+      // → 各poi_labelが basis候補の何個(≤NEAR_M)の近くにあるか数え、"ちょうど1候補" にしか
+      //   近くない＝その候補固有の目印だけを採用（複数候補に重なるものは全部捨てる）。
+      const pts = basis.slice(0, 8)
+        .map((c, i) => ({ i, name: c.name || `候補${i + 1}`, lat: c.latitude ?? c.lat, lng: c.longitude ?? c.lng }))
+        .filter(p => p.lat != null && p.lng != null);
+      if (pts.length < 2) return [];
+      const byCand = new Map(pts.map(p => [p.i, []]));   // 候補index → 固有目印名[]
+      const seenName = new Set();
+      for (const g of grid) {
+        if (!g.name) continue;
+        const key = norm(g.name);
+        if (!key || usedCond.has(key) || seenName.has(key)) continue; // 既存条件・同名は除外
+        const gl = g.latitude ?? g.lat, gn = g.longitude ?? g.lng;
+        if (gl == null || gn == null) continue;
+        const near = pts.filter(p => distM(p.lat, p.lng, gl, gn) <= NEAR_M);
+        if (near.length !== 1) continue;                 // 0個 or 複数候補に重なる → 区別に使えない
+        seenName.add(key);
+        const arr = byCand.get(near[0].i);
+        if (arr.length < 15) arr.push(g.name);
+      }
+      const candList = pts.map(p => ({ name: p.name, nearby: byCand.get(p.i) })).filter(c => c.nearby.length);
+      if (!candList.length) return []; // 幾何的に区別できる目印が無い → 出さない（絞り込めないので）
+
+      // LLM は「区別できる候補群」の中から知名度で選ぶだけ。allowed 以外は採用しない。
+      const allowed = new Set(candList.flatMap(c => c.nearby.map(norm)));
       const names = await this.llm.suggestLandmarks(candList, this._langCode());
       if (!names.length) return [];
-
-      // Resolve each suggested NAME back to the known grid poi_label items (coords already
-      // known) so choosing a suggestion never triggers a re-query. Names that don't map to
-      // a real grid POI are dropped (avoids "アクロス福岡" → "…アクロス福岡店" noise).
-      // Deterministic distinctiveness backstop: a good narrowing hint must be near only
-      // SOME candidates. The L3 prompt asks for this, but we don't trust it — recompute
-      // per-candidate proximity from coords and drop hints near "more than half" (and
-      // always those near ALL). Geometry is exact, so JS enforces it, not the LLM.
-      const basisPts = basis.slice(0, 8)
-        .map(c => [c.longitude ?? c.lng, c.latitude ?? c.lat])
-        .filter(([a, b]) => a != null && b != null);
-      const nearCountOf = items => basisPts.filter(([blng, blat]) =>
-        items.some(it => distM(blat, blng, it.latitude ?? it.lat, it.longitude ?? it.lng) <= NEAR_M)
-      ).length;
-
+      const out = [];
       const usedNames = new Set();
-      const scored = [];
       for (const nm of names) {
         const key = norm(nm);
-        if (!key || usedNames.has(key) || usedCond.has(key)) continue; // skip dups / existing conditions
+        if (!key || usedNames.has(key) || !allowed.has(key)) continue; // 区別済みリスト外/重複は拒否
         const items = grid.filter(g => g.name && norm(g.name) === key);
         if (!items.length) continue; // unresolvable → skip (no re-query)
         usedNames.add(key);
-        scored.push({ nm, items, near: nearCountOf(items) });
+        out.push({ text: this._landmarkPhrase(nm), landmark: nm, items });
       }
-      const N = basisPts.length;
-      // 区別に使える＝ごく一部の候補にしか無い（選べば候補が確実に大きく減る）。
-      // 「絞り込めない目印は出さない」— 救済フォールバックは廃止（無意味なヒントを出す方が害）。
-      // near*2<=N: 過半数の候補に共通する目印は除外（N=2→near1のみ, N=3→near1のみ, N=8→near≦4）。
-      const kept = N >= 2 ? scored.filter(s => s.near > 0 && s.near * 2 <= N) : scored;
-      kept.sort((a, b) => a.near - b.near); // 少数の候補にしか無い＝区別力が高い順
-      return kept.map(s => ({ text: this._landmarkPhrase(s.nm), landmark: s.nm, items: s.items }));
+      return out;
     } catch { return []; }
   }
 
