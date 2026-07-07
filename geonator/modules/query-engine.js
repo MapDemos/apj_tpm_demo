@@ -234,8 +234,21 @@ class QueryEngine {
 
     // [3-B] collect candidates (unless cached)
     if (cacheInvalid.candidates) {
-      const collected = await this._collectCandidates(schema, bboxes);
+      let collected = await this._collectCandidates(schema, bboxes);
       if (!collected) return;
+
+      // [3-B-overflow] target overflowed the cap (too dense for the proximity bbox) →
+      // re-anchor on a selective tight condition (promotion) or ask for a landmark.
+      if (this._targetRaw > this.config.CANDIDATE_LIMIT) {
+        const tight = await this._resolveOverflow(schema, bboxes, collected);
+        if (tight && tight.bbox) {
+          if (tight.note) this.ui.showMessage(tight.note);
+          const re = await this._collectCandidates(schema, { targetBbox: tight.bbox, condBbox: bboxes.condBbox });
+          if (re) collected = re;
+        }
+        // no resolution (user skipped / nothing found) → proceed with the capped set.
+      }
+
       this._cache.mainCandidates = collected.main;
       this._cache.condCandidates = collected.conditions;
       // Visualize hits
@@ -769,6 +782,107 @@ class QueryEngine {
     return this._langCode() === 'en' ? `${name} is right nearby` : `すぐ近くに${name}がある`;
   }
 
+  // ─────────────────────────────────────────────
+  // Overflow handling: target too dense for the proximity bbox (raw > CANDIDATE_LIMIT).
+  // Reactive (data-driven): re-anchor on a selective tight condition, else clarify.
+  // ─────────────────────────────────────────────
+
+  /** Bounding box enclosing the given points, expanded by radiusM (meters). */
+  _bboxFromPoints(points, radiusM = 250) {
+    const lls = (points || [])
+      .map(p => [p.longitude ?? p.lng, p.latitude ?? p.lat])
+      .filter(([a, b]) => a != null && b != null);
+    if (!lls.length) return null;
+    const lats = lls.map(x => x[1]), lngs = lls.map(x => x[0]);
+    const cLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+    const mLat = radiusM / 111000;
+    const mLng = radiusM / (111000 * Math.cos(cLat * Math.PI / 180) || 1);
+    return [Math.min(...lngs) - mLng, Math.min(...lats) - mLat, Math.max(...lngs) + mLng, Math.max(...lats) + mLat];
+  }
+
+  /** A condition worth promoting to the search anchor: specific poi + tight distance + few resolved points. */
+  _findPromotableAnchor(schema, condResults) {
+    const TIGHT = new Set(['same_building', 'adjacent', 'very_close']);
+    let best = null;
+    for (const c of (schema.conditions || [])) {
+      if (c.type !== 'poi' || !TIGHT.has(c.distance?.level)) continue;
+      const items = condResults[c.text ?? c.type] || [];
+      if (items.length < 1 || items.length > 10) continue; // selective enough to anchor on
+      if (!best || items.length < best.items.length) {
+        const dp = resolveDistanceParams(c.distance, this.config.DEFAULT_LEVEL);
+        best = { label: c.text ?? c.type, items, radiusM: dp.radiusM || 250 };
+      }
+    }
+    return best;
+  }
+
+  /** Prominent nearby landmarks (for the overflow clarify) as {text, landmark, items} buttons. */
+  async _computeAreaSuggestions(targetBbox) {
+    try {
+      const grid = await this.mcp.buildPoiLabelGrid(targetBbox, 65);
+      if (!grid?.length) return [];
+      const norm = s => (s || '').normalize('NFKC').replace(/[\s　]+/g, '').toLowerCase();
+      const names = [], seen = new Set();
+      for (const g of grid) { const k = norm(g.name); if (g.name && !seen.has(k)) { seen.add(k); names.push(g.name); } }
+      if (!names.length) return [];
+      const picked = await this.llm.suggestProminentLandmarks(names.slice(0, 60), this._langCode());
+      const out = [], used = new Set();
+      for (const nm of picked) {
+        const k = norm(nm); if (!k || used.has(k)) continue;
+        const items = grid.filter(g => g.name && norm(g.name) === k);
+        if (!items.length) continue;
+        used.add(k);
+        out.push({ text: nm, landmark: nm, items });
+      }
+      return out;
+    } catch { return []; }
+  }
+
+  /** Resolve a clarify-supplied landmark name to coordinate points (no re-query loop). */
+  async _resolveClarifyAnchor(text) {
+    try {
+      const sb = await this.mcp.searchBox(text, { types: 'poi,address,place' });
+      return (sb?.features || []).slice(0, 5)
+        .map(f => { const c = f.geometry?.coordinates; return c ? { longitude: c[0], latitude: c[1] } : null; })
+        .filter(Boolean);
+    } catch { return null; }
+  }
+
+  /**
+   * Overflow resolution. Returns { bbox, note } to re-collect the target in a tighter
+   * area, or null to proceed with the capped set.
+   */
+  async _resolveOverflow(schema, bboxes, collected) {
+    const en = this._langCode() === 'en';
+    const tgt = schema.target?.text || '';
+
+    // 1) Promote a selective tight condition (e.g. すぐ隣にドミノピザ) → its area.
+    const anchor = this._findPromotableAnchor(schema, collected.conditions);
+    if (anchor) {
+      const bbox = this._bboxFromPoints(anchor.items, anchor.radiusM);
+      if (bbox) return { bbox, note: en
+        ? `Too many「${tgt}」here — narrowing to the area around「${anchor.label}」.`
+        : `「${tgt}」が多すぎるため「${anchor.label}」周辺に絞って探します。` };
+    }
+
+    // 2) No selective anchor → ask the user for a distinguishing landmark (+ suggestions).
+    const suggestions = await this._computeAreaSuggestions(bboxes.targetBbox);
+    const prompt = en
+      ? `There are too many「${tgt}」in this area. Tell me a nearby landmark (store / facility / park) to pinpoint it — or pick one below.`
+      : `この辺りは「${tgt}」が多すぎます。近くの目印（店・施設・公園など）を教えてください（下から選んでもOK）。`;
+    const hint = await this.ui.showHintInput(prompt, suggestions);
+    if (!hint) return null; // skipped → accept the capped set
+
+    let points, label;
+    if (typeof hint === 'object' && hint.landmark) { points = hint.items; label = hint.landmark; }
+    else { label = String(hint); points = await this._resolveClarifyAnchor(label); }
+    if (!points || !points.length) return null;
+
+    const bbox = this._bboxFromPoints(points, 250);
+    if (!bbox) return null;
+    return { bbox, note: en ? `Narrowing to the area around「${label}」.` : `「${label}」周辺に絞って探します。` };
+  }
+
   _bboxExceedsLimit(bbox) {
     if (!bbox) return false;
     const [minX, minY, maxX, maxY] = bbox;
@@ -832,6 +946,8 @@ class QueryEngine {
 
     // Debug: target + condition collection breakdown
     const tdbg = this.mcp._lastTargetDebug || null;
+    // Pre-slice raw count → overflow signal (target too dense for the proximity bbox).
+    this._targetRaw = tdbg?.raw_count ?? mainRaw.length;
     this._dbgReport.target = {
       intent:        this._buildIntentLabel(target),
       raw:           mainRaw.length,

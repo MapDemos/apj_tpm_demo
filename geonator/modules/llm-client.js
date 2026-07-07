@@ -49,6 +49,30 @@ class LLMClient {
     }
   }
 
+  /**
+   * L3 (overflow clarify): from a list of nearby landmark names, pick the most
+   * RECOGNIZABLE / well-known ones (3-4) to prompt the user. Returns names (string[]).
+   * @param {string[]} names
+   * @param {string} lang
+   */
+  async suggestProminentLandmarks(names, lang = 'ja') {
+    if (!names || !names.length) return [];
+    const sys = 'あなたは位置特定を助けるアシスタントです。与えられたランドマーク名の一覧から、一般に知名度が高く人が思い出しやすいもの（公園・公共施設・有名チェーン・駅・大型商業施設・ランドマーク建物など）を3〜4個選んで返してください。無名・番地のみ・一般的すぎるものは避ける。一覧に実在する名前をそのまま返す。出力はJSONのみ: {"suggestions": ["名前", ...]}。';
+    try {
+      const result = await this._callClaude(
+        { system: sys, user: `ランドマーク名一覧:\n${JSON.stringify(names)}\n\n知名度の高いものを3〜4個。JSONのみ返してください。` },
+        400,
+        this.config.L3_MODEL,
+        'L3'
+      );
+      const json = this._extractJSON(result);
+      const arr = json && Array.isArray(json.suggestions) ? json.suggestions : [];
+      return arr.filter(s => typeof s === 'string' && s.trim()).slice(0, 4);
+    } catch {
+      return [];
+    }
+  }
+
   // ─────────────────────────────────────────────
   // L1: Natural language → QuerySchema
   // ─────────────────────────────────────────────

@@ -947,6 +947,7 @@ class MapboxMCPClient {
         if (!seen.has(key)) { seen.set(key, item); bSbItems.push(item); }
       });
 
+      const rawCount = seen.size; // pre-slice merged count → overflow signal
       const items = this._assignIds([...seen.values()]
         .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
         .slice(0, 150), isPrimary);
@@ -954,6 +955,7 @@ class MapboxMCPClient {
         source: 'Tilequery poi_label grid (buildings) + Search Box',
         count: items.length, items,
         _debug: {
+          raw_count: rawCount,
           sb_count: bSbItems.length,
           tq_count: bTqItems.length,
           tq_dropped_count: tqItems.length - buildingOnly.length,
@@ -1039,6 +1041,7 @@ class MapboxMCPClient {
       });
     }
 
+    const rawCount = seen.size; // pre-slice merged count → overflow signal
     const items = this._assignIds([...seen.values()]
       .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
       .slice(0, 150), isPrimary);
@@ -1052,6 +1055,7 @@ class MapboxMCPClient {
       count: items.length,
       items,
       _debug: {
+        raw_count: rawCount,
         sb_count: sbCount,
         tq_count: tqCount,
         tq_dropped_count: tqDropped.length,
