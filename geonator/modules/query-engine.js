@@ -91,6 +91,7 @@ class QueryEngine {
         return `condition: ${c.text ?? c.type} [${c.type}] 距離=${d.level ?? '-'}/${d.method ?? '-'}${d.minutes ? ' ' + d.minutes + '分' : ''}${qe}`;
       }),
     ]);
+    this.ui.thinking?.(); // proximity解決の計算中も考え中表示
 
     await this._executeSearch(schema, merged);
   }
@@ -249,6 +250,7 @@ class QueryEngine {
       `アンカー: ${this._dbgReport.proximity.anchors.join(', ')}`,
       `target収集bbox 約${this._dbgReport.proximity.targetBboxM}m / condition収集bbox 約${this._dbgReport.proximity.condBboxM}m`,
     ]);
+    this.ui.thinking?.(); // 候補収集の計算中も考え中表示
 
     // [3-B] collect candidates (unless cached)
     if (cacheInvalid.candidates) {
@@ -280,6 +282,7 @@ class QueryEngine {
       `target「${this._dbgReport.target?.intent}」: 取得${this._dbgReport.target?.raw} → 除外${this._dbgReport.target?.excluded} → 残${this._dbgReport.target?.kept}`,
       ...(this._dbgReport.conditions || []).map(c => `条件 ${c.label}[${c.type}]: ${c.found}`),
     ]);
+    this.ui.thinking?.(); // 距離評価（候補スコアリング）の計算中も考え中表示＝候補が出る前
 
     // [3-C] evaluate (collect reach polygons for visualization)
     this.mcp._evalPolygons = [];

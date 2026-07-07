@@ -455,6 +455,8 @@ class LocationFinderApp {
       },
       // 1次検索bbox（within到達圏で絞られていればその値）を保持。地図OFF時の静的地図の枠に使う。
       setResultBbox(bbox) { self._lastResultBbox = bbox || null; },
+      // 次の計算中に「考えています…」を再表示（候補表示など、次の吹き出しで自動的に消える）
+      thinking() { self._showTypingIndicator(); },
       drawProximityPoints(points) {
         if (!self._mapActive()) return; // 地図OFF: 描画スキップ
         // proximityアンカー（基準点）の地図表示は無効化（分かりづらいとの指摘）。
