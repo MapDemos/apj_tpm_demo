@@ -26,7 +26,7 @@ class QueryEngine {
     this.config = config;
 
     // Cache layers (K)
-    this._cache = { bbox: null, mainCandidates: null, condCandidates: null, schema: null };
+    this._cache = { bbox: null, mainCandidates: null, condCandidates: null, surfaced: null, schema: null };
     this._clarifyCount = 0;
     this._previousText = null;    // for L1 re-parse
     this._awaitingClarify = false; // last run ended asking for more info (main-input answer merges)
@@ -1102,6 +1102,10 @@ class QueryEngine {
     // 参考(none) is only shown when there is NO full/partial match (else too many).
     const displayNone = hasMatch ? [] : none;
 
+    // Remember the SURFACED candidates (what the user actually sees as results) so that
+    // "更に絞り込む" narrows within these — not within the full pre-evaluation pool.
+    this._cache.surfaced = [...full, ...partial, ...displayNone];
+
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
     this.ui.showResults(full, partial, displayNone, null, conditionLabels);
 
@@ -1185,12 +1189,17 @@ class QueryEngine {
   }
 
   /**
-   * "更に絞り込む": narrow WITHIN the already-surfaced Target candidates. The candidate
-   * pool is fixed to this._cache.mainCandidates (target is NOT re-collected); only the
-   * new conditions are collected and the existing pool is re-evaluated/re-tiered.
+   * "更に絞り込む": narrow WITHIN the candidates that REMAINED from the previous attempt
+   * (the surfaced full+partial results — NOT the full pre-evaluation pool). Target is
+   * NOT re-collected; only the new conditions are collected and this fixed subset is
+   * re-evaluated/re-tiered. Consecutive narrows keep shrinking the previous remainder.
    */
   async _narrowWithin(schema, addConds) {
-    const pool = this._cache.mainCandidates;
+    // Pool = last surfaced results (remaining candidates). Fall back to mainCandidates
+    // only if surfaced wasn't captured (shouldn't happen after a normal run).
+    const pool = (this._cache.surfaced && this._cache.surfaced.length)
+      ? this._cache.surfaced
+      : this._cache.mainCandidates;
     if (!pool || !pool.length) { this.ui.showMessage(this._m().mainZero(schema.target?.text || '')); return; }
 
     const merged = { ...schema, conditions: [...(schema.conditions || []), ...addConds] };
@@ -1215,9 +1224,10 @@ class QueryEngine {
       condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
     }
     // L2-1 category validity on the (new) poi conditions. Pool is fixed, so the target
-    // filter is a cache-hit no-op; we keep the returned pool as-is.
+    // filter is a cache-hit no-op; we keep the returned pool as-is. Do NOT overwrite
+    // _cache.mainCandidates (that stays the full collected pool for a later re-search);
+    // the narrow subset lives only in `keptPool` and is re-captured as `surfaced` below.
     const keptPool = await this._applyCategoryFilter(merged, pool, condResults);
-    this._cache.mainCandidates = keptPool;
     this._cache.condCandidates = condResults;
     this._dbgReport.conditions = [...(this._dbgReport.conditions || []), ...condDebug];
 
@@ -1259,7 +1269,7 @@ class QueryEngine {
   }
 
   _resetCache() {
-    this._cache = { bbox: null, mainCandidates: null, condCandidates: null, schema: null };
+    this._cache = { bbox: null, mainCandidates: null, condCandidates: null, surfaced: null, schema: null };
     this._clarifyCount = 0;
     this._previousText = null;
   }
