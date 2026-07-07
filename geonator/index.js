@@ -262,7 +262,8 @@ class LocationFinderApp {
       return `pin-s-${i + 1}+${color}(${lng},${lat})`; // ラベル=順位(1〜5)、色=ティア
     }).join(',');
     const view = this._staticView(top, this._lastResultBbox);
-    return `https://api.mapbox.com/styles/v1/${style}/static/${pins}/${view}/480x300@2x?access_token=${token}`;
+    // サムネイル用途なので標準解像度（@2xは実質4倍pxで重い）。420x240で軽量化。
+    return `https://api.mapbox.com/styles/v1/${style}/static/${pins}/${view}/420x240?access_token=${token}`;
   }
 
   /** 静的地図の視野: ピンが固まっていれば 'auto'（フィット）、散っていれば1次検索bbox（軽くパディング）。 */
