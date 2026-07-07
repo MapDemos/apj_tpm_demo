@@ -111,6 +111,12 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close') {
     }
   }
 
+  // Hard cap: at most 3 conditions (JS-side block). Keeps scoring quality and LLM
+  // cost bounded; extras beyond the first 3 are dropped here.
+  if (Array.isArray(schema.conditions) && schema.conditions.length > 3) {
+    schema.conditions = schema.conditions.slice(0, 3);
+  }
+
   // condition distance + queries defaults
   if (schema.conditions) {
     for (const c of schema.conditions) {

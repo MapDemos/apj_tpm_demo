@@ -148,11 +148,11 @@ class LocationFinderApp {
       this.config.L1_MODEL   = MODEL_DEFAULTS.L1;
       this.config.L2_1_MODEL = MODEL_DEFAULTS.L2_1;
       this.config.L2_2_MODEL = MODEL_DEFAULTS.L2_2;
-      this.config.L2_1_KEEP_NULL_CATEGORY = true; // default: include null-category candidates
+      this.config.L2_1_KEEP_NULL_CATEGORY = false; // default: exclude null-category candidates (strict)
       if (l1Sel)  l1Sel.value  = MODEL_DEFAULTS.L1;
       if (l21Sel) l21Sel.value = MODEL_DEFAULTS.L2_1;
       if (l22Sel) l22Sel.value = MODEL_DEFAULTS.L2_2;
-      if (nullSel) nullSel.value = 'include';
+      if (nullSel) nullSel.value = 'exclude';
       try { localStorage.removeItem('geonator_models'); localStorage.removeItem('geonator_l2_1'); } catch (_) {}
       this._updateModelBadge();
       this._resetScoring?.(); // weights + decisiveness (defined in _initScoringSettings)
@@ -379,11 +379,12 @@ class LocationFinderApp {
         const shortModel = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
         const parts = [`⏱ 処理時間 ${secs}s`];
         let totIn = 0, totOut = 0;
+        // Always list all three roles (even 0 calls) so L2-1/L2-2 cost/time is visible.
+        // 0回 = そのクエリで未実行（キャッシュヒット/対象なし）。
         for (const [role, s] of [['L1', stats.llm?.L1], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2]]) {
-          if (s && s.calls > 0) {
-            parts.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
-            totIn += s.inTok; totOut += s.outTok;
-          }
+          if (!s) continue;
+          parts.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
+          totIn += s.inTok; totOut += s.outTok;
         }
         parts.push(`API: SB ${self.mapboxMCP?._sbRequests ?? 0} / TQ ${self.mapboxMCP?._tqRequests ?? 0} / ISO ${self.mapboxMCP?._isoRequests ?? 0}`);
         self.addMessage('tool-status', parts.join('\n'));
