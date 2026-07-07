@@ -108,14 +108,21 @@ class LocationFinderApp {
       if (saved.L2_2) this.config.L2_2_MODEL = saved.L2_2;
       else if (saved.L2) this.config.L2_2_MODEL = saved.L2; // legacy key
     } catch (_) {}
+    // L2-1 behavior: category=null handling (separate from model prefs)
+    try {
+      const b = JSON.parse(localStorage.getItem('geonator_l2_1') || '{}');
+      if (typeof b.keepNull === 'boolean') this.config.L2_1_KEEP_NULL_CATEGORY = b.keepNull;
+    } catch (_) {}
 
     const l1Sel  = document.getElementById('l1ModelSelect');
     const l21Sel = document.getElementById('l2_1ModelSelect');
     const l22Sel = document.getElementById('l2_2ModelSelect');
+    const nullSel = document.getElementById('l2_1NullSelect');
     const modal  = document.getElementById('settingsModal');
     if (l1Sel)  l1Sel.value  = this.config.L1_MODEL;
     if (l21Sel) l21Sel.value = this.config.L2_1_MODEL;
     if (l22Sel) l22Sel.value = this.config.L2_2_MODEL;
+    if (nullSel) nullSel.value = this.config.L2_1_KEEP_NULL_CATEGORY === false ? 'exclude' : 'include';
 
     const persist = () => {
       try {
@@ -125,9 +132,13 @@ class LocationFinderApp {
       } catch (_) {}
       this._updateModelBadge();
     };
+    const persistNull = () => {
+      try { localStorage.setItem('geonator_l2_1', JSON.stringify({ keepNull: this.config.L2_1_KEEP_NULL_CATEGORY })); } catch (_) {}
+    };
     l1Sel?.addEventListener('change',  e => { this.config.L1_MODEL   = e.target.value; persist(); });
     l21Sel?.addEventListener('change', e => { this.config.L2_1_MODEL = e.target.value; persist(); });
     l22Sel?.addEventListener('change', e => { this.config.L2_2_MODEL = e.target.value; persist(); });
+    nullSel?.addEventListener('change', e => { this.config.L2_1_KEEP_NULL_CATEGORY = e.target.value !== 'exclude'; persistNull(); });
 
     this._initScoringSettings();
 
@@ -137,10 +148,12 @@ class LocationFinderApp {
       this.config.L1_MODEL   = MODEL_DEFAULTS.L1;
       this.config.L2_1_MODEL = MODEL_DEFAULTS.L2_1;
       this.config.L2_2_MODEL = MODEL_DEFAULTS.L2_2;
+      this.config.L2_1_KEEP_NULL_CATEGORY = true; // default: include null-category candidates
       if (l1Sel)  l1Sel.value  = MODEL_DEFAULTS.L1;
       if (l21Sel) l21Sel.value = MODEL_DEFAULTS.L2_1;
       if (l22Sel) l22Sel.value = MODEL_DEFAULTS.L2_2;
-      try { localStorage.removeItem('geonator_models'); } catch (_) {}
+      if (nullSel) nullSel.value = 'include';
+      try { localStorage.removeItem('geonator_models'); localStorage.removeItem('geonator_l2_1'); } catch (_) {}
       this._updateModelBadge();
       this._resetScoring?.(); // weights + decisiveness (defined in _initScoringSettings)
     });
@@ -2891,6 +2904,10 @@ class LocationFinderApp {
       setText('set-l1-label', st.l1);
       setText('set-l2_1-label', st.l2_1);
       setText('set-l2_2-label', st.l2_2);
+      setLead('set-l2null-title', st.l2nullTitle);   setText('set-l2null-hint', st.l2nullHint);
+      setText('set-l2null-row', st.l2nullRow);
+      setText('set-l2null-inc', st.l2nullInclude);
+      setText('set-l2null-exc', st.l2nullExclude);
       setLead('set-weight-title', st.weightTitle);   setText('set-weight-hint', st.weightHint);
       setText('set-wrel-label', st.wRel);
       setText('set-wcond-label', st.wCond);
@@ -3123,6 +3140,11 @@ const LANG = {
       l1:          'L1（クエリ解析）',
       l2_1:        'L2-1（通常クエリの関連性・カテゴリ）',
       l2_2:        'L2-2（Targetの関連性）',
+      l2nullTitle: 'L2-1：カテゴリ未設定の扱い',
+      l2nullHint:  '（カテゴリ情報が無い候補）',
+      l2nullRow:   'カテゴリ=null の候補',
+      l2nullInclude: '候補に含める',
+      l2nullExclude: '候補に含めない',
       weightTitle: 'スコアの重みづけ',
       weightHint:  '（何を重視するか・合計100%）',
       wRel:        '関連性（意図の一致）',
@@ -3199,6 +3221,11 @@ const LANG = {
       l1:          'L1 (query parsing)',
       l2_1:        'L2-1 (general-query relevance · category)',
       l2_2:        'L2-2 (target relevance)',
+      l2nullTitle: 'L2-1: category=null handling',
+      l2nullHint:  '(candidates with no category info)',
+      l2nullRow:   'Candidates with category=null',
+      l2nullInclude: 'Include as candidates',
+      l2nullExclude: 'Exclude from candidates',
       weightTitle: 'Score weighting',
       weightHint:  '(what to prioritize · sums to 100%)',
       wRel:        'Relevance (intent match)',

@@ -80,6 +80,18 @@
 
       <div class="settings-divider"></div>
 
+      <!-- L2-1 strictness: category=null handling (separate from model prefs) -->
+      <div class="settings-subtitle" id="set-l2null-title">L2-1：カテゴリ未設定の扱い <span class="settings-hint" id="set-l2null-hint">（カテゴリ情報が無い候補）</span></div>
+      <label class="settings-row">
+        <span id="set-l2null-row">カテゴリ=null の候補</span>
+        <select id="l2_1NullSelect">
+          <option id="set-l2null-inc" value="include">候補に含める</option>
+          <option id="set-l2null-exc" value="exclude">候補に含めない</option>
+        </select>
+      </label>
+
+      <div class="settings-divider"></div>
+
       <!-- ② スコアの重みづけ — 3 weights, always sum to 100% (moving one redistributes) -->
       <div class="settings-subtitle" id="set-weight-title">スコアの重みづけ <span class="settings-hint" id="set-weight-hint">（何を重視するか・合計100%）</span></div>
       <div class="settings-slider-row">

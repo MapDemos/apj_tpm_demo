@@ -742,6 +742,9 @@ class QueryEngine {
       }
     }
 
+    // null-category handling (setting): false = drop candidates with no category at all.
+    const excludeNull = this.config.L2_1_KEEP_NULL_CATEGORY === false;
+
     // apply removals (soft + never-empty)
     const dbg = [];
     let outMain = mainRaw;
@@ -749,13 +752,19 @@ class QueryEngine {
       const removeSet = this._catCache.get(cacheKeyOf(g));
       if (!removeSet) continue; // uncached (LLM failed) → keep all
       const { remove_poi_category, remove_class } = removeSet;
-      if (!remove_poi_category.size && !remove_class.size) continue;
-      const survivors = g.items.filter(it => !this._catMatchesRemove(it, remove_poi_category, remove_class));
+      const hasRemovals = remove_poi_category.size || remove_class.size;
+      if (!hasRemovals && !excludeNull) continue; // nothing to do for this group
+      const survivors = g.items.filter(it => {
+        if (this._catMatchesRemove(it, remove_poi_category, remove_class)) return false; // clearly-wrong category
+        if (excludeNull && !this._hasCategory(it)) return false;                          // no category → strict drop
+        return true;
+      });
       const after = survivors.length ? survivors : g.items; // never-empty guard
       dbg.push({
         label:       g.key === TARGET_KEY ? 'target' : g.key,
         removePoi:   [...remove_poi_category],
         removeClass: [...remove_class],
+        nullDropped: excludeNull,
         before:      g.items.length,
         after:       after.length,
       });
@@ -776,6 +785,11 @@ class QueryEngine {
       if (it.maki) cls.add(String(it.maki));
     }
     return { key, intent, items, poi_category: [...poiCat], class: [...cls] };
+  }
+
+  /** True if the item carries any category signal (poi_category / class / maki). */
+  _hasCategory(it) {
+    return (Array.isArray(it.poi_category) && it.poi_category.length > 0) || !!it.cls || !!it.maki;
   }
 
   /** True if the item's own categories intersect the remove-set (→ drop). */
