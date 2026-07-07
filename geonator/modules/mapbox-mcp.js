@@ -781,7 +781,7 @@ class MapboxMCPClient {
     });
   }
 
-  async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null, isPrimary = false, sharedGrid = null) {
+  async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null, isPrimary = false, sharedGrid = null, noFallback = false) {
     // sharedGrid: pre-fetched poi_label items (buildPoiLabelGrid) reused across the
     // target + all poi conditions so we don't run one grid per query. When present,
     // the building/general paths partition it locally instead of fetching their own.
@@ -1027,7 +1027,10 @@ class MapboxMCPClient {
     });
 
     // ── Final fallback: bus stop tileset (non-bus-stop queries only) ──
-    if (seen.size === 0 && effectiveProximity && !this._isBusStopQuery(queries)) {
+    // Disabled for condition collection (noFallback): a specific condition like ドミノピザ
+    // with 0 hits must return 0 — NOT nearby bus stops, which would become bogus condition
+    // items (e.g. 新丸子駅西口 matched as "ドミノピザ").
+    if (!noFallback && seen.size === 0 && effectiveProximity && !this._isBusStopQuery(queries)) {
       if (this.config.DEBUG) console.log('[MapboxMCP] 0件 → バス停フォールバック');
       const [lng, lat] = effectiveProximity;
       const busStops = await this._busStopFallback(lat, lng, 500);
@@ -2471,8 +2474,9 @@ class MapboxMCPClient {
 
     // Only poi conditions consume the shared poi_label grid; other types (bus stop /
     // transit / intersection / signal) take their own layer branches inside.
+    // noFallback=true: a 0-hit condition must stay 0 (no bus-stop fallback → no bogus items).
     const resultStr = await this._searchNearbyPOI(
-      queries, proximity, bbox, intent, null, false, condition.type === 'poi' ? sharedGrid : null
+      queries, proximity, bbox, intent, null, false, condition.type === 'poi' ? sharedGrid : null, true
     );
     return this._parseItemsFromResult(resultStr);
   }
