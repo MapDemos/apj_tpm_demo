@@ -105,6 +105,26 @@ class LLMClient {
   }
 
   /**
+   * 高速な確認文だけを生成（L1本体と並行してHaikuで実行し、真っ先に「〜を探しますね」を出す）。
+   * 解析はしない＝ユーザーの依頼の丁寧な復唱のみ。場所探し以外なら空文字。
+   * @returns {Promise<string>}
+   */
+  async confirmInput(userText, lang = 'ja') {
+    if (typeof PROMPT_CONFIRM === 'undefined') return '';
+    try {
+      const langNote = lang === 'en' ? '\nReply in English.' : '';
+      const result = await this._callClaude(
+        { system: PROMPT_CONFIRM, user: `発話:\n${userText}${langNote}` },
+        160,
+        this.config.L1_CONFIRM_MODEL || 'claude-haiku-4-5-20251001',
+        'L1c' // stats未計上（L1本体を汚さない・極小コール）
+      );
+      const text = (result || '').trim().replace(/^["「]|["」]$/g, '');
+      return text.length > 1 ? text : '';
+    } catch { return ''; }
+  }
+
+  /**
    * Parse a refinement hint as a DELTA against the current understanding (never a
    * full rebuild-from-text, so existing conditions are never lost). Returns the
    * conditions to add/remove and any target/proximity change, plus a confirmation.

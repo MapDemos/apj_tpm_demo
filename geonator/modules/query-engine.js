@@ -62,14 +62,22 @@ class QueryEngine {
     this._runStart = Date.now();
     this.ui.clearResults();
 
+    // 確認文を「真っ先に」出すため、軽量な確認文(Haiku)をフルのL1解析(Sonnet)と【並行】発行。
+    // 先に返った方を表示（通常Haikuが速い）。L1側の confirmation はフォールバック。
+    let confirmShown = false;
+    this.llm.confirmInput?.(merged, this._langCode())
+      ?.then(msg => {
+        if (msg && !confirmShown) { confirmShown = true; this.ui.showMessage(msg); this.ui.thinking?.(); }
+      })
+      ?.catch(() => {});
+
     const schema = await this._parseAndValidate(merged, null);
     if (!schema) return; // clarification was handled inside
 
     this._dbgReport.schema = schema;
 
-    // User-facing confirmation (LLM-generated NL) shown immediately, in parallel with
-    // the heavy processing that follows. States what we understood + what couldn't be included.
-    if (schema.confirmation) this.ui.showMessage(schema.confirmation);
+    // 高速確認がまだ出ていなければ（Haiku失敗/解析の方が速かった等）L1の confirmation を表示。
+    if (!confirmShown && schema.confirmation) { confirmShown = true; this.ui.showMessage(schema.confirmation); }
 
     // [STEP] QuerySchema — show the parsed intent early so the operator can sanity-check
     // L1's interpretation (target / conditions / distances) before any search runs.
