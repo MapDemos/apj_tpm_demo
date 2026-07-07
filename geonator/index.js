@@ -471,12 +471,16 @@ class LocationFinderApp {
           { label: '🔁 最初からやり直す', value: 'restart' },
         ];
 
+    // Keep the resolver so _resetChat can cancel a pending feedback wait — otherwise
+    // clearing chat while awaiting feedback leaves run() hung (input stays disabled).
+    this._feedbackResolve = onAction;
     for (const { label, value } of buttons) {
       const btn = document.createElement('button');
       btn.textContent = label;
       btn.className   = 'choice-btn';
       btn.onclick = () => {
         container.remove();
+        this._feedbackResolve = null;
         this.addMessage('user', label);
         onAction(value);
       };
@@ -589,10 +593,8 @@ class LocationFinderApp {
 
     document.getElementById('clearChatBtn').addEventListener('click', () => this._resetChat());
 
-    document.getElementById('lang-toggle').addEventListener('click', () => {
-      this._lang = this._lang === 'ja' ? 'en' : 'ja';
-      this._applyLanguage(this._lang);
-    });
+    document.getElementById('lang-toggle').addEventListener('click', () => this._toggleLanguage());
+    document.getElementById('settingsLangBtn')?.addEventListener('click', () => this._toggleLanguage());
 
     // Thinking float widget toggle
     const toggleLog = () => {
@@ -683,6 +685,12 @@ class LocationFinderApp {
     if (this._debugStepResolve) { this._debugStepResolve(); this._debugStepResolve = null; }
     // Resolve any pending hint request
     if (this._hintResolve) { this._hintResolve(null); this._hintResolve = null; }
+    // Resolve any pending feedback wait (unknown value → _handleFeedback does nothing,
+    // so run() returns cleanly and _handleSend's finally re-enables the input).
+    if (this._feedbackResolve) { this._feedbackResolve(null); this._feedbackResolve = null; }
+    // Hide the in-progress "検索しています" widget immediately (belt-and-braces;
+    // _handleSend's finally also hides it once the resolved run() returns).
+    this._hideThinking?.();
     // Remove probable area polygon
     this._removeProbableArea();
     this.clearMapElements();
@@ -2805,13 +2813,20 @@ class LocationFinderApp {
     });
   }
 
+  _toggleLanguage() {
+    this._lang = this._lang === 'ja' ? 'en' : 'ja';
+    this._applyLanguage(this._lang);
+  }
+
   _applyLanguage(lang) {
     const t = LANG[lang];
     if (!t) return;
 
-    // Toggle button — shows current language
+    // Toggle button — shows current language (header + settings modal stay in sync)
     const btn = document.getElementById('lang-toggle');
     if (btn) btn.textContent = t.langBtn;
+    const sBtn = document.getElementById('settingsLangBtn');
+    if (sBtn) sBtn.textContent = t.langBtn;
 
     // App title
     const titleEl = document.getElementById('app-title');
