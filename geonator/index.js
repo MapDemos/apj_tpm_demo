@@ -782,6 +782,7 @@ class LocationFinderApp {
     const sorted = [...candidates].sort((a, b) => order.indexOf(a._tier) - order.indexOf(b._tier));
 
     let goldNum = 0;
+    const goldMarkers = []; // {marker, score, lng, lat} — for top-3 callouts + focus
     for (const place of sorted) {
       const tier = TIER[place._tier] || TIER.none;
       const lng = place.longitude ?? place.lng;
@@ -833,11 +834,17 @@ class LocationFinderApp {
         if (this._debugMode) this._highlightStep('step-eval');
       });
       this.candidateMarkers.push(marker);
+      if (place._tier === 'gold') goldMarkers.push({ marker, score: mi.score ?? 0, lng, lat });
     }
 
-    // Auto-open the top gold candidate's popup
-    const topGold = this.candidateMarkers.find(m => m.getElement().classList.contains('tier-gold'));
-    if (topGold) setTimeout(() => topGold.togglePopup(), 600);
+    // Gold: pulse on ALL gold (CSS radar via .tier-glow, applied above). Open callouts on
+    // the TOP-3 gold by score, and focus the map on the single highest.
+    if (goldMarkers.length) {
+      goldMarkers.sort((a, b) => b.score - a.score);
+      goldMarkers.slice(0, 3).forEach((g, i) => setTimeout(() => g.marker.togglePopup(), 500 + i * 250));
+      const top = goldMarkers[0];
+      try { this.map.flyTo({ center: _safeLL(top.lng, top.lat), zoom: 16, duration: 900, essential: true }); } catch (_) {}
+    }
   }
 
   // ─────────────────────────────────────────────────────────────

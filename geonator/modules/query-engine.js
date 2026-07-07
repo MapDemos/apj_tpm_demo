@@ -92,7 +92,7 @@ class QueryEngine {
   async _parseAndValidate(userText, previousText) {
     let schema;
     try {
-      schema = await this.llm.parseQuery(userText, previousText);
+      schema = await this.llm.parseQuery(userText, previousText, this._langCode());
     } catch (e) {
       this.ui.showMessage(this._m().error_communication);
       return null;
@@ -171,7 +171,7 @@ class QueryEngine {
     const combined = `${this._previousText}\n追加情報：${additionalText}`;
     this._previousText = combined;
     try {
-      const schema = await this.llm.parseQuery(combined, null);
+      const schema = await this.llm.parseQuery(combined, null, this._langCode());
       if (!validateQuerySchema(schema).ok) return null;
       fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
       return schema;
@@ -615,6 +615,83 @@ class QueryEngine {
     return candidates.filter(c => !(c.name && BUILDING_SUFFIX.test(c.name.trim())));
   }
 
+  /** UI language code for LLM-generated user-facing text. */
+  _langCode() { return this.ui.getLang?.() === 'en' ? 'en' : 'ja'; }
+
+  /**
+   * Pre-scoring dedup of Target candidates (too many dups inflate ties / hurt scoring).
+   *  1) same normalized name (NFKC + strip spaces, case-insensitive) → keep one
+   *     (prefer a 店-suffixed/branch name, else the one closer to the anchor).
+   *  2) proximity dedup: when a candidate WITH a store suffix (…店) and one WITHOUT are
+   *     within ~30m and share the brand (storeless name is a prefix), drop the storeless
+   *     one — it's the same physical place with a less specific entry.
+   */
+  _dedupTargets(cands) {
+    if (!cands || cands.length <= 1) return cands;
+    const norm     = s => (s || '').normalize('NFKC').replace(/[\s　]+/g, '').toLowerCase();
+    const hasStore = s => /店$/.test((s || '').trim());
+    const distM = (a, b) => {
+      const la = a.latitude ?? a.lat, lna = a.longitude ?? a.lng;
+      const lb = b.latitude ?? b.lat, lnb = b.longitude ?? b.lng;
+      if (la == null || lna == null || lb == null || lnb == null) return Infinity;
+      const R = 6371000, toRad = d => d * Math.PI / 180;
+      const dLat = toRad(lb - la), dLng = toRad(lnb - lna);
+      const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(la)) * Math.cos(toRad(lb)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+    };
+
+    // pass 1: exact normalized-name dedup
+    const byName = new Map();
+    const unnamed = [];
+    for (const c of cands) {
+      const k = norm(c.name);
+      if (!k) { unnamed.push(c); continue; }
+      const ex = byName.get(k);
+      if (!ex) { byName.set(k, c); continue; }
+      const keep = (hasStore(c.name) && !hasStore(ex.name)) ? c
+                 : (!hasStore(c.name) && hasStore(ex.name)) ? ex
+                 : ((c.distance ?? 9e9) < (ex.distance ?? 9e9) ? c : ex);
+      byName.set(k, keep);
+    }
+    const kept = [...byName.values(), ...unnamed];
+
+    // pass 2: proximity + store-suffix
+    const NEAR_M = 30;
+    const removed = new Set();
+    for (let i = 0; i < kept.length; i++) {
+      for (let j = 0; j < kept.length; j++) {
+        if (i === j) continue;
+        const a = kept[i], b = kept[j];
+        if (removed.has(a.id) || removed.has(b.id)) continue;
+        if (hasStore(a.name) && !hasStore(b.name) && distM(a, b) <= NEAR_M) {
+          const na = norm(a.name), nb = norm(b.name);
+          if (nb && na.startsWith(nb)) removed.add(b.id);
+        }
+      }
+    }
+    const out = kept.filter(c => !removed.has(c.id));
+    if (this.config.DEBUG && out.length < cands.length) {
+      console.log(`[QueryEngine] target dedup: ${cands.length} → ${out.length}`);
+    }
+    return out;
+  }
+
+  /** Localized full-criteria summary shown on refine (narrow / research). */
+  _criteriaSummary(schema) {
+    const en   = this._langCode() === 'en';
+    const px   = (schema.proximity?.anchors || []).map(a => a.text).filter(Boolean).join('・');
+    const tgt  = schema.target?.text || '';
+    const conds = (schema.conditions || []).map(c => c.text ?? c.type).filter(Boolean);
+    if (en) {
+      let s = `🔎 Searching${px ? ` around ${px}` : ''} for「${tgt}」`;
+      if (conds.length) s += `\nConditions: ${conds.join(' / ')}`;
+      return s;
+    }
+    let s = `🔎 ${px ? `${px}周辺で` : ''}「${tgt}」を検索`;
+    if (conds.length) s += `\n条件: ${conds.join(' / ')}`;
+    return s;
+  }
+
   _bboxExceedsLimit(bbox) {
     if (!bbox) return false;
     const [minX, minY, maxX, maxY] = bbox;
@@ -643,6 +720,7 @@ class QueryEngine {
     // Target collection (partition shared grid to the tight target bbox)
     let mainRaw = await this.mcp.collectTarget(target, targetBbox, sharedGrid);
     mainRaw = this._applyBuildingNameRules(target, mainRaw);
+    mainRaw = this._dedupTargets(mainRaw); // [pre-scoring] drop duplicate candidates (see method)
 
     // Conditions collection (partition shared grid to the wide condition bbox) — parallel
     const condResults = {};
@@ -1176,7 +1254,7 @@ class QueryEngine {
     this.llm.resetStats?.();
     this._runStart = Date.now();
 
-    const delta = await this.llm.parseRefinement(schema, hint);
+    const delta = await this.llm.parseRefinement(schema, hint, this._langCode());
     if (!delta) { this.ui.showMessage(this._m().error_communication); return; }
     const validTypes = SCHEMA_ENUMS.condition_type;
     const addConds = delta.add_conditions.filter(c => c && validTypes.includes(c.type));
@@ -1213,6 +1291,8 @@ class QueryEngine {
     this._previousText = `${this._previousText}\n追加情報：${hint}`;
     this._dbgReport.schema = merged;
     if (delta.confirmation) this.ui.showMessage(delta.confirmation);
+    // [④] show the FULL criteria being searched (not just the user's added input)
+    this.ui.showMessage(this._criteriaSummary(merged));
 
     await this._executeSearch(merged, this._previousText);
   }
@@ -1236,6 +1316,9 @@ class QueryEngine {
     this._cache.schema = merged;
     this._previousText = `${this._previousText}\n絞り込み：${addConds.map(c => c.text ?? c.type).join('、')}`;
     this._dbgReport = { schema: merged, proximity: this._dbgReport.proximity, target: this._dbgReport.target, conditions: [], categoryFilter: [], evaluation: null, excludedByHardFilter: [] };
+
+    // [④] show the FULL criteria being narrowed on (accumulated old + new conditions)
+    this.ui.showMessage(this._criteriaSummary(merged));
 
     this.ui.clearResults?.();
 

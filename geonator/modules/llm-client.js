@@ -30,13 +30,13 @@ class LLMClient {
    * @param {string|null} previousText - full previous query text for re-parse
    * @returns {Promise<object>} raw QuerySchema (before validation/filling)
    */
-  async parseQuery(userText, previousText = null) {
+  async parseQuery(userText, previousText = null, lang = 'ja') {
     const fullText = previousText ? `${previousText}\n追加情報：${userText}` : userText;
 
     for (let attempt = 0; attempt <= this.config.L1_MAX_RETRY; attempt++) {
       try {
         const result = await this._callClaude(
-          this._buildL1Prompt(fullText),
+          this._buildL1Prompt(fullText, lang),
           1500,  // QuerySchema with QE queries[] + multiple conditions can be long
           this.config.L1_MODEL,
           'L1'
@@ -58,18 +58,19 @@ class LLMClient {
    * @param {string} hintText - user's refinement text
    * @returns {Promise<{add_conditions:Array, remove_condition_texts:string[], new_target:object|null, new_proximity:object|null, confirmation:string}|null>}
    */
-  async parseRefinement(schema, hintText) {
+  async parseRefinement(schema, hintText, lang = 'ja') {
     if (typeof PROMPT_L1_REFINE === 'undefined') throw new Error('PROMPT_L1_REFINE not loaded');
     const summary = {
       target:     schema?.target?.text ?? null,
       proximity:  (schema?.proximity?.anchors || []).map(a => a.text),
       conditions: (schema?.conditions || []).map(c => c.text ?? c.type),
     };
+    const langNote = lang === 'en' ? ' confirmation は英語で（条件のtext等は日本語のまま）。' : '';
     try {
       const result = await this._callClaude(
         {
           system: PROMPT_L1_REFINE,
-          user:   `現在の理解:\n${JSON.stringify(summary)}\n\n追加情報:「${hintText}」\n\n差分JSONのみを返してください。`,
+          user:   `現在の理解:\n${JSON.stringify(summary)}\n\n追加情報:「${hintText}」\n\n${langNote}差分JSONのみを返してください。`,
         },
         900,
         this.config.L1_MODEL,
@@ -207,15 +208,20 @@ class LLMClient {
     return JSON.parse(match[1].trim());
   }
 
-  _buildL1Prompt(userText) {
+  _buildL1Prompt(userText, lang = 'ja') {
     // Full prompt text lives in prompts/prompt-l1.js (loaded separately).
     // Here we just compose the call structure. The condition cap is injected at call
     // time (configurable) so L1 emits ≤N conditions and the confirmation stays consistent.
     if (typeof PROMPT_L1 === 'undefined') throw new Error('PROMPT_L1 not loaded');
     const maxC = Number.isFinite(this.config.MAX_CONDITIONS) ? this.config.MAX_CONDITIONS : 3;
+    // confirmation is user-facing → write it in the UI language. All OTHER fields
+    // (text/queries/place names) stay Japanese for the JP map data.
+    const langNote = lang === 'en'
+      ? ' confirmation フィールドだけは英語で書いてください（他のフィールドは日本語のまま。地名・施設名は日本語表記のままでよい）。'
+      : '';
     return {
       system: PROMPT_L1,
-      user:   `ユーザー入力：「${userText}」\n\nconditionは重要な順に最大${maxC}件まで採用してください（入り切らない条件は confirmation で言及）。QuerySchema JSONのみを返してください。`,
+      user:   `ユーザー入力：「${userText}」\n\nconditionは重要な順に最大${maxC}件まで採用してください（入り切らない条件は confirmation で言及）。${langNote}QuerySchema JSONのみを返してください。`,
     };
   }
 
