@@ -121,6 +121,14 @@ class QueryEngine {
 
     fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
 
+    // Fallback: L1 (esp. Haiku) sometimes describes building height in the confirmation
+    // but forgets the structured target.floors. Infer it from the raw text so the floor
+    // scoring actually runs (タワマンの中のファミマ 等).
+    if (schema.target && !schema.target.floors) {
+      const f = this._inferFloors(userText);
+      if (f) schema.target.floors = f;
+    }
+
     // [A] structural checks
     const issues = structuralChecks(schema);
     for (const issue of issues) {
@@ -808,6 +816,19 @@ class QueryEngine {
   /** Localized "right nearby" phrasing for a resolved landmark suggestion. */
   _landmarkPhrase(name) {
     return this._langCode() === 'en' ? `${name} is right nearby` : `すぐ近くに${name}がある`;
+  }
+
+  /** Infer a target floor constraint from raw text (fallback when L1 omits target.floors). */
+  _inferFloors(text) {
+    if (!text) return null;
+    let m;
+    if ((m = text.match(/(\d{1,3})\s*階以上/)))            return { min: parseInt(m[1], 10) };
+    if ((m = text.match(/(\d{1,3})\s*階以下/)))            return { max: parseInt(m[1], 10) };
+    if ((m = text.match(/(\d{1,3})\s*階(建て|だて|の)/)))  return { value: parseInt(m[1], 10) };
+    if (/(タワマン|タワーマンション|超高層|高層(マンション|ビル|階|階建)?)/.test(text)) return { min: 20 };
+    if (/(背の高い|(高い|でかい)(建物|ビル|マンション))/.test(text))                    return { min: 10 };
+    if (/(低層|背の低い|平屋)/.test(text))                                              return { max: 3 };
+    return null;
   }
 
   // ─────────────────────────────────────────────
