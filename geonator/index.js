@@ -2568,12 +2568,13 @@ class LocationFinderApp {
     const uid = `hint-${Date.now()}`;
 
     const ht = LANG[this._lang];
-    // [L3] agent suggestion buttons (differentiating landmarks). Optional.
-    const sugList = Array.isArray(suggestions) ? suggestions.filter(s => s && s.trim()) : [];
+    // [L3] agent suggestion buttons (differentiating landmarks). Each is an object
+    // { text, landmark, items } carrying its resolved poi_label items (no re-query).
+    const sugList = Array.isArray(suggestions) ? suggestions.filter(s => s && s.text) : [];
     const sugTitle = this._lang === 'en' ? '💡 Agent suggestions' : '💡 エージェントからの提案';
     const sugHTML = sugList.length
       ? `<div class="hint-suggest-title">${sugTitle}</div><div class="hint-suggest" id="${uid}-sug">` +
-        sugList.map((s, i) => `<button class="choice-btn hint-suggest-btn" data-i="${i}">${_esc(s)}</button>`).join('') +
+        sugList.map((s, i) => `<button class="choice-btn hint-suggest-btn" data-i="${i}">${_esc(s.text)}</button>`).join('') +
         `</div>`
       : '';
     const wrapper = document.createElement('div');
@@ -2602,9 +2603,9 @@ class LocationFinderApp {
           document.getElementById(`${uid}-ok`).disabled    = true;
           document.getElementById(`${uid}-skip`).style.display = 'none';
           wrapper.querySelectorAll('.hint-suggest-btn').forEach(b => { b.disabled = true; });
-          this.addMessage('user', s);
+          this.addMessage('user', s.text);
           this._hintResolve = null;
-          onResponse(s);
+          onResponse(s); // resolve with the suggestion object (carries resolved items)
         });
       });
     }

@@ -740,8 +740,30 @@ class QueryEngine {
         return { name: c.name || `候補${i + 1}`, nearby };
       });
       if (candList.every(c => c.nearby.length === 0)) return [];
-      return await this.llm.suggestLandmarks(candList, this._langCode());
+      const names = await this.llm.suggestLandmarks(candList, this._langCode());
+      if (!names.length) return [];
+
+      // Resolve each suggested NAME back to the known grid poi_label items (coords already
+      // known) so choosing a suggestion never triggers a re-query. Names that don't map to
+      // a real grid POI are dropped (avoids "アクロス福岡" → "…アクロス福岡店" noise).
+      const norm = s => (s || '').normalize('NFKC').replace(/[\s　]+/g, '').toLowerCase();
+      const out = [];
+      const usedNames = new Set();
+      for (const nm of names) {
+        const key = norm(nm);
+        if (!key || usedNames.has(key)) continue;
+        const items = grid.filter(g => g.name && norm(g.name) === key);
+        if (!items.length) continue; // unresolvable → skip (no re-query)
+        usedNames.add(key);
+        out.push({ text: this._landmarkPhrase(nm), landmark: nm, items });
+      }
+      return out;
     } catch { return []; }
+  }
+
+  /** Localized "right nearby" phrasing for a resolved landmark suggestion. */
+  _landmarkPhrase(name) {
+    return this._langCode() === 'en' ? `${name} is right nearby` : `すぐ近くに${name}がある`;
   }
 
   _bboxExceedsLimit(bbox) {
@@ -1300,15 +1322,26 @@ class QueryEngine {
 
     if (action !== 'narrow' && action !== 'research') return;
 
-    // [L3] Agent suggestions: differentiating landmarks near the top-tier candidates,
-    // offered as buttons alongside free input. Computed on-demand (may be empty).
-    const suggestions = await this._computeSuggestions();
+    // [L3] Agent suggestions (narrow only): differentiating landmarks near the top-tier
+    // candidates, offered as buttons alongside free input. Each carries its resolved
+    // poi_label items so choosing one never re-queries.
+    const suggestions = action === 'narrow' ? await this._computeSuggestions() : [];
 
-    // Both narrow and research take a hint and parse it as a delta.
     const hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
     if (!hint) return;
     this.llm.resetStats?.();
     this._runStart = Date.now();
+
+    // Chosen agent suggestion → use the KNOWN poi items directly (no parse, no re-query).
+    if (hint && typeof hint === 'object' && hint.landmark) {
+      const cond = {
+        type: 'poi', text: hint.landmark, query_intent: 'specific', queries: [hint.landmark],
+        direction: null,
+        distance: { method: 'radius', level: 'very_close', profile: null, minutes: null, meters: null },
+      };
+      await this._narrowWithin(schema, [cond], { [hint.landmark]: hint.items });
+      return;
+    }
 
     const delta = await this.llm.parseRefinement(schema, hint, this._langCode());
     if (!delta) { this.ui.showMessage(this._m().error_communication); return; }
@@ -1359,7 +1392,9 @@ class QueryEngine {
    * NOT re-collected; only the new conditions are collected and this fixed subset is
    * re-evaluated/re-tiered. Consecutive narrows keep shrinking the previous remainder.
    */
-  async _narrowWithin(schema, addConds) {
+  async _narrowWithin(schema, addConds, preItems = null) {
+    // preItems: { [condKey]: items } for conditions whose poi_label items are already
+    // known (agent suggestions) — used directly, skipping the query AND the L2-1 filter.
     // Pool = last surfaced results (remaining candidates). Fall back to mainCandidates
     // only if surfaced wasn't captured (shouldn't happen after a normal run).
     const pool = (this._cache.surfaced && this._cache.surfaced.length)
@@ -1387,6 +1422,7 @@ class QueryEngine {
     const newKeys = new Set();
     for (const c of addConds) {
       const key = c.text ?? c.type;
+      if (preItems && preItems[key]) { condResults[key] = preItems[key]; continue; } // known poi → no query, no L2-1
       newKeys.add(key);
       if (c.type === 'road' || c.type === 'water') continue; // per-candidate eval, no collection
       condResults[key] = await this.mcp.collectCondition(c, bboxes.condBbox, null);
