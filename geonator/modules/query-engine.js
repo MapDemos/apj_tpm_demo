@@ -1126,76 +1126,118 @@ class QueryEngine {
   // ─────────────────────────────────────────────
 
   async _handleFeedback(schema, originalText) {
-    const action = await this.ui.showFeedback();
+    const proximityLabel = (schema?.proximity?.anchors || []).map(a => a.text).filter(Boolean).join('・') || null;
+    const action = await this.ui.showFeedback(proximityLabel);
 
-    switch (action) {
-      case 'done':
-        this.ui.showMessage(this._m().confirmed);
-        this._resetCache();
-        break;
-
-      case 'continue': {
-        // [6-2a] ask for hint
-        const hint = await this.ui.showHintInput(this._m().ask_hint);
-        if (!hint) break;
-
-        // reset telemetry for this new search cycle
-        this.llm.resetStats?.();
-        this._runStart = Date.now();
-
-        // [6-2b] Parse the hint as a DELTA and apply it surgically to the EXISTING
-        // schema. We never rebuild the schema from text, so existing conditions are
-        // never lost (fixes the "first condition ignored" / "2nd refine reverts" bugs).
-        const delta = await this.llm.parseRefinement(schema, hint);
-        if (!delta) { this.ui.showMessage(this._m().error_communication); break; }
-
-        const validTypes = SCHEMA_ENUMS.condition_type;
-        const merged = {
-          ...schema,
-          proximity:  schema.proximity,
-          target:     schema.target,
-          conditions: [...(schema.conditions || [])],
-        };
-        // target change (e.g. マンション→アパート)
-        if (delta.new_target && delta.new_target.text) {
-          merged.target = { ...schema.target, ...delta.new_target };
-        }
-        // proximity change (e.g. ○○駅→△△駅)
-        if (delta.new_proximity) {
-          merged.proximity = delta.new_proximity;
-        }
-        // remove existing conditions being replaced/negated (e.g. 公園→川)
-        if (delta.remove_condition_texts.length) {
-          const rm = new Set(delta.remove_condition_texts);
-          merged.conditions = merged.conditions.filter(c => !rm.has(c.text));
-        }
-        // append new conditions (the "add" case — accumulates across refinements)
-        const addConds = delta.add_conditions.filter(c => c && validTypes.includes(c.type));
-        merged.conditions = [...merged.conditions, ...addConds];
-
-        merged.confirmation = delta.confirmation;
-        // cap = max(current length, MAX_CONDITIONS): refinement additions are never
-        // dropped even if they exceed the initial cap (user is deliberately narrowing).
-        fillSchemaDefaults(merged, this.config.DEFAULT_LEVEL, Math.max(merged.conditions.length, this.config.MAX_CONDITIONS));
-
-        // Guard: a malformed delta (e.g. bad new_proximity) must not run a broken schema.
-        if (!validateQuerySchema(merged).ok) { this.ui.showMessage(this._m().error_communication); break; }
-
-        this._previousText = `${this._previousText}\n追加情報：${hint}`;
-        this._dbgReport.schema = merged;
-        if (delta.confirmation) this.ui.showMessage(delta.confirmation);
-
-        // _executeSearch's cache invalidation handles it: proximity/target unchanged →
-        // bbox/target reused; changed → recomputed. Then re-evaluate = narrow/re-search.
-        await this._executeSearch(merged, this._previousText);
-        break;
-      }
-
-      case 'restart':
-        this._resetCache();
-        this.ui.showMessage(this._m().welcome);
-        break;
+    if (action === 'done') {
+      this.ui.showMessage(this._m().confirmed);
+      this._resetCache();
+      return;
     }
+
+    if (action !== 'narrow' && action !== 'research') return;
+
+    // Both narrow and research take a hint and parse it as a delta.
+    const hint = await this.ui.showHintInput(this._m().ask_hint);
+    if (!hint) return;
+    this.llm.resetStats?.();
+    this._runStart = Date.now();
+
+    const delta = await this.llm.parseRefinement(schema, hint);
+    if (!delta) { this.ui.showMessage(this._m().error_communication); return; }
+    const validTypes = SCHEMA_ENUMS.condition_type;
+    const addConds = delta.add_conditions.filter(c => c && validTypes.includes(c.type));
+
+    // ── narrow: filter WITHIN the already-surfaced Target candidates (pool fixed,
+    // target NOT re-collected). Purely additive — only new conditions apply. ──
+    if (action === 'narrow') {
+      if (!addConds.length) { this.ui.showMessage(this._m().error_communication); return; }
+      if (delta.confirmation) this.ui.showMessage(delta.confirmation);
+      await this._narrowWithin(schema, addConds);
+      return;
+    }
+
+    // ── research: surgically apply the full delta (add/remove/target/proximity) to
+    // the existing schema and RE-SEARCH around the proximity (target re-collected). ──
+    const merged = {
+      ...schema,
+      proximity:  schema.proximity,
+      target:     schema.target,
+      conditions: [...(schema.conditions || [])],
+    };
+    if (delta.new_target && delta.new_target.text) merged.target = { ...schema.target, ...delta.new_target };
+    if (delta.new_proximity) merged.proximity = delta.new_proximity;
+    if (delta.remove_condition_texts.length) {
+      const rm = new Set(delta.remove_condition_texts);
+      merged.conditions = merged.conditions.filter(c => !rm.has(c.text));
+    }
+    merged.conditions = [...merged.conditions, ...addConds];
+    merged.confirmation = delta.confirmation;
+    fillSchemaDefaults(merged, this.config.DEFAULT_LEVEL, Math.max(merged.conditions.length, this.config.MAX_CONDITIONS));
+
+    if (!validateQuerySchema(merged).ok) { this.ui.showMessage(this._m().error_communication); return; }
+
+    this._previousText = `${this._previousText}\n追加情報：${hint}`;
+    this._dbgReport.schema = merged;
+    if (delta.confirmation) this.ui.showMessage(delta.confirmation);
+
+    await this._executeSearch(merged, this._previousText);
+  }
+
+  /**
+   * "更に絞り込む": narrow WITHIN the already-surfaced Target candidates. The candidate
+   * pool is fixed to this._cache.mainCandidates (target is NOT re-collected); only the
+   * new conditions are collected and the existing pool is re-evaluated/re-tiered.
+   */
+  async _narrowWithin(schema, addConds) {
+    const pool = this._cache.mainCandidates;
+    if (!pool || !pool.length) { this.ui.showMessage(this._m().mainZero(schema.target?.text || '')); return; }
+
+    const merged = { ...schema, conditions: [...(schema.conditions || []), ...addConds] };
+    fillSchemaDefaults(merged, this.config.DEFAULT_LEVEL, Math.max(merged.conditions.length, this.config.MAX_CONDITIONS));
+    this._cache.schema = merged;
+    this._previousText = `${this._previousText}\n絞り込み：${addConds.map(c => c.text ?? c.type).join('、')}`;
+    this._dbgReport = { schema: merged, proximity: this._dbgReport.proximity, target: this._dbgReport.target, conditions: [], categoryFilter: [], evaluation: null, excludedByHardFilter: [] };
+
+    this.ui.clearResults?.();
+
+    // Reuse the cached bbox; collect ONLY the new conditions (poi/point types).
+    const bboxes = this._computeDualBbox(this._cache.bbox, merged);
+    this._anchorRefM = Math.max(1, this._bboxWidthM(bboxes.targetBbox) / 2);
+
+    const condResults = { ...(this._cache.condCandidates || {}) };
+    const condDebug = [];
+    for (const c of addConds) {
+      const key = c.text ?? c.type;
+      if (c.type === 'road' || c.type === 'water') { condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: '候補ごと評価' }); continue; }
+      const items = await this.mcp.collectCondition(c, bboxes.condBbox, null);
+      condResults[key] = items;
+      condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
+    }
+    // L2-1 category validity on the (new) poi conditions. Pool is fixed, so the target
+    // filter is a cache-hit no-op; we keep the returned pool as-is.
+    const keptPool = await this._applyCategoryFilter(merged, pool, condResults);
+    this._cache.mainCandidates = keptPool;
+    this._cache.condCandidates = condResults;
+    this._dbgReport.conditions = [...(this._dbgReport.conditions || []), ...condDebug];
+
+    // Evaluate with the FIXED pool (no target re-collection).
+    this.mcp._evalPolygons = [];
+    const results = await this._evaluate(merged, keptPool, condResults);
+    this.ui.drawHits?.(keptPool);
+    Object.values(condResults).forEach(items => this.ui.drawConditionHits?.(items));
+    this.ui.drawPolygons?.(this.mcp._evalPolygons);
+    this.ui.fitToBBox?.(bboxes.condBbox);
+    this.ui.refreshCounts?.();
+
+    const dbgRow = c => ({ name: c.name || '(名前なし)', score: c._matchInfo?.score ?? 0, tier: c._tier, rel: c._relevance, hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [] });
+    this._dbgReport.evaluation = { full: results.full.map(dbgRow), partial: results.partial.map(dbgRow), noneCount: results.none.length };
+
+    this._showResults(results, merged);
+    this.ui.showRunStats?.({ ms: Date.now() - (this._runStart || Date.now()), llm: this.llm.stats });
+    this.ui.showDebugReport?.(this._dbgReport);
+
+    await this._handleFeedback(merged, this._previousText);
   }
 
   // ─────────────────────────────────────────────

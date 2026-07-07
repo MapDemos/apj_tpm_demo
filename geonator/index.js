@@ -320,9 +320,9 @@ class LocationFinderApp {
         // Note: non-mappable conditions are now surfaced via the L1-generated
         // confirmation message (schema.confirmation), so no separate unsupported note here.
       },
-      async showFeedback() {
+      async showFeedback(proximityLabel) {
         return new Promise(resolve => {
-          self._showFeedbackButtons(resolve);
+          self._showFeedbackButtons(resolve, proximityLabel);
         });
       },
       clearResults() {
@@ -498,23 +498,27 @@ class LocationFinderApp {
   }
 
   /**
-   * Show done/continue/restart feedback buttons after results.
+   * Show 3 feedback buttons after results:
+   *   done     — 終了する
+   *   narrow   — 更に絞り込む（今の候補プールの中だけで絞る）
+   *   research — 〈proximity〉周辺で探し直す（条件を足して再検索）
    */
-  _showFeedbackButtons(onAction) {
+  _showFeedbackButtons(onAction, proximityLabel) {
     const container = document.createElement('div');
     container.className = 'feedback-buttons';
     container.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;';
 
+    const px = (proximityLabel || '').trim();
     const buttons = this._lang === 'en'
       ? [
-          { label: '✅ Confirm',         value: 'done' },
-          { label: '🔄 Refine further',  value: 'continue' },
-          { label: '🔁 Start over',      value: 'restart' },
+          { label: '✅ Finish',            value: 'done' },
+          { label: '🔍 Narrow down',       value: 'narrow' },
+          { label: px ? `🔄 Search again around ${px}` : '🔄 Search again with more info', value: 'research' },
         ]
       : [
-          { label: '✅ これで確定',       value: 'done' },
-          { label: '🔄 続けて絞り込む',   value: 'continue' },
-          { label: '🔁 最初からやり直す', value: 'restart' },
+          { label: '✅ 終了する',           value: 'done' },
+          { label: '🔍 更に絞り込む',        value: 'narrow' },
+          { label: px ? `🔄 ${px}周辺で探し直す` : '🔄 条件を足して探し直す', value: 'research' },
         ];
 
     // Keep the resolver so _resetChat can cancel a pending feedback wait — otherwise
