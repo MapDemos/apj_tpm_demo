@@ -707,10 +707,14 @@ class QueryEngine {
    * each one's nearby poi_label landmarks and let L3 pick recognizable, DIFFERENTIATING
    * ones (near only some candidates). Returns short condition phrases (string[]).
    */
-  async _computeSuggestions() {
+  async _computeSuggestions(schema) {
     try {
       const basis = this._basisTier(this._cache.surfaced || []);
       if (basis.length < 2 || !this._cache.bbox) return [];
+      const norm = s => (s || '').normalize('NFKC').replace(/[\s　]+/g, '').toLowerCase();
+      // Landmarks already used as conditions must not be re-suggested → exclude them from
+      // the L3 input entirely (most efficient: no extra tokens, can't be picked).
+      const usedCond = new Set((schema?.conditions || []).map(c => norm(c.text ?? c.type)).filter(Boolean));
       const NEAR_M = 150; // 「すぐ近く」相当
       // poi_label grid over the basis candidates' area (+margin), no Search Box.
       const lats = basis.map(c => c.latitude ?? c.lat).filter(v => v != null);
@@ -731,7 +735,7 @@ class QueryEngine {
         const nearby = [];
         const seen = new Set();
         for (const g of grid) {
-          if (!g.name) continue;
+          if (!g.name || usedCond.has(norm(g.name))) continue; // skip landmarks already used as conditions
           const gl = g.latitude ?? g.lat, gn = g.longitude ?? g.lng;
           if (gl == null || gn == null) continue;
           if (distM(cl, cn, gl, gn) <= NEAR_M && !seen.has(g.name)) { seen.add(g.name); nearby.push(g.name); }
@@ -746,12 +750,11 @@ class QueryEngine {
       // Resolve each suggested NAME back to the known grid poi_label items (coords already
       // known) so choosing a suggestion never triggers a re-query. Names that don't map to
       // a real grid POI are dropped (avoids "アクロス福岡" → "…アクロス福岡店" noise).
-      const norm = s => (s || '').normalize('NFKC').replace(/[\s　]+/g, '').toLowerCase();
       const out = [];
       const usedNames = new Set();
       for (const nm of names) {
         const key = norm(nm);
-        if (!key || usedNames.has(key)) continue;
+        if (!key || usedNames.has(key) || usedCond.has(key)) continue; // skip dups / existing conditions
         const items = grid.filter(g => g.name && norm(g.name) === key);
         if (!items.length) continue; // unresolvable → skip (no re-query)
         usedNames.add(key);
@@ -1330,7 +1333,7 @@ class QueryEngine {
     // [L3] Agent suggestions (narrow only): differentiating landmarks near the top-tier
     // candidates, offered as buttons alongside free input. Each carries its resolved
     // poi_label items so choosing one never re-queries.
-    const suggestions = action === 'narrow' ? await this._computeSuggestions() : [];
+    const suggestions = action === 'narrow' ? await this._computeSuggestions(schema) : [];
 
     const hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
     if (!hint) return;
