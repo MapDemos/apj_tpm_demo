@@ -50,6 +50,43 @@ class LLMClient {
     throw new Error('L1: failed to produce valid JSON after retries');
   }
 
+  /**
+   * Parse a refinement hint against the current understanding. Decides whether the
+   * hint ADDS a new condition (narrow existing candidates) or REVISES/negates an
+   * existing condition/target/proximity (full re-search).
+   * @param {object} schema - current QuerySchema
+   * @param {string} hintText - user's refinement text
+   * @returns {Promise<{mode:'add'|'revise', conditions:Array, confirmation:string}|null>}
+   */
+  async parseRefinement(schema, hintText) {
+    if (typeof PROMPT_L1_REFINE === 'undefined') throw new Error('PROMPT_L1_REFINE not loaded');
+    const summary = {
+      target:     schema?.target?.text ?? null,
+      proximity:  (schema?.proximity?.anchors || []).map(a => a.text),
+      conditions: (schema?.conditions || []).map(c => c.text ?? c.type),
+    };
+    try {
+      const result = await this._callClaude(
+        {
+          system: PROMPT_L1_REFINE,
+          user:   `現在の理解:\n${JSON.stringify(summary)}\n\n追加情報:「${hintText}」\n\nJSONのみを返してください。`,
+        },
+        800,
+        this.config.L1_MODEL,
+        'L1'
+      );
+      const json = this._extractJSON(result);
+      if (!json) return null;
+      return {
+        mode:         json.mode === 'revise' ? 'revise' : 'add',
+        conditions:   Array.isArray(json.conditions) ? json.conditions : [],
+        confirmation: typeof json.confirmation === 'string' ? json.confirmation : '',
+      };
+    } catch {
+      return null; // caller falls back to full re-parse
+    }
+  }
+
   // ─────────────────────────────────────────────
   // L2-1: category validity check (通常クエリ) — see poi_category/class, not names
   // ─────────────────────────────────────────────

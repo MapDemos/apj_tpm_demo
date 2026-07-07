@@ -1143,11 +1143,37 @@ class QueryEngine {
         this.llm.resetStats?.();
         this._runStart = Date.now();
 
-        // [6-2b] re-parse (K)
+        // [6-2b] classify the hint: ADD (append condition, narrow existing candidates)
+        // vs REVISE/negate (changes target/proximity/an existing condition → full re-search).
+        const delta = await this.llm.parseRefinement(schema, hint);
+
+        // ADD: keep the existing schema's conditions (fixes "first condition ignored" —
+        // we do NOT re-derive conditions from text) and append only the new ones, then
+        // re-evaluate to narrow the already-surfaced candidates.
+        const validTypes = SCHEMA_ENUMS.condition_type;
+        const newConds = (delta?.mode === 'add' ? (delta.conditions || []) : [])
+          .filter(c => c && validTypes.includes(c.type));
+
+        if (delta && delta.mode === 'add' && newConds.length) {
+          const mergedConds = [...(schema.conditions || []), ...newConds];
+          const merged = { ...schema, conditions: mergedConds, confirmation: delta.confirmation };
+          // Fill defaults for the new conditions; cap = current length so refinement
+          // additions are never dropped (user is deliberately adding).
+          fillSchemaDefaults(merged, this.config.DEFAULT_LEVEL, mergedConds.length);
+          this._previousText = `${this._previousText}\n追加情報：${hint}`;
+          if (delta.confirmation) this.ui.showMessage(delta.confirmation);
+          // proximity/target unchanged → bbox reused; conditions changed → candidates
+          // re-collected (target search hits mcp cache) and re-evaluated = narrowing.
+          await this._executeSearch(merged, this._previousText);
+          break;
+        }
+
+        // REVISE/negate (or delta parse failed) → full re-parse + re-search.
         const newSchema = await this._reparseMerged(hint);
         if (!newSchema) break;
+        const confirmMsg = newSchema.confirmation || delta?.confirmation;
+        if (confirmMsg) this.ui.showMessage(confirmMsg);
 
-        // [6-2c] cache invalidation
         const invalid = this._detectCacheInvalidation(newSchema);
         if (invalid.bbox) this._cache.bbox = null;
         if (invalid.candidates) { this._cache.mainCandidates = null; this._cache.condCandidates = null; }
