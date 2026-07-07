@@ -112,7 +112,7 @@ const CONFIG = {
   // 判定方式（ハード=採点前に除外 / ソフト=加点）。デフォルトは両方ハード。
   SAME_BUILDING_MODE:     'hard', // 'hard'（同ビル以外を除外）| 'soft'（同ビルを加点条件として採点）
   FLOORS_MODE:            'hard', // 'hard'（階数条件外を除外）| 'soft'（階数一致をファジー加点）
-  FLOORS_HARD_TOL:        2,      // FLOORS_MODE='hard'かつvalue指定時の許容（±階・height÷3の丸め誤差吸収）
+  FLOORS_HARD_TOL:        0,      // FLOORS_MODE='hard'かつvalue指定時の許容（±階）。0=完全一致（「10階建て」は10階のみ）。丸め誤差を許すなら1に
 
   DEBUG: true,
 };
