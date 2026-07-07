@@ -217,6 +217,17 @@ class LocationFinderApp {
     this._updateModelBadge();
   }
 
+  /** 地図表示ON/OFF。OFFで .map-off を付け対話パネルを中央表示。ON復帰時は地図をresize。 */
+  _setMapOff(off) {
+    this._mapOff = !!off;
+    document.querySelector('.app-container')?.classList.toggle('map-off', this._mapOff);
+    const btn = document.getElementById('mapToggleBtn');
+    if (btn) btn.textContent = this._mapOff ? LANG[this._lang].mapShow : LANG[this._lang].mapHide;
+    try { localStorage.setItem('geonator_ui', JSON.stringify({ mapOff: this._mapOff })); } catch (_) {}
+    // 再表示時: 非表示中はコンテナ幅が0なので mapbox の再計算が必要
+    if (!this._mapOff && this.map) setTimeout(() => { try { this.map.resize(); } catch (_) {} }, 60);
+  }
+
   _updateModelBadge() {
     const el = document.getElementById('model-badge');
     if (!el) return;
@@ -784,6 +795,13 @@ class LocationFinderApp {
         this._debugStepResolve = null;
       }
     });
+
+    // 地図表示 ON/OFF（OFFで対話パネルを中央表示＝スマホ風）。設定は localStorage に永続化。
+    document.getElementById('mapToggleBtn')?.addEventListener('click', () => this._setMapOff(!this._mapOff));
+    try {
+      const ui = JSON.parse(localStorage.getItem('geonator_ui') || '{}');
+      this._setMapOff(!!ui.mapOff);
+    } catch (_) { this._setMapOff(false); }
 
     // Example chips
     document.querySelectorAll('.example-chip').forEach(btn => {
@@ -3086,6 +3104,10 @@ class LocationFinderApp {
     const dbgBtn = document.getElementById('debugToggleBtn');
     if (dbgBtn) dbgBtn.textContent = this._debugMode ? t.debugOn : t.debugOff;
 
+    // Map toggle button (respect current state)
+    const mapBtn = document.getElementById('mapToggleBtn');
+    if (mapBtn) mapBtn.textContent = this._mapOff ? t.mapShow : t.mapHide;
+
     // Examples label
     const exLabel = document.getElementById('examples-label');
     if (exLabel) exLabel.textContent = t.examplesLabel;
@@ -3306,6 +3328,8 @@ const LANG = {
     clearChat:     'チャットをクリア',
     debugOff:      '🔍 デバッグ OFF',
     debugOn:       '🔍 デバッグ ON',
+    mapHide:       '🗺 地図表示OFF',
+    mapShow:       '🗺 地図表示ON',
     examplesLabel: '入力例',
     mapReady:      '地図の準備ができました',
     mapLoading:    '地図を読み込み中…',
@@ -3410,6 +3434,8 @@ const LANG = {
     clearChat:     'Clear Chat',
     debugOff:      '🔍 Debug OFF',
     debugOn:       '🔍 Debug ON',
+    mapHide:       '🗺 Map OFF',
+    mapShow:       '🗺 Map ON',
     examplesLabel: 'Examples',
     mapReady:      'Map ready',
     mapLoading:    'Loading map…',

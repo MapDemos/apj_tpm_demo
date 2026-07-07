@@ -243,6 +243,17 @@ html, body {
   overflow: hidden;
 }
 
+/* 地図OFF: 地図を隠し、対話パネルをスマホ風に中央表示 */
+.app-container.map-off { justify-content: center; }
+.app-container.map-off .map-panel { display: none; }
+.app-container.map-off .chat-panel {
+  width: 100%;
+  max-width: 480px;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
 /* ── Chat Panel ──────────────────────────────────────────────── */
 
 .chat-panel {
