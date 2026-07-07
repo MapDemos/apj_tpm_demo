@@ -240,7 +240,7 @@ class QueryEngine {
       this._cache.condCandidates = collected.conditions;
       // Visualize hits
       this.ui.drawHits?.(collected.main);
-      Object.values(collected.conditions).forEach(items => this.ui.drawConditionHits?.(items));
+      Object.entries(collected.conditions).forEach(([label, items], ci) => this.ui.drawConditionHits?.(items, ci, label));
       this.ui.refreshCounts?.();
     }
 
@@ -1454,7 +1454,7 @@ class QueryEngine {
     this.mcp._evalPolygons = [];
     const results = await this._evaluate(merged, keptPool, condResults, frozenLabels);
     this.ui.drawHits?.(keptPool);
-    Object.values(condResults).forEach(items => this.ui.drawConditionHits?.(items));
+    Object.entries(condResults).forEach(([label, items], ci) => this.ui.drawConditionHits?.(items, ci, label));
     this.ui.drawPolygons?.(this.mcp._evalPolygons);
     this.ui.fitToBBox?.(bboxes.condBbox);
     this.ui.refreshCounts?.();

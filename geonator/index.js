@@ -353,6 +353,7 @@ class LocationFinderApp {
         if (bbox) self._dbgAddBbox(bbox);
       },
       drawHits(items) {
+        self._condLegend = []; // reset per run (target drawn first, conditions appended)
         (items || []).forEach(it => {
           const lng = it.longitude ?? it.lng;
           const lat = it.latitude  ?? it.lat;
@@ -360,15 +361,19 @@ class LocationFinderApp {
             self._dbgAddPoint('dbg-search-hits', 'searchHits', lng, lat, { name: it.name || '' });
           }
         });
+        self._rebuildLegend();
       },
-      drawConditionHits(items) {
+      drawConditionHits(items, ci = 0, label = '') {
         (items || []).forEach(it => {
           const lng = it.longitude ?? it.lng;
           const lat = it.latitude  ?? it.lat;
           if (lng != null && lat != null) {
-            self._dbgAddPoint('dbg-tq-hits', 'tqHits', lng, lat, { name: it.name || '' });
+            self._dbgAddPoint('dbg-tq-hits', 'tqHits', lng, lat, { name: it.name || '', ci });
           }
         });
+        const P = LocationFinderApp.COND_PALETTE;
+        (self._condLegend ||= []).push({ label: label || `条件${ci + 1}`, color: P[ci % P.length] });
+        self._rebuildLegend();
       },
       drawPolygons(features) {
         if (!self._dbg || !features?.length) return;
@@ -616,6 +621,23 @@ class LocationFinderApp {
 
     document.querySelectorAll('.debug-step').forEach(el =>
       el.classList.toggle('step-isolated', isolating && el.dataset.step === stepId));
+  }
+
+  /** Rebuild the map legend: proximity / target / each condition (color) / reach area. */
+  _rebuildLegend() {
+    const el = document.getElementById('mapLegend');
+    if (!el) return;
+    const en = this._lang === 'en';
+    const row = (color, text, extra = '') =>
+      `<div class="legend-row"><span class="legend-dot" style="background:${color};${extra}"></span>${_esc(text)}</div>`;
+    const rows = [
+      row('#f97316', en ? 'proximity / search area' : 'proximity / 検索範囲'),
+      row('#06b6d4', en ? 'target candidates' : 'target候補'),
+      ...(this._condLegend || []).map(c => row(c.color, `${en ? 'condition' : '条件'}: ${c.label}`)),
+      row('#8b5cf6', en ? 'reach area (eval)' : '評価範囲(到達圏)'),
+    ];
+    el.innerHTML = rows.join('');
+    el.style.display = 'block';
   }
 
   /** Highlight the chat step message a clicked map element belongs to. */
@@ -894,6 +916,10 @@ class LocationFinderApp {
   // ─────────────────────────────────────────────────────────────
 
   static _TIER_ICON = { gold: '🥇', silver: '🥈', match: '🟢', bronze: '🥉', none: '⚪' };
+
+  // Per-condition colors for Step1 collection (distinct from target=teal, proximity=orange,
+  // eval=violet). Indexed by condition order (ci); MAX_CONDITIONS caps at 5.
+  static COND_PALETTE = ['#a855f7', '#ec4899', '#eab308', '#22c55e', '#f43f5e'];
 
   /**
    * Render candidates as a clickable list in the conversation panel, each with
@@ -1378,10 +1404,15 @@ class LocationFinderApp {
     ]);
 
     // Purple: Tilequery hit points + labels
+    // Condition hits colored per-condition by `ci` (condition index), so target and each
+    // condition_n are visually distinct in Step1 collection.
+    const P = LocationFinderApp.COND_PALETTE;
+    // wrap ci by palette length so it stays consistent with the legend (which also wraps)
+    const condColor = ['match', ['%', ['coalesce', ['get', 'ci'], 0], P.length], ...P.flatMap((c, i) => [i, c]), P[0]];
     add('dbg-tq-hits', this._dbg.tqHits, [
       {
         id: 'dbg-tq-hits-c', type: 'circle',
-        paint: { 'circle-radius': 5, 'circle-color': '#a855f7', 'circle-opacity': 0.8,
+        paint: { 'circle-radius': 5, 'circle-color': condColor, 'circle-opacity': 0.8,
                  'circle-stroke-width': 1, 'circle-stroke-color': '#fff' },
       },
       {
@@ -1396,7 +1427,7 @@ class LocationFinderApp {
           'text-max-width':        8,
         },
         paint: {
-          'text-color':       '#c084fc',
+          'text-color':       condColor,
           'text-halo-color':  'rgba(8,13,26,0.85)',
           'text-halo-width':  1.2,
         },
