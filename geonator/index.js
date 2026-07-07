@@ -107,6 +107,7 @@ class LocationFinderApp {
       if (saved.L2_1) this.config.L2_1_MODEL = saved.L2_1;
       if (saved.L2_2) this.config.L2_2_MODEL = saved.L2_2;
       else if (saved.L2) this.config.L2_2_MODEL = saved.L2; // legacy key
+      if (saved.L3) this.config.L3_MODEL = saved.L3;
     } catch (_) {}
     // L2-1 behavior: category=null handling (separate from model prefs)
     try {
@@ -122,19 +123,21 @@ class LocationFinderApp {
     const l1Sel  = document.getElementById('l1ModelSelect');
     const l21Sel = document.getElementById('l2_1ModelSelect');
     const l22Sel = document.getElementById('l2_2ModelSelect');
+    const l3Sel  = document.getElementById('l3ModelSelect');
     const nullSel = document.getElementById('l2_1NullSelect');
     const maxCondSel = document.getElementById('maxConditionsSelect');
     const modal  = document.getElementById('settingsModal');
     if (l1Sel)  l1Sel.value  = this.config.L1_MODEL;
     if (l21Sel) l21Sel.value = this.config.L2_1_MODEL;
     if (l22Sel) l22Sel.value = this.config.L2_2_MODEL;
+    if (l3Sel)  l3Sel.value  = this.config.L3_MODEL;
     if (nullSel) nullSel.value = this.config.L2_1_KEEP_NULL_CATEGORY === false ? 'exclude' : 'include';
     if (maxCondSel) maxCondSel.value = String(this.config.MAX_CONDITIONS);
 
     const persist = () => {
       try {
         localStorage.setItem('geonator_models', JSON.stringify({
-          L1: this.config.L1_MODEL, L2_1: this.config.L2_1_MODEL, L2_2: this.config.L2_2_MODEL,
+          L1: this.config.L1_MODEL, L2_1: this.config.L2_1_MODEL, L2_2: this.config.L2_2_MODEL, L3: this.config.L3_MODEL,
         }));
       } catch (_) {}
       this._updateModelBadge();
@@ -148,22 +151,25 @@ class LocationFinderApp {
     l1Sel?.addEventListener('change',  e => { this.config.L1_MODEL   = e.target.value; persist(); });
     l21Sel?.addEventListener('change', e => { this.config.L2_1_MODEL = e.target.value; persist(); });
     l22Sel?.addEventListener('change', e => { this.config.L2_2_MODEL = e.target.value; persist(); });
+    l3Sel?.addEventListener('change',  e => { this.config.L3_MODEL   = e.target.value; persist(); });
     nullSel?.addEventListener('change', e => { this.config.L2_1_KEEP_NULL_CATEGORY = e.target.value !== 'exclude'; persistNull(); });
     maxCondSel?.addEventListener('change', e => { this.config.MAX_CONDITIONS = parseInt(e.target.value, 10); persistSearch(); });
 
     this._initScoringSettings();
 
     // Single "↺ すべてデフォルトに戻す" — models + scoring weights + decisiveness at once.
-    const MODEL_DEFAULTS = { L1: 'claude-haiku-4-5-20251001', L2_1: 'claude-haiku-4-5-20251001', L2_2: 'claude-sonnet-4-6' };
+    const MODEL_DEFAULTS = { L1: 'claude-haiku-4-5-20251001', L2_1: 'claude-haiku-4-5-20251001', L2_2: 'claude-sonnet-4-6', L3: 'claude-haiku-4-5-20251001' };
     document.getElementById('settingsResetBtn')?.addEventListener('click', () => {
       this.config.L1_MODEL   = MODEL_DEFAULTS.L1;
       this.config.L2_1_MODEL = MODEL_DEFAULTS.L2_1;
       this.config.L2_2_MODEL = MODEL_DEFAULTS.L2_2;
+      this.config.L3_MODEL   = MODEL_DEFAULTS.L3;
       this.config.L2_1_KEEP_NULL_CATEGORY = false; // default: exclude null-category candidates (strict)
       this.config.MAX_CONDITIONS = 3;              // default condition cap
       if (l1Sel)  l1Sel.value  = MODEL_DEFAULTS.L1;
       if (l21Sel) l21Sel.value = MODEL_DEFAULTS.L2_1;
       if (l22Sel) l22Sel.value = MODEL_DEFAULTS.L2_2;
+      if (l3Sel)  l3Sel.value  = MODEL_DEFAULTS.L3;
       if (nullSel) nullSel.value = 'exclude';
       if (maxCondSel) maxCondSel.value = '3';
       try { localStorage.removeItem('geonator_models'); localStorage.removeItem('geonator_l2_1'); localStorage.removeItem('geonator_search'); } catch (_) {}
@@ -299,10 +305,10 @@ class LocationFinderApp {
           self._showChoicePanel(question, choices).then(resolve);
         });
       },
-      async showHintInput(prompt) {
+      async showHintInput(prompt, suggestions) {
         return new Promise(resolve => {
           self.addMessage('assistant', prompt);
-          self._showHintPanel(prompt, (text) => resolve(text));
+          self._showHintPanel(prompt, (text) => resolve(text), suggestions);
         });
       },
       getLang() { return self._lang; },
@@ -391,7 +397,7 @@ class LocationFinderApp {
         let totIn = 0, totOut = 0;
         // Always list all three roles (even 0 calls) so L2-1/L2-2 cost/time is visible.
         // 0回 = そのクエリで未実行（キャッシュヒット/対象なし）。
-        for (const [role, s] of [['L1', stats.llm?.L1], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2]]) {
+        for (const [role, s] of [['L1', stats.llm?.L1], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
           if (!s) continue;
           parts.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
           totIn += s.inTok; totOut += s.outTok;
@@ -2557,17 +2563,26 @@ class LocationFinderApp {
   }
 
   /** Render the hint request panel in chat and wait for operator input. */
-  _showHintPanel(claudeMessage, onResponse) {
+  _showHintPanel(claudeMessage, onResponse, suggestions) {
     const container = document.getElementById('chatMessages');
     const uid = `hint-${Date.now()}`;
 
     const ht = LANG[this._lang];
+    // [L3] agent suggestion buttons (differentiating landmarks). Optional.
+    const sugList = Array.isArray(suggestions) ? suggestions.filter(s => s && s.trim()) : [];
+    const sugTitle = this._lang === 'en' ? '💡 Agent suggestions' : '💡 エージェントからの提案';
+    const sugHTML = sugList.length
+      ? `<div class="hint-suggest-title">${sugTitle}</div><div class="hint-suggest" id="${uid}-sug">` +
+        sugList.map((s, i) => `<button class="choice-btn hint-suggest-btn" data-i="${i}">${_esc(s)}</button>`).join('') +
+        `</div>`
+      : '';
     const wrapper = document.createElement('div');
     wrapper.className = 'message hint-request';
     wrapper.innerHTML = `
       <div class="msg-label">${ht.hintTitle(this.config.HINT_EXTRA_TURNS)}</div>
       <div class="hint-bubble">
         <div class="hint-question">${_formatMsg(claudeMessage)}</div>
+        ${sugHTML}
         <textarea id="${uid}-input" class="hint-input" placeholder="${ht.hintPlaceholder}" rows="3"></textarea>
         <div class="hint-actions">
           <button class="hint-submit-btn" id="${uid}-ok">${ht.hintSubmit}</button>
@@ -2577,6 +2592,22 @@ class LocationFinderApp {
     `;
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
+
+    // Suggestion click = submit that suggestion as the hint.
+    if (sugList.length) {
+      wrapper.querySelectorAll('.hint-suggest-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const s = sugList[+btn.dataset.i];
+          document.getElementById(`${uid}-input`).disabled = true;
+          document.getElementById(`${uid}-ok`).disabled    = true;
+          document.getElementById(`${uid}-skip`).style.display = 'none';
+          wrapper.querySelectorAll('.hint-suggest-btn').forEach(b => { b.disabled = true; });
+          this.addMessage('user', s);
+          this._hintResolve = null;
+          onResponse(s);
+        });
+      });
+    }
 
     document.getElementById(`${uid}-ok`).addEventListener('click', () => {
       const text = document.getElementById(`${uid}-input`).value.trim();
@@ -2926,6 +2957,7 @@ class LocationFinderApp {
       setText('set-l1-label', st.l1);
       setText('set-l2_1-label', st.l2_1);
       setText('set-l2_2-label', st.l2_2);
+      setText('set-l3-label', st.l3);
       setLead('set-l2null-title', st.l2nullTitle);   setText('set-l2null-hint', st.l2nullHint);
       setText('set-l2null-row', st.l2nullRow);
       setText('set-l2null-inc', st.l2nullInclude);
@@ -3164,6 +3196,7 @@ const LANG = {
       l1:          'L1（クエリ解析）',
       l2_1:        'L2-1（通常クエリの関連性・カテゴリ）',
       l2_2:        'L2-2（Targetの関連性）',
+      l3:          'L3（絞り込みの目印提案）',
       l2nullTitle: 'L2-1：カテゴリ未設定の扱い',
       l2nullHint:  '（カテゴリ情報が無い候補）',
       l2nullRow:   'カテゴリ=null の候補',
@@ -3248,6 +3281,7 @@ const LANG = {
       l1:          'L1 (query parsing)',
       l2_1:        'L2-1 (general-query relevance · category)',
       l2_2:        'L2-2 (target relevance)',
+      l3:          'L3 (refinement landmark suggestions)',
       l2nullTitle: 'L2-1: category=null handling',
       l2nullHint:  '(candidates with no category info)',
       l2nullRow:   'Candidates with category=null',

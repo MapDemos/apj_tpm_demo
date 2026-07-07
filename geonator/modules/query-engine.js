@@ -692,6 +692,58 @@ class QueryEngine {
     return s;
   }
 
+  /** Basis pool for narrow suggestions = candidates of the highest present tier. */
+  _basisTier(cands) {
+    if (!cands?.length) return [];
+    for (const tier of ['gold', 'silver', 'match', 'bronze']) {
+      const g = cands.filter(c => c._tier === tier);
+      if (g.length) return g;
+    }
+    return cands;
+  }
+
+  /**
+   * [L3] Agent suggestions for narrowing: from the top-tier surfaced candidates, gather
+   * each one's nearby poi_label landmarks and let L3 pick recognizable, DIFFERENTIATING
+   * ones (near only some candidates). Returns short condition phrases (string[]).
+   */
+  async _computeSuggestions() {
+    try {
+      const basis = this._basisTier(this._cache.surfaced || []);
+      if (basis.length < 2 || !this._cache.bbox) return [];
+      const NEAR_M = 150; // 「すぐ近く」相当
+      // poi_label grid over the basis candidates' area (+margin), no Search Box.
+      const lats = basis.map(c => c.latitude ?? c.lat).filter(v => v != null);
+      const lngs = basis.map(c => c.longitude ?? c.lng).filter(v => v != null);
+      if (!lats.length) return [];
+      const mLat = NEAR_M / 111000, mLng = NEAR_M / (111000 * Math.cos(Math.min(...lats) * Math.PI / 180) || 1);
+      const bbox = [Math.min(...lngs) - mLng, Math.min(...lats) - mLat, Math.max(...lngs) + mLng, Math.max(...lats) + mLat];
+      const grid = await this.mcp.buildPoiLabelGrid(bbox, 65);
+      if (!grid?.length) return [];
+      const distM = (aLat, aLng, bLat, bLng) => {
+        const R = 6371000, toRad = d => d * Math.PI / 180;
+        const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
+        const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+        return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+      };
+      const candList = basis.slice(0, 8).map((c, i) => {
+        const cl = c.latitude ?? c.lat, cn = c.longitude ?? c.lng;
+        const nearby = [];
+        const seen = new Set();
+        for (const g of grid) {
+          if (!g.name) continue;
+          const gl = g.latitude ?? g.lat, gn = g.longitude ?? g.lng;
+          if (gl == null || gn == null) continue;
+          if (distM(cl, cn, gl, gn) <= NEAR_M && !seen.has(g.name)) { seen.add(g.name); nearby.push(g.name); }
+          if (nearby.length >= 15) break;
+        }
+        return { name: c.name || `候補${i + 1}`, nearby };
+      });
+      if (candList.every(c => c.nearby.length === 0)) return [];
+      return await this.llm.suggestLandmarks(candList, this._langCode());
+    } catch { return []; }
+  }
+
   _bboxExceedsLimit(bbox) {
     if (!bbox) return false;
     const [minX, minY, maxX, maxY] = bbox;
@@ -1248,8 +1300,12 @@ class QueryEngine {
 
     if (action !== 'narrow' && action !== 'research') return;
 
+    // [L3] Agent suggestions: differentiating landmarks near the top-tier candidates,
+    // offered as buttons alongside free input. Computed on-demand (may be empty).
+    const suggestions = await this._computeSuggestions();
+
     // Both narrow and research take a hint and parse it as a delta.
-    const hint = await this.ui.showHintInput(this._m().ask_hint);
+    const hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
     if (!hint) return;
     this.llm.resetStats?.();
     this._runStart = Date.now();

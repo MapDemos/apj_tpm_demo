@@ -16,7 +16,37 @@ class LLMClient {
       L1:   { model: this.config.L1_MODEL,   inTok: 0, outTok: 0, ms: 0, calls: 0 },
       L2_1: { model: this.config.L2_1_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
       L2_2: { model: this.config.L2_2_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
+      L3:   { model: this.config.L3_MODEL,   inTok: 0, outTok: 0, ms: 0, calls: 0 },
     };
+  }
+
+  /**
+   * L3: suggest differentiating landmarks for narrowing. Given the remaining candidates
+   * and each one's nearby poi_label names, pick 2-4 recognizable landmarks that are near
+   * only SOME candidates, phrased as short conditions. Returns string[] (empty on none).
+   * @param {Array<{name:string, nearby:string[]}>} candList
+   * @param {string} lang
+   */
+  async suggestLandmarks(candList, lang = 'ja') {
+    if (typeof PROMPT_L3 === 'undefined') throw new Error('PROMPT_L3 not loaded');
+    if (!candList || candList.length < 2) return [];
+    const langNote = lang === 'en' ? ' Write the suggestions in English (keep Japanese place names as-is).' : '';
+    try {
+      const result = await this._callClaude(
+        {
+          system: PROMPT_L3,
+          user:   `候補と近傍ランドマーク:\n${JSON.stringify(candList)}\n\n候補を区別できる目印を2〜4個。${langNote}JSONのみ返してください。`,
+        },
+        512,
+        this.config.L3_MODEL,
+        'L3'
+      );
+      const json = this._extractJSON(result);
+      const arr = json && Array.isArray(json.suggestions) ? json.suggestions : [];
+      return arr.filter(s => typeof s === 'string' && s.trim()).slice(0, 4);
+    } catch {
+      return [];
+    }
   }
 
   // ─────────────────────────────────────────────

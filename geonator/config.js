@@ -32,6 +32,7 @@ const CONFIG = {
   //   L2-2 = Targetの関連性チェック（名前ベースのニュアンス判定→Sonnet既定）
   L2_1_MODEL:      'claude-haiku-4-5-20251001', // category validity（極小入力の分類→Haikuで十分）
   L2_2_MODEL:      'claude-sonnet-4-6',         // target relevance（名前ニュアンス→Sonnet既定）
+  L3_MODEL:        'claude-haiku-4-5-20251001', // 絞り込み提案（近傍ランドマークから目印提案→Haiku既定）
   // L2-1 strictness: カテゴリ情報が無い(null)候補を残すか。true=含める、
   // false=含めない(既定・厳密・カテゴリで裏取りできない候補を落とす)。設定画面で切替可。
   L2_1_KEEP_NULL_CATEGORY: false,
