@@ -1285,14 +1285,19 @@ class QueryEngine {
         c._floors = (lat != null && lng != null) ? await this.mcp._getBuildingFloors(lat, lng) : null;
       }));
     }
-    // floorsハード: 階数が判明していて仕様を満たさない候補を除外。階数不明(null)は
-    // 判定不能として保持（same_building の graceful と同じ思想）。
+    // floorsハード: fail-closed。仕様を「証明できた」候補だけ残す。階数が取れない候補は
+    // 満たすと確認できない以上、ハードでは不合格（除外）にする（例: 20階以上指定で高さ不明の
+    // カフェが素通りして検証済みの高層より上位に来る不具合を防ぐ）。緩めたい場合はソフトへ。
     if (floorsHard) {
+      const specLabel = this._floorSpecLabel(floorSpec);
       const kept = [];
       for (const c of mainCandidates) {
-        if (c._floors == null || this._floorPass(c._floors, floorSpec)) { kept.push(c); continue; }
+        if (c._floors != null && this._floorPass(c._floors, floorSpec)) { kept.push(c); continue; }
         this._dbgReport.excludedByHardFilter.push({
-          name: c.name || '(名前なし)', reason: `絶対条件「${this._floorSpecLabel(floorSpec)}」を満たさない（${c._floors}階相当）`,
+          name: c.name || '(名前なし)',
+          reason: c._floors == null
+            ? `階数を取得できず「${specLabel}」を確認できないため除外（ハード）`
+            : `絶対条件「${specLabel}」を満たさない（${c._floors}階相当）`,
         });
       }
       mainCandidates = kept;
