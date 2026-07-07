@@ -321,7 +321,7 @@ class QueryEngine {
 
   async _resolveProximity(schema) {
     const anchors = schema.proximity.anchors;
-    const resolvedPoints = [];
+    let resolvedPoints = [];
 
     // Optional scope (broad area to locate/disambiguate a POI anchor within):
     // 「鎌倉市のコメダの前の…」→ scope=鎌倉市, anchor=コメダ.
@@ -356,7 +356,15 @@ class QueryEngine {
     this._reachPolygons = null;
     this._withinReachM  = null;
     let bbox = null;
-    const useIso = within && within.method === 'isochrone' && within.minutes != null && within.meters == null;
+    // within指定時は基準点を1点（出入口の重心）に集約。駅は複数の出入口点＋各700mを返すため、
+    // そのままだと出入口の広がりで探索範囲が「n分以内」より大きく膨らむ（＝到達圏の趣旨が崩れる）。
+    if (within && (within.minutes != null || within.meters != null) && resolvedPoints.length > 1) {
+      const cLng = resolvedPoints.reduce((s, p) => s + p.lng, 0) / resolvedPoints.length;
+      const cLat = resolvedPoints.reduce((s, p) => s + p.lat, 0) / resolvedPoints.length;
+      resolvedPoints = [{ lng: cLng, lat: cLat }];
+    }
+    // minutes があれば時間 → Isochrone（method の指定に依らず）。meters は距離 → 半径。
+    const useIso = within && within.minutes != null && within.meters == null;
     if (useIso) {
       const reach = await this.mcp.isochroneReach(resolvedPoints, within.minutes, within.profile || 'walking');
       if (reach.bbox) { bbox = reach.bbox; this._reachPolygons = reach.polygons; }
@@ -1039,12 +1047,16 @@ class QueryEngine {
     mainRaw = this._dedupTargets(mainRaw); // [pre-scoring] drop duplicate candidates (see method)
 
     // proximity.within=isochrone: hard-limit targets to the reachable polygon ("徒歩n分以内")。
+    // reachRaw: 到達圏内に絞ったあとの生件数。過密(overflow)判定はこの数で行う（膨らんだ
+    // bbox全体の生件数ではなく、実際に到達圏内にある候補数で判断させる）。
+    let reachRaw = null;
     if (this._reachPolygons?.length) {
       const { kept, excluded } = this.mcp.filterInsidePolygons(mainRaw, this._reachPolygons);
       excluded.forEach(c => this._dbgReport.excludedByHardFilter.push({
         name: c.name || '(名前なし)', reason: `到達圏（proximity.within）外のため除外`,
       }));
       mainRaw = kept;
+      reachRaw = mainRaw.length;
     }
 
     // Conditions collection (partition shared grid to the wide condition bbox) — parallel
@@ -1081,7 +1093,8 @@ class QueryEngine {
     // Debug: target + condition collection breakdown
     const tdbg = this.mcp._lastTargetDebug || null;
     // Pre-slice raw count → overflow signal (target too dense for the proximity bbox).
-    this._targetRaw = tdbg?.raw_count ?? mainRaw.length;
+    // 到達圏(within)で絞った場合はその件数を使う（膨らんだbbox全体の生件数で誤判定しない）。
+    this._targetRaw = reachRaw != null ? reachRaw : (tdbg?.raw_count ?? mainRaw.length);
     this._dbgReport.target = {
       intent:        this._buildIntentLabel(target),
       queries:       Array.isArray(target?.queries) ? target.queries : (target?.text ? [target.text] : []),
