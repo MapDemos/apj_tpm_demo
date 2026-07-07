@@ -422,12 +422,14 @@ class LocationFinderApp {
         self._updateThinking(text);
       },
       async showChoices(question, choices) {
+        self._hideCancelBtn(); // ユーザー選択待ち＝処理は一旦ユーザーに委ねる→キャンセル不要
         return new Promise(resolve => {
           self.addMessage('assistant', question);
           self._showChoicePanel(question, choices).then(resolve);
         });
       },
       async showHintInput(prompt, suggestions) {
+        self._hideCancelBtn(); // 入力待ち＝キャンセル不要
         return new Promise(resolve => {
           self.addMessage('assistant', prompt);
           self._showHintPanel(prompt, (text) => resolve(text), suggestions);
@@ -448,6 +450,7 @@ class LocationFinderApp {
         self._renderCandidatePanel(full, partial, none, summary);
       },
       async showFeedback(proximityLabel) {
+        self._hideCancelBtn(); // フィードバック待ち＝キャンセル不要
         return new Promise(resolve => {
           self._showFeedbackButtons(resolve, proximityLabel);
         });
