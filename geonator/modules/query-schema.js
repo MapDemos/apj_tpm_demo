@@ -133,6 +133,10 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
     }
   }
 
+  // result_area: L1 sets true for vague "大体この辺" queries → JS draws an approximate
+  // area (convex hull of candidates) instead of pinpointing a single spot.
+  if (schema.result_area === undefined) schema.result_area = false;
+
   return schema;
 }
 

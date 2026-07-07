@@ -333,8 +333,10 @@ class LocationFinderApp {
       clearResults() {
         self.clearMapElements();
         self._clearDebugLayers();
+        self._removeProbableArea?.();
         if (self.finalMarker) { self.finalMarker.remove(); self.finalMarker = null; }
       },
+      showProbableArea(candidates, message) { self.showProbableArea(candidates, message); },
 
       // ── Visualization / telemetry callbacks (always on, not debug-gated) ──
       refreshCounts() {

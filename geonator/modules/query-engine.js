@@ -1435,6 +1435,16 @@ class QueryEngine {
 
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
     this.ui.showResults(full, partial, displayNone, summary, conditionLabels);
+
+    // [大体の位置] area result: draw an approximate area (convex hull) around the
+    // surfaced candidates when the query asked for a rough location, not a pinpoint.
+    if (schema.result_area) {
+      const areaPts = (hasMatch ? [...full, ...partial] : displayNone)
+        .filter(c => (c.longitude ?? c.lng) != null && (c.latitude ?? c.lat) != null);
+      if (areaPts.length) {
+        this.ui.showProbableArea?.(areaPts, this._langCode() === 'en' ? 'Roughly this area' : 'だいたいこの辺りです');
+      }
+    }
   }
 
   // ─────────────────────────────────────────────
