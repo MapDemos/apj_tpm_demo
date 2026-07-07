@@ -30,7 +30,7 @@ const CONFIG = {
   // L2 is split into two independent checks (both changeable in settings):
   //   L2-1 = 通常クエリのcategory妥当性チェック（poi_category/class を見る・軽量→Haiku既定）
   //   L2-2 = Targetの関連性チェック（名前ベースのニュアンス判定→Sonnet既定）
-  L2_1_MODEL:      'claude-haiku-4-5-20251001', // category validity（極小入力の分類→Haikuで十分）
+  L2_1_MODEL:      'claude-sonnet-4-6',         // category validity（分野判断にニュアンスが要る→Sonnet既定。Haikuは飲食下位分類等を誤除外しがち）
   L2_2_MODEL:      'claude-sonnet-4-6',         // target relevance（名前ニュアンス→Sonnet既定）
   L3_MODEL:        'claude-haiku-4-5-20251001', // 絞り込み提案（近傍ランドマークから目印提案→Haiku既定）
   // L2-1 strictness: カテゴリ情報が無い(null)候補を残すか。true=含める、

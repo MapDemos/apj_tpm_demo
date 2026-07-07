@@ -182,7 +182,7 @@ class LocationFinderApp {
     this._initScoringSettings();
 
     // Single "↺ すべてデフォルトに戻す" — models + scoring weights + decisiveness at once.
-    const MODEL_DEFAULTS = { L1: 'claude-haiku-4-5-20251001', L2_1: 'claude-haiku-4-5-20251001', L2_2: 'claude-sonnet-4-6', L3: 'claude-haiku-4-5-20251001' };
+    const MODEL_DEFAULTS = { L1: 'claude-haiku-4-5-20251001', L2_1: 'claude-sonnet-4-6', L2_2: 'claude-sonnet-4-6', L3: 'claude-haiku-4-5-20251001' };
     document.getElementById('settingsResetBtn')?.addEventListener('click', () => {
       this.config.L1_MODEL   = MODEL_DEFAULTS.L1;
       this.config.L2_1_MODEL = MODEL_DEFAULTS.L2_1;
