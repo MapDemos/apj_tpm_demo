@@ -836,7 +836,10 @@ class QueryEngine {
       // 固定150m内“ちょうど1候補”だと、候補が近接していると全目印が複数圏に入り全滅する。
       // 代わりに各目印を最寄り候補に割り当て、2番目の候補よりMARGIN以上近い時だけ「その候補固有」
       // として採用（＝どの候補にも同程度に近い曖昧な目印だけを捨てる）。
-      const pts = basis.slice(0, 8)
+      // 目印は「ユーザーが実際に見て選ぶ候補」を区別するためのもの。対話パネルは上位5件表示
+      // （index.js _renderCandidatePanel の LIMIT=5）なので、その5件に揃える。
+      const TOP_N = 5;
+      const pts = basis.slice(0, TOP_N)
         .map((c, i) => ({ i, name: c.name || `候補${i + 1}`, lat: c.latitude ?? c.lat, lng: c.longitude ?? c.lng }))
         .filter(p => p.lat != null && p.lng != null);
       if (pts.length < 2) return [];
