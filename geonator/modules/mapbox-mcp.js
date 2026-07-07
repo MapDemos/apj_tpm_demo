@@ -1101,7 +1101,7 @@ class MapboxMCPClient {
    * @param {number[]|null} bbox     - [minLng, minLat, maxLng, maxLat]
    * @param {number}        radius   - per-point radius in meters (default 100)
    */
-  async _gridTilequeryPOI(centerLat, centerLng, bbox, radius = 200) {
+  async _gridTilequeryPOI(centerLat, centerLng, bbox, radius = 200, holePolygon = null) {
     const bboxKey  = bbox?.map(v => Math.round(v * 10000)).join(',') ?? 'null';
     const gridKey  = `${Math.round(centerLat * 10000)},${Math.round(centerLng * 10000)},r${radius},${bboxKey}`;
     if (this._poiGridCache.has(gridKey)) {
@@ -1161,6 +1161,13 @@ class MapboxMCPClient {
       gridPoints = [[centerLng, centerLat]];
     }
 
+    // 穴（内側isochrone内）のグリッド点はskip（proximity.within=「n分以上」のドーナツ収集のコスト削減）
+    if (holePolygon) {
+      const before = gridPoints.length;
+      gridPoints = gridPoints.filter(([gLng, gLat]) => !turf.booleanPointInPolygon(turf.point([gLng, gLat]), holePolygon));
+      if (this.config.DEBUG) console.log(`[MapboxMCP] 穴skip: ${before}→${gridPoints.length}点`);
+    }
+
     if (this.config.DEBUG)
       console.log(`[MapboxMCP] グリッドTilequery: ${gridPoints.length}点 × r=${radius}m`);
 
@@ -1200,11 +1207,11 @@ class MapboxMCPClient {
    * @param {number}   radius
    * @returns {Promise<Array>} deduped poi_label items { name, longitude, latitude, distance, cls, maki }
    */
-  async buildPoiLabelGrid(bbox, radius = 65) {
+  async buildPoiLabelGrid(bbox, radius = 65, holePolygon = null) {
     if (!bbox || bbox.length < 4) return [];
     const centerLng = (bbox[0] + bbox[2]) / 2;
     const centerLat = (bbox[1] + bbox[3]) / 2;
-    return this._gridTilequeryPOI(centerLat, centerLng, bbox, radius);
+    return this._gridTilequeryPOI(centerLat, centerLng, bbox, radius, holePolygon);
   }
 
   /** Keep only items whose coordinate falls inside bbox (for partitioning a shared grid). */
@@ -2029,17 +2036,47 @@ class MapboxMCPClient {
     return { bbox: bb, polygons };
   }
 
-  /** items のうち、いずれかのポリゴン内にある点だけ残す（proximity.within=isochrone のハード足切り）。 */
-  filterInsidePolygons(items, polygons) {
-    if (!polygons?.length) return { kept: items || [], excluded: [] };
+  /** proximity.within のハード足切り。polygons のいずれかに内包 かつ hole の外、を満たす点だけ残す。
+   *  - n分以内: polygons=[iso], hole=null → iso内。
+   *  - n分以上(m分以内): polygons=null(外側はbbox), hole=内側iso → 内側isoの外（bboxが外側上限）。 */
+  filterInsidePolygons(items, polygons, hole = null) {
+    const hasPoly = !!(polygons && polygons.length);
+    if (!hasPoly && !hole) return { kept: items || [], excluded: [] };
     const kept = [], excluded = [];
     for (const it of (items || [])) {
       const lng = it.longitude ?? it.lng, lat = it.latitude ?? it.lat;
-      const inside = (lng != null && lat != null) &&
-        polygons.some(poly => turf.booleanPointInPolygon(turf.point([lng, lat]), poly));
-      (inside ? kept : excluded).push(it);
+      let ok = (lng != null && lat != null);
+      if (ok) {
+        const pt = turf.point([lng, lat]);
+        if (hasPoly) ok = polygons.some(poly => turf.booleanPointInPolygon(pt, poly));
+        if (ok && hole) ok = !turf.booleanPointInPolygon(pt, hole);
+      }
+      (ok ? kept : excluded).push(it);
     }
     return { kept, excluded };
+  }
+
+  /** within の「n分以上(m分以内)」用の探索範囲を計算。
+   *  戻り値 { bbox, hole, tooLarge }：bbox=収集範囲、hole=内側iso(この外を残す)、
+   *  tooLarge=内側isoが既定bboxを覆うほど大きい（=範囲広すぎ→既定bboxで探索）。 */
+  async computeWithinReach(point, spec, defaultBbox) {
+    const { minMinutes, maxMinutes, profile = 'walking' } = spec || {};
+    if (!point || minMinutes == null) return null;
+    const inner = await this.getIsochronePolygon(point.lat, point.lng, minMinutes, profile);
+    if (!inner) return null;
+    if (maxMinutes != null) { // ドーナツ: 外側=iso(m)のbbox、内側=iso(n)で除外
+      const outer = await this.getIsochronePolygon(point.lat, point.lng, maxMinutes, profile);
+      if (!outer) return null;
+      return { bbox: turf.bbox(outer), hole: inner, tooLarge: false };
+    }
+    // n分以上（上限なし）: 外側=内側iso外接bboxを拡張。内側isoが既定bboxを覆うなら広すぎ。
+    const ib = turf.bbox(inner);
+    const bw = defaultBbox ? Math.abs(defaultBbox[2] - defaultBbox[0]) : Infinity;
+    if (defaultBbox && Math.abs(ib[2] - ib[0]) >= bw * 0.9) {
+      return { bbox: defaultBbox, hole: null, tooLarge: true }; // 範囲広すぎ→proximity周辺
+    }
+    const cx = (ib[0] + ib[2]) / 2, cy = (ib[1] + ib[3]) / 2, f = 1.5;
+    return { bbox: [cx - (cx - ib[0]) * f, cy - (cy - ib[1]) * f, cx + (ib[2] - cx) * f, cy + (ib[3] - cy) * f], hole: inner, tooLarge: false };
   }
 
   async _filterByIsochrone(anchorLat, anchorLng, minutes, profile, candidates, direction = null, radiusMeters = null) {

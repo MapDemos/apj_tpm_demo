@@ -91,7 +91,16 @@ class QueryEngine {
       return `  展開${expanded ? '' : '(未展開)'}=[${qs.join(', ')}]`;
     };
     await this._step('step-schema', '⓪ クエリ解釈 (QuerySchema)', [
-      `proximity: ${anchors || '(なし)'}${schema.proximity?.bearing_filter ? ' 方角=' + schema.proximity.bearing_filter : ''}${(() => { const w = schema.proximity?.within; if (!w) return ''; if (w.meters != null) return `  範囲=${w.meters}m以内`; if (w.minutes != null) return `  範囲=${w.profile || 'walking'} ${w.minutes}分以内`; return ''; })()}`,
+      `proximity: ${anchors || '(なし)'}${schema.proximity?.bearing_filter ? ' 方角=' + schema.proximity.bearing_filter : ''}${(() => {
+        const w = schema.proximity?.within; if (!w) return '';
+        if (w.level) return `  範囲=${({ adjacent: '目の前', very_close: 'すぐ隣' })[w.level] || w.level}`;
+        const mn = w.minMinutes ?? null, mx = w.maxMinutes ?? w.minutes ?? null, prof = w.profile || 'walking';
+        if (mn != null && mx != null) return `  範囲=${prof} ${mn}〜${mx}分`;
+        if (mn != null) return `  範囲=${prof} ${mn}分以上`;
+        if (mx != null) return `  範囲=${prof} ${mx}分以内`;
+        const met = w.maxMeters ?? w.meters ?? null;
+        return met != null ? `  範囲=${met}m以内` : '';
+      })()}`,
       `target: ${schema.target?.text}  intent=${schema.target?.query_intent}${schema.target?.floors ? '  階数=' + JSON.stringify(schema.target.floors) : ''}${qeStr(schema.target)}`,
       ...(schema.conditions || []).map(c => {
         const d = c.distance || {};
@@ -249,9 +258,12 @@ class QueryEngine {
     // Visualize search area (target = tight, condition = wide) + fit map
     this.ui.drawBBox?.(bboxes.condBbox);
     this.ui.drawBBox?.(bboxes.targetBbox);
-    if (this._reachPolygons?.length) this.ui.drawPolygons?.(this._reachPolygons); // proximity.within 到達圏
+    // proximity.within 到達圏の可視化（n分以内=iso、n分以上=除外する内側isoを表示）
+    const reachDraw = [...(this._reachPolygons || []), ...(this._reachHole ? [this._reachHole] : [])];
+    if (reachDraw.length) this.ui.drawPolygons?.(reachDraw);
     this.ui.fitToBBox?.(bboxes.condBbox);
     this.ui.refreshCounts?.();
+    if (this._withinNote) this.ui.showMessage?.(this._withinNote); // 「範囲広すぎ→周辺で探索」通知
 
     // [STEP] proximity解決
     await this._step('step-proximity', '① 一次検索: proximity解決', [
@@ -338,7 +350,7 @@ class QueryEngine {
     // 駅の出入口展開・既定半径(400m)は作らない＝出入口tilequeryも省く。ただし出口が明示
     // された場合だけは出入口が要るので単一点化しない。
     const w = schema.proximity.within;
-    const wantSinglePoint = !!(w && (w.minutes != null || w.meters != null));
+    const wantSinglePoint = !!(w && (w.level || w.minMinutes != null || w.maxMinutes != null || w.minutes != null || w.meters != null || w.maxMeters != null));
 
     // Optional scope (broad area to locate/disambiguate a POI anchor within):
     // 「鎌倉市のコメダの前の…」→ scope=鎌倉市, anchor=コメダ.
@@ -369,33 +381,49 @@ class QueryEngine {
     //    ポリゴン内にハード足切り（徒歩n分“以内”を正確に反映）。
     //  - 距離(meters)  → 半径: アンカーの radiusM を上書きした矩形bbox（円フィルタはしない）。
     // 曖昧な「近く/付近」は within=null → 既定半径（意味が目印依存のため／設計方針）。
-    const within = schema.proximity.within;
+    // proximity.within: 基準点からの明示的な到達範囲で探索範囲を決める。
+    //  level(目の前=adjacent/すぐ隣=very_close) → 半径 / maxMinutes(n分以内) → isochrone内 /
+    //  minMinutes(+maxMinutes)(n分以上[m分以内]) → 内側isoの外(ドーナツ) / meters → 半径。
+    const within = schema.proximity.within || null;
+    const level  = within?.level ?? null;
+    const minMin = within?.minMinutes ?? null;
+    const maxMin = within?.maxMinutes ?? within?.minutes ?? null; // legacy: minutes = 以内(max)
+    const maxMet = within?.maxMeters  ?? within?.meters  ?? null; // legacy: meters  = 以内(max)
+    const prof   = within?.profile || 'walking';
+    const active = !!(within && (level || minMin != null || maxMin != null || maxMet != null));
     this._reachPolygons = null;
+    this._reachHole     = null;
     this._withinReachM  = null;
+    this._withinNote    = null;
     let bbox = null;
-    // within指定時は基準点を1点（出入口の重心）に集約。駅は複数の出入口点＋各700mを返すため、
-    // そのままだと出入口の広がりで探索範囲が「n分以内」より大きく膨らむ（＝到達圏の趣旨が崩れる）。
-    if (within && (within.minutes != null || within.meters != null) && resolvedPoints.length > 1) {
+    // within指定時は基準点を1点（出入口の重心）に集約（駅の出入口の広がりで範囲が膨らむのを防ぐ）。
+    if (active && resolvedPoints.length > 1) {
       const cLng = resolvedPoints.reduce((s, p) => s + p.lng, 0) / resolvedPoints.length;
       const cLat = resolvedPoints.reduce((s, p) => s + p.lat, 0) / resolvedPoints.length;
       resolvedPoints = [{ lng: cLng, lat: cLat }];
     }
-    // minutes があれば時間 → Isochrone（method の指定に依らず）。meters は距離 → 半径。
-    const useIso = within && within.minutes != null && within.meters == null;
-    if (useIso) {
-      const reach = await this.mcp.isochroneReach(resolvedPoints, within.minutes, within.profile || 'walking');
+    const SPEED = { walking: 80, cycling: 250, driving: 500 }; // m/min（isochrone失敗時の半径近似）
+    if (level) {
+      const rm = DISTANCE_TABLE[level]?.radius_m;
+      if (rm) { resolvedPoints.forEach(p => { p.radiusM = rm; }); this._withinReachM = rm; }
+    } else if (minMin != null) {
+      // n分以上（m分以内）: 内側isoの外を残す。外側は iso(m).bbox / 拡張bbox / 広すぎなら既定bbox。
+      const defaultBbox = this.mcp.resolveBBox({ points: resolvedPoints, marginM: 0 });
+      const reach = await this.mcp.computeWithinReach(resolvedPoints[0], { minMinutes: minMin, maxMinutes: maxMin, profile: prof }, defaultBbox);
+      if (reach?.bbox) {
+        bbox = reach.bbox; this._reachHole = reach.hole;
+        if (reach.tooLarge) this._withinNote = this._m().reachTooLarge(minMin, prof, schema.proximity.anchors?.[0]?.text || '');
+      }
+    } else if (maxMin != null) {
+      // n分以内: isochrone内に絞る
+      const reach = await this.mcp.isochroneReach(resolvedPoints, maxMin, prof);
       if (reach.bbox) { bbox = reach.bbox; this._reachPolygons = reach.polygons; }
-    }
-    if (!bbox && within && (within.meters != null || within.minutes != null)) {
-      // 距離指定、または isochrone 取得不可時のフォールバック（minutes×速度の半径近似）。
-      const SPEED = { walking: 80, cycling: 250, driving: 500 }; // m/min
-      const reachM = within.meters != null
-        ? within.meters
-        : within.minutes * (SPEED[within.profile] || SPEED.walking);
-      if (reachM > 0) { resolvedPoints.forEach(p => { p.radiusM = reachM; }); this._withinReachM = Math.round(reachM); }
+      else { const rm = maxMin * (SPEED[prof] || SPEED.walking); resolvedPoints.forEach(p => { p.radiusM = rm; }); this._withinReachM = Math.round(rm); }
+    } else if (maxMet != null) {
+      resolvedPoints.forEach(p => { p.radiusM = maxMet; }); this._withinReachM = maxMet;
     }
 
-    // [AA] compute base bbox from all resolved points (unless isochrone already set it)
+    // [AA] compute base bbox from all resolved points (unless within already set it)
     if (!bbox) bbox = this.mcp.resolveBBox({ points: resolvedPoints, marginM: 0 });
 
     // Upper-limit check (EE/§6-3): the dense building grid is infeasible over a
@@ -1086,7 +1114,8 @@ class QueryEngine {
     const targetIsBuilding = ['category_mansion', 'category_apartment', 'category_building']
       .includes(target?.query_intent);
     const useGrid = targetIsBuilding || this.mcp._bboxToRadius(condBbox) <= 1500;
-    const sharedGrid = useGrid ? await this.mcp.buildPoiLabelGrid(condBbox, 65) : null;
+    // proximity.within の穴（内側isochrone内）はグリッド点をskip（「n分以上」ドーナツのTQ削減）
+    const sharedGrid = useGrid ? await this.mcp.buildPoiLabelGrid(condBbox, 65, this._reachHole || null) : null;
 
     // Target collection (partition shared grid to the tight target bbox)
     let mainRaw = await this.mcp.collectTarget(target, targetBbox, sharedGrid);
@@ -1097,8 +1126,8 @@ class QueryEngine {
     // reachRaw: 到達圏内に絞ったあとの生件数。過密(overflow)判定はこの数で行う（膨らんだ
     // bbox全体の生件数ではなく、実際に到達圏内にある候補数で判断させる）。
     let reachRaw = null;
-    if (this._reachPolygons?.length) {
-      const { kept, excluded } = this.mcp.filterInsidePolygons(mainRaw, this._reachPolygons);
+    if (this._reachPolygons?.length || this._reachHole) {
+      const { kept, excluded } = this.mcp.filterInsidePolygons(mainRaw, this._reachPolygons, this._reachHole);
       excluded.forEach(c => this._dbgReport.excludedByHardFilter.push({
         name: c.name || '(名前なし)', reason: `到達圏（proximity.within）外のため除外`,
       }));
@@ -1874,6 +1903,7 @@ const MESSAGES = {
     resultMany:     hc => `${hc ? '条件に合う候補' : '候補'}が多数見つかりました。上位5件を表示します。`,
     resultNoExact:  n => `条件に完全一致する候補はありませんでした。近い候補を${n}件表示します。`,
     resultNone:     hc => hc ? '条件に合う候補を見つけられませんでした。' : '候補が見つかりませんでした。',
+    reachTooLarge:  (min, prof, anchor) => `${({ walking: '徒歩', cycling: '自転車', driving: '車' })[prof] || '徒歩'}${min}分以上は範囲が広すぎるため、${anchor || 'この地点'}の周辺で探します。`,
   },
   en: {
     searching:            'Searching for candidates…',
@@ -1902,5 +1932,6 @@ const MESSAGES = {
     resultMany:     hc => `Found many ${hc ? 'matching candidates' : 'candidates'}. Showing the top 5.`,
     resultNoExact:  n => `No exact match; showing ${n} close candidate(s).`,
     resultNone:     hc => hc ? 'No matching candidates found.' : 'No candidates found.',
+    reachTooLarge:  (min, prof, anchor) => `${min}+ min by ${prof || 'walking'} covers too wide an area; searching around ${anchor || 'this point'} instead.`,
   },
 };

@@ -115,13 +115,17 @@ scopeは**proximityアンカー（施設）が、どの行政区域/エリアの
 - なければ null
 
 ### proximity.within（任意・基準点からの明示的な到達範囲）
-基準点(proximity)からの**具体的な距離・時間**が指定された時だけ設定する。探索範囲(bbox)をこの範囲で引く。
-- 形式: { "method": "radius|isochrone", "profile": "walking|cycling|driving|null", "minutes": 数値|null, "meters": 数値|null }
-- 例: 「武蔵小杉駅から徒歩5分以内の…」→ within={ method:"isochrone", profile:"walking", minutes:5, meters:null }
-- 例: 「渋谷駅から500m以内の…」→ within={ method:"radius", profile:null, minutes:null, meters:500 }
-- 例: 「駅から車で10分の…」→ within={ method:"isochrone", profile:"driving", minutes:10, meters:null }
-- **設定しない（null）ケース**: 「近く」「付近」「周辺」「そば」「すぐ」等の**曖昧な近接語**（具体的な距離・時間が無い）。これらは目印によって意味が変わるため既定の範囲で探索する。
-- 注意: これは**基準点そのものからの到達範囲**。「○○から徒歩5分の△△の近くの□□」のように、距離が別の目印(condition)に掛かる場合はそちらの condition.distance に入れる（within ではない）。
+基準点(proximity)からの**具体的な距離・時間・近接度**が指定された時だけ設定する。探索範囲をこれで絞る。
+- 形式: { "profile": "walking|cycling|driving|null", "minMinutes": 数値|null, "maxMinutes": 数値|null, "maxMeters": 数値|null, "level": "adjacent|very_close|null" }
+- **時間（isochrone）**（profile必須。徒歩=walking / 自転車=cycling / 車=driving）:
+  - 「〜から徒歩5分**以内**」→ { profile:"walking", maxMinutes:5 }
+  - 「〜から徒歩10分**以上**」→ { profile:"walking", minMinutes:10 }
+  - 「〜から徒歩5分**以上**10分**以内**」→ { profile:"walking", minMinutes:5, maxMinutes:10 }
+  - 「〜から車で10分以内」→ { profile:"driving", maxMinutes:10 }
+- **距離**: 「〜から500m以内」→ { maxMeters:500 }（profile:null）
+- **近接度(level)**: 「〜の**目の前**の/**すぐ隣**の」→ { level:"adjacent" }（目の前・真ん前・真横）/ { level:"very_close" }（すぐ隣・すぐそば・ほぼ隣接）
+- **設定しない（null）ケース**: 「近く」「付近」「周辺」「そば」「すぐ近く」等の**曖昧な近接語**（具体的な距離・時間・目の前/隣の明示が無い）。目印によって意味が変わるため既定の範囲で探索する。
+- 注意: これは**基準点そのものからの到達範囲**。「○○から徒歩5分の△△の近くの□□」のように距離が別の目印(condition)に掛かる場合は、そちらの condition.distance に入れる（within ではない）。
 
 ### target（必須・1つ）
 探しているもの。必ず1つ。
