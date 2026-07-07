@@ -70,8 +70,9 @@ class LocationFinderApp {
       this.mapboxMCP = new MapboxMCPClient(this.config, this);
       await this.mapboxMCP.initialize();
 
-      // 2. Init Mapbox GL JS map
-      await this._initMap();
+      // 2. Init Mapbox GL JS map — 地図ONの時だけ生成（OFF起動ならWebGL/タイルを立ち上げない）
+      this._mapOff = this._readMapOffPref();
+      if (!this._mapOff) await this._ensureMap();
 
       // 3. Wire up UI event listeners
       this._setupEventListeners();
@@ -217,7 +218,23 @@ class LocationFinderApp {
     this._updateModelBadge();
   }
 
-  /** 地図表示ON/OFF。OFFで .map-off を付け対話パネルを中央表示。ON復帰時は地図をresize。 */
+  /** localStorage から地図OFF設定を読む（初期化で地図生成の要否判断に使う）。 */
+  _readMapOffPref() {
+    try { return !!(JSON.parse(localStorage.getItem('geonator_ui') || '{}').mapOff); }
+    catch (_) { return false; }
+  }
+
+  /** 地図が「有効（ON かつ生成済み）」か。描画系はこれが真の時だけ実行する。 */
+  _mapActive() { return !this._mapOff && !!this.map; }
+
+  /** トグル。ONにする時はここで地図生成を保証（遅延生成）。 */
+  async _toggleMap() {
+    const off = !this._mapOff;
+    this._setMapOff(off);              // 先にDOM反映（パネル表示→コンテナ幅を確定させてから生成）
+    if (!off) await this._ensureMap(); // OFF→ON: 未生成なら生成（初回もサイズ確定済みで生成）
+  }
+
+  /** 地図表示ON/OFFのDOM反映。OFFで .map-off を付け対話パネルを中央表示。ON復帰時は resize。 */
   _setMapOff(off) {
     this._mapOff = !!off;
     document.querySelector('.app-container')?.classList.toggle('map-off', this._mapOff);
@@ -391,18 +408,20 @@ class LocationFinderApp {
         });
       },
       clearResults() {
+        if (!self._mapActive()) return; // 地図OFF: 消すべき地図要素が無い
         self.clearMapElements();
         self._clearDebugLayers();
         self._removeProbableArea?.();
         if (self.finalMarker) { self.finalMarker.remove(); self.finalMarker = null; }
       },
-      showProbableArea(candidates, message) { self.showProbableArea(candidates, message); },
+      showProbableArea(candidates, message) { if (!self._mapActive()) return; self.showProbableArea(candidates, message); },
 
       // ── Visualization / telemetry callbacks (always on, not debug-gated) ──
       refreshCounts() {
         self._updateAPICountDisplay();
       },
       drawProximityPoints(points) {
+        if (!self._mapActive()) return; // 地図OFF: 描画スキップ
         // proximityアンカー（基準点）の地図表示は無効化（分かりづらいとの指摘）。
         // 検索エリアは drawBBox(targetBbox/condBbox) で引き続き表示する。
         // アンカー由来の bbox だけは範囲把握に有用なので残す。
@@ -411,9 +430,11 @@ class LocationFinderApp {
         });
       },
       drawBBox(bbox) {
+        if (!self._mapActive()) return; // 地図OFF: 描画スキップ
         if (bbox) self._dbgAddBbox(bbox);
       },
       drawHits(items) {
+        if (!self._mapActive()) return; // 地図OFF: 描画スキップ
         self._condLegend = []; // reset per run (target drawn first, conditions appended)
         (items || []).forEach(it => {
           const lng = it.longitude ?? it.lng;
@@ -425,6 +446,7 @@ class LocationFinderApp {
         self._rebuildLegend();
       },
       drawConditionHits(items, ci = 0, label = '') {
+        if (!self._mapActive()) return; // 地図OFF: 描画スキップ
         (items || []).forEach(it => {
           const lng = it.longitude ?? it.lng;
           const lat = it.latitude  ?? it.lat;
@@ -437,7 +459,7 @@ class LocationFinderApp {
         self._rebuildLegend();
       },
       drawPolygons(features) {
-        if (!self._dbg || !features?.length) return;
+        if (!self._mapActive() || !self._dbg || !features?.length) return;
         // Cap to keep the map readable / performant
         const capped = features.slice(0, 200);
         capped.forEach(f => { if (f?.geometry) self._dbg.evalPolys.features.push(f); });
@@ -445,7 +467,7 @@ class LocationFinderApp {
         document.getElementById('mapLegend').style.display = 'block';
       },
       fitToBBox(bbox) {
-        if (!bbox) return;
+        if (!self._mapActive() || !bbox) return; // 地図OFF: スキップ
         try {
           self.map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 80, duration: 900, maxZoom: 16 });
         } catch(_) {}
@@ -718,7 +740,8 @@ class LocationFinderApp {
   // Map init
   // ─────────────────────────────────────────────────────────────
 
-  async _initMap() {
+  async _ensureMap() {
+    if (this.map) return; // 生成済み（遅延生成・冪等）
     mapboxgl.accessToken = this.config.MAPBOX_ACCESS_TOKEN;
 
     this.map = new mapboxgl.Map({
@@ -797,11 +820,8 @@ class LocationFinderApp {
     });
 
     // 地図表示 ON/OFF（OFFで対話パネルを中央表示＝スマホ風）。設定は localStorage に永続化。
-    document.getElementById('mapToggleBtn')?.addEventListener('click', () => this._setMapOff(!this._mapOff));
-    try {
-      const ui = JSON.parse(localStorage.getItem('geonator_ui') || '{}');
-      this._setMapOff(!!ui.mapOff);
-    } catch (_) { this._setMapOff(false); }
+    document.getElementById('mapToggleBtn')?.addEventListener('click', () => this._toggleMap());
+    this._setMapOff(this._mapOff); // 起動時のDOM反映（bool は initialize() で確定済み）
 
     // Example chips
     document.querySelectorAll('.example-chip').forEach(btn => {
@@ -901,6 +921,7 @@ class LocationFinderApp {
    * none = no condition matched (shown only when nothing else matched)
    */
   _renderTierMarkers(candidates) {
+    if (!this._mapActive()) return; // 地図OFF: マーカー/flyTo はスキップ（候補パネルは別途表示される）
     this.candidateMarkers.forEach(m => m.remove());
     this.candidateMarkers = [];
     if (!candidates || candidates.length === 0) return;
@@ -1113,7 +1134,7 @@ class LocationFinderApp {
 
   /** Fly to a candidate and open its map popup. */
   _focusCandidate(id, lng, lat) {
-    if (lng == null || lat == null) return;
+    if (!this._mapActive() || lng == null || lat == null) return; // 地図OFF: 何もしない
     this.map.flyTo({ center: [lng, lat], zoom: 16, duration: 800, essential: true });
     const marker = (this.candidateMarkers || []).find(m => m._candId === id);
     if (marker && !marker.getPopup().isOpen()) marker.togglePopup();
@@ -2322,7 +2343,7 @@ class LocationFinderApp {
   async processUserMessage(userText) {
     this._resetFlowState();
     this._lastQuery = userText; // captured for ground-truth feedback rows
-    this.map.flyTo({ zoom: 10, duration: 900, essential: true });
+    if (this._mapActive()) this.map.flyTo({ zoom: 10, duration: 900, essential: true }); // 地図OFF時はスキップ
     await this.queryEngine.run(userText);
   }
 
