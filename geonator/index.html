@@ -34,7 +34,7 @@
       <span class="api-counter" id="api-counter-tq" title="Tilequery APIリクエスト回数">TQ:0</span>
       <span class="api-counter" id="api-counter-iso" title="Isochrone APIリクエスト回数">ISO:0</span>
       <span class="token-display" id="token-display" title="累計トークン（↑入力 ↓出力）">-</span>
-      <button id="settingsBtn" class="control-btn" title="モデル設定">⚙️ 設定</button>
+      <button id="settingsBtn" class="control-btn" title="Settings / 設定">⚙️ 設定</button>
       <button id="mapToggleBtn" class="control-btn" title="地図表示のON/OFF（OFFで対話パネルを中央表示）">🗺 地図表示OFF</button>
       <button id="debugToggleBtn" class="control-btn debug-toggle-btn" title="各ツール実行後に一時停止してステップ確認できます">🔍 デバッグ OFF</button>
       <button id="clearChatBtn" class="control-btn">チャットをクリア</button>
@@ -67,7 +67,15 @@
       <!-- ① モデル -->
       <div class="settings-subtitle" id="set-model-title">モデル</div>
       <label class="settings-row">
-        <span id="set-l1-label">L1（クエリ解析）</span>
+        <span id="set-l1c-label">L1-1（確認文の先出し）</span>
+        <select id="l1ConfirmModelSelect">
+          <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+        </select>
+      </label>
+      <div class="settings-modelwhy" id="set-l1c-why">ユーザーの依頼を一文で復唱して確認するだけの軽量処理。解析(L1-2)と並行して真っ先に出すので、速さ優先で Haiku 推奨。</div>
+      <label class="settings-row">
+        <span id="set-l1-label">L1-2（クエリ解析）</span>
         <select id="l1ModelSelect">
           <option value="claude-sonnet-4-6">Sonnet 4.6</option>
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>

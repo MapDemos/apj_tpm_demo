@@ -104,7 +104,8 @@ class LocationFinderApp {
     // target-relevance model, so it maps to L2_2; L2_1 defaults to Haiku).
     try {
       const saved = JSON.parse(localStorage.getItem('geonator_models') || '{}');
-      if (saved.L1)   this.config.L1_MODEL   = saved.L1;
+      if (saved.L1)   this.config.L1_MODEL   = saved.L1;   // L1-2（クエリ解析）
+      if (saved.L1c)  this.config.L1_CONFIRM_MODEL = saved.L1c; // L1-1（確認文の先出し）
       if (saved.L2_1) this.config.L2_1_MODEL = saved.L2_1;
       if (saved.L2_2) this.config.L2_2_MODEL = saved.L2_2;
       else if (saved.L2) this.config.L2_2_MODEL = saved.L2; // legacy key
@@ -128,6 +129,7 @@ class LocationFinderApp {
     } catch (_) {}
 
     const l1Sel  = document.getElementById('l1ModelSelect');
+    const l1cSel = document.getElementById('l1ConfirmModelSelect');
     const l21Sel = document.getElementById('l2_1ModelSelect');
     const l22Sel = document.getElementById('l2_2ModelSelect');
     const l3Sel  = document.getElementById('l3ModelSelect');
@@ -137,6 +139,7 @@ class LocationFinderApp {
     const flModeSel  = document.getElementById('floorsModeSelect');
     const modal  = document.getElementById('settingsModal');
     if (l1Sel)  l1Sel.value  = this.config.L1_MODEL;
+    if (l1cSel) l1cSel.value = this.config.L1_CONFIRM_MODEL;
     if (l21Sel) l21Sel.value = this.config.L2_1_MODEL;
     if (l22Sel) l22Sel.value = this.config.L2_2_MODEL;
     if (l3Sel)  l3Sel.value  = this.config.L3_MODEL;
@@ -149,7 +152,8 @@ class LocationFinderApp {
     const persist = () => {
       try {
         localStorage.setItem('geonator_models', JSON.stringify({
-          L1: this.config.L1_MODEL, L2_1: this.config.L2_1_MODEL, L2_2: this.config.L2_2_MODEL, L3: this.config.L3_MODEL,
+          L1: this.config.L1_MODEL, L1c: this.config.L1_CONFIRM_MODEL,
+          L2_1: this.config.L2_1_MODEL, L2_2: this.config.L2_2_MODEL, L3: this.config.L3_MODEL,
         }));
       } catch (_) {}
       this._updateModelBadge();
@@ -164,6 +168,7 @@ class LocationFinderApp {
       try { localStorage.setItem('geonator_judge', JSON.stringify({ sameBuilding: this.config.SAME_BUILDING_MODE, floors: this.config.FLOORS_MODE })); } catch (_) {}
     };
     l1Sel?.addEventListener('change',  e => { this.config.L1_MODEL   = e.target.value; persist(); });
+    l1cSel?.addEventListener('change', e => { this.config.L1_CONFIRM_MODEL = e.target.value; persist(); });
     l21Sel?.addEventListener('change', e => { this.config.L2_1_MODEL = e.target.value; persist(); });
     l22Sel?.addEventListener('change', e => { this.config.L2_2_MODEL = e.target.value; persist(); });
     l3Sel?.addEventListener('change',  e => { this.config.L3_MODEL   = e.target.value; persist(); });
@@ -184,9 +189,10 @@ class LocationFinderApp {
     this._initScoringSettings();
 
     // Single "↺ すべてデフォルトに戻す" — models + scoring weights + decisiveness at once.
-    const MODEL_DEFAULTS = { L1: 'claude-sonnet-4-6', L2_1: 'claude-sonnet-4-6', L2_2: 'claude-sonnet-4-6', L3: 'claude-haiku-4-5-20251001' };
+    const MODEL_DEFAULTS = { L1: 'claude-sonnet-4-6', L1c: 'claude-haiku-4-5-20251001', L2_1: 'claude-sonnet-4-6', L2_2: 'claude-sonnet-4-6', L3: 'claude-haiku-4-5-20251001' };
     document.getElementById('settingsResetBtn')?.addEventListener('click', () => {
       this.config.L1_MODEL   = MODEL_DEFAULTS.L1;
+      this.config.L1_CONFIRM_MODEL = MODEL_DEFAULTS.L1c;
       this.config.L2_1_MODEL = MODEL_DEFAULTS.L2_1;
       this.config.L2_2_MODEL = MODEL_DEFAULTS.L2_2;
       this.config.L3_MODEL   = MODEL_DEFAULTS.L3;
@@ -195,6 +201,7 @@ class LocationFinderApp {
       this.config.SAME_BUILDING_MODE = 'hard';     // default: hard filter
       this.config.FLOORS_MODE        = 'hard';     // default: hard filter
       if (l1Sel)  l1Sel.value  = MODEL_DEFAULTS.L1;
+      if (l1cSel) l1cSel.value = MODEL_DEFAULTS.L1c;
       if (l21Sel) l21Sel.value = MODEL_DEFAULTS.L2_1;
       if (l22Sel) l22Sel.value = MODEL_DEFAULTS.L2_2;
       if (l3Sel)  l3Sel.value  = MODEL_DEFAULTS.L3;
@@ -290,7 +297,8 @@ class LocationFinderApp {
     const suffix = this._lang === 'en' ? ' (Recommended)' : '（推奨）';
     // MODEL_DEFAULTS と一致させること（役割ごとの既定＝推奨）
     const rec = {
-      l1ModelSelect:   'claude-sonnet-4-6',
+      l1ConfirmModelSelect: 'claude-haiku-4-5-20251001', // L1-1 確認文=速さ優先
+      l1ModelSelect:   'claude-sonnet-4-6',              // L1-2 解析=推論重視
       l2_1ModelSelect: 'claude-sonnet-4-6',
       l2_2ModelSelect: 'claude-sonnet-4-6',
       l3ModelSelect:   'claude-haiku-4-5-20251001',
@@ -3237,10 +3245,12 @@ class LocationFinderApp {
       setText('set-lang-title', st.langTitle);
       setText('set-lang-row', st.langRow);
       setText('set-model-title', st.modelTitle);
+      setText('set-l1c-label', st.l1confirm);
       setText('set-l1-label', st.l1);
       setText('set-l2_1-label', st.l2_1);
       setText('set-l2_2-label', st.l2_2);
       setText('set-l3-label', st.l3);
+      setText('set-l1c-why', st.l1cWhy);
       setText('set-l1-why', st.l1Why);
       setText('set-l2_1-why', st.l2_1Why);
       setText('set-l2_2-why', st.l2_2Why);
@@ -3272,6 +3282,7 @@ class LocationFinderApp {
       setText('set-judge-note', st.judgeNote);
       setText('settingsResetBtn', st.resetBtn);
       setText('settingsCloseBtn', st.closeBtn);
+      setText('settingsBtn', st.settingsBtn); // ヘッダーの設定ボタン（英語/日本語）
     }
     this._markRecommendedModels?.(); // 「（推奨）」/「(Recommended)」を現在の言語で付け直す
 
@@ -3497,10 +3508,13 @@ const LANG = {
       langTitle:   '言語 / Language',
       langRow:     '表示言語',
       modelTitle:  'モデル',
-      l1:          'L1（クエリ解析）',
+      settingsBtn: '⚙️ 設定',
+      l1confirm:   'L1-1（確認文の先出し）',
+      l1:          'L1-2（クエリ解析）',
       l2_1:        'L2-1（通常クエリの関連性・カテゴリ）',
       l2_2:        'L2-2（Targetの関連性）',
       l3:          'L3（絞り込みの目印提案）',
+      l1cWhy:      'ユーザーの依頼を一文で復唱して確認するだけの軽量処理。解析(L1-2)と並行して真っ先に出すので、速さ優先で Haiku 推奨。',
       l1Why:       '自然文→構造化スキーマの最重要工程。目印(proximity)と対象(target)の切り分け、「AとBの間」等の解釈に推論力が要る → Sonnet推奨。',
       l2_1Why:     'カテゴリの分野判断（ラーメン屋＝「レストラン>和食」を残す等）にニュアンスが要る → Sonnet推奨。',
       l2_2Why:     '店名の機微から意図一致を4段階判定（definitely/probably/…） → Sonnet推奨。',
@@ -3601,10 +3615,13 @@ const LANG = {
       langTitle:   'Language / 言語',
       langRow:     'Display language',
       modelTitle:  'Models',
-      l1:          'L1 (query parsing)',
+      settingsBtn: '⚙️ Settings',
+      l1confirm:   'L1-1 (early confirmation)',
+      l1:          'L1-2 (query parsing)',
       l2_1:        'L2-1 (general-query relevance · category)',
       l2_2:        'L2-2 (target relevance)',
       l3:          'L3 (refinement landmark suggestions)',
+      l1cWhy:      'Just restates the user request in one line, in parallel with parsing (L1-2), shown first — so speed matters. Haiku recommended.',
       l1Why:       'The heaviest reasoning step: free text → structured schema (proximity vs target, "between A and B", etc.). Sonnet recommended.',
       l2_1Why:     'Judging category domains needs nuance (keep "restaurant>Japanese" for a ramen shop). Sonnet recommended.',
       l2_2Why:     'Rates intent match from subtle name cues (4 levels: definitely/probably/…). Sonnet recommended.',
