@@ -1322,6 +1322,11 @@ class QueryEngine {
 
     if (action !== 'narrow' && action !== 'research') return;
 
+    // Reset telemetry for this refine cycle BEFORE computing suggestions, so the L3
+    // suggestion call is counted (otherwise the reset would wipe its stats).
+    this.llm.resetStats?.();
+    this._runStart = Date.now();
+
     // [L3] Agent suggestions (narrow only): differentiating landmarks near the top-tier
     // candidates, offered as buttons alongside free input. Each carries its resolved
     // poi_label items so choosing one never re-queries.
@@ -1329,8 +1334,6 @@ class QueryEngine {
 
     const hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
     if (!hint) return;
-    this.llm.resetStats?.();
-    this._runStart = Date.now();
 
     // Chosen agent suggestion → use the KNOWN poi items directly (no parse, no re-query).
     if (hint && typeof hint === 'object' && hint.landmark) {
