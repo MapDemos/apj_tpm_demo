@@ -883,9 +883,6 @@ class LocationFinderApp {
       }
     });
 
-    // 処理中のキャンセル（赤ボタン）
-    document.getElementById('cancelBtn')?.addEventListener('click', () => this._cancelQuery());
-
     // 地図表示 ON/OFF（OFFで対話パネルを中央表示＝スマホ風）。設定は localStorage に永続化。
     document.getElementById('mapToggleBtn')?.addEventListener('click', () => this._toggleMap());
     this._setMapOff(this._mapOff); // 起動時のDOM反映（bool は initialize() で確定済み）
@@ -942,9 +939,23 @@ class LocationFinderApp {
     }
   }
 
-  /** キャンセルボタンの表示/非表示（処理中のみ赤いキャンセルを出す）。 */
-  _showCancelBtn() { const b = document.getElementById('cancelBtn'); if (b) b.style.display = ''; }
-  _hideCancelBtn() { const b = document.getElementById('cancelBtn'); if (b) b.style.display = 'none'; }
+  /** 処理中のみ、チャット内にユーザー吹き出し（右寄せ・赤）としてキャンセルボタンを出す。 */
+  _showCancelBtn() {
+    this._hideCancelBtn();
+    const container = document.getElementById('chatMessages');
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'message user cancel-row';
+    row.id = 'cancelRow';
+    const btn = document.createElement('button');
+    btn.className = 'btn-cancel';
+    btn.textContent = LANG[this._lang].cancelBtn;
+    btn.onclick = () => this._cancelQuery();
+    row.appendChild(btn);
+    container.appendChild(row);
+    container.scrollTop = container.scrollHeight;
+  }
+  _hideCancelBtn() { document.getElementById('cancelRow')?.remove(); }
 
   /** ソフトキャンセル：以降の新規API発行を止め(mcpが_cancelledを見る)、UIを即復帰、結果描画を抑止。 */
   _cancelQuery() {
@@ -3300,10 +3311,7 @@ class LocationFinderApp {
     // Map toggle button (respect current state)
     const mapBtn = document.getElementById('mapToggleBtn');
     if (mapBtn) mapBtn.textContent = this._mapOff ? t.mapShow : t.mapHide;
-
-    // Cancel button label
-    const cxlBtn = document.getElementById('cancelBtn');
-    if (cxlBtn) cxlBtn.textContent = t.cancelBtn;
+    // （キャンセルボタンは処理中に動的生成する吹き出しなのでここでは扱わない）
 
     // Examples label
     const exLabel = document.getElementById('examples-label');
@@ -3564,7 +3572,7 @@ const LANG = {
     connecting:       'Claude APIに接続中…',
     pausedHint:       '⏸ 追加情報を待っています...',
     retryBtn:         '🔄 やり直す',
-    cancelBtn:        '✕ キャンセル',
+    cancelBtn:        'キャンセルする',
     cancelled:        'キャンセルしました。',
     errGeneric:       'エラーが発生しました。もう一度お試しください。',
     errNetwork:       '通信エラーが発生しました。ネットワークを確認してもう一度お試しください。',
@@ -3685,7 +3693,7 @@ const LANG = {
     connecting:       'Connecting to Claude…',
     pausedHint:       '⏸ Waiting for your input…',
     retryBtn:         '🔄 Retry',
-    cancelBtn:        '✕ Cancel',
+    cancelBtn:        'Cancel',
     cancelled:        'Cancelled.',
     errGeneric:       'Something went wrong. Please try again.',
     errNetwork:       'Network error. Check your connection and try again.',
