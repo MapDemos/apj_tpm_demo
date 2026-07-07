@@ -90,6 +90,7 @@ class QueryEngine {
         const qe = c.type === 'poi' ? qeStr(c) : '';
         return `condition: ${c.text ?? c.type} [${c.type}] 距離=${d.level ?? '-'}/${d.method ?? '-'}${d.minutes ? ' ' + d.minutes + '分' : ''}${qe}`;
       }),
+      `result_area: ${schema.result_area ? 'true（概略エリア描画）' : 'false（候補ランク表示）'}`,
     ]);
 
     await this._executeSearch(schema, merged);
@@ -133,6 +134,7 @@ class QueryEngine {
     // Fallback: L1 sometimes drops the structured target.floors, or mis-classifies a
     // building-height container ("タワマンの中の…") as a literal POI condition. Recover both.
     this._applyFloorsInference(schema, userText);
+    this._guardResultArea(schema, userText);
 
     // [A] structural checks
     const issues = structuralChecks(schema);
@@ -190,6 +192,7 @@ class QueryEngine {
       fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
       // Same floors recovery as _parseAndValidate across clarify/refine re-parses.
       this._applyFloorsInference(schema, combined);
+      this._guardResultArea(schema, combined);
       return schema;
     } catch {
       this.ui.showMessage(this._m().error_communication);
@@ -924,6 +927,15 @@ class QueryEngine {
       const f = this._inferFloors(text);
       if (f) schema.target.floors = f;
     }
+  }
+
+  // result_area は L1(Haiku) が「〜の間」「〜周辺」等の proximity 表現に引きずられて
+  // 誤って true にしがち（具体targetを探す通常依頼なのにエリア面を描画してしまう）。
+  // クエリ文に明確な「エリアを知りたい」語が無ければ false に矯正する（証拠ベースの保険）。
+  _guardResultArea(schema, text) {
+    if (!schema?.result_area) return;
+    const areaIntent = /(あたり|辺り|どの辺|どのへん|どこら|どこら辺|界隈|一帯|多いエリア|どんなエリア|どんな街|どんなところ|エリアを教|エリアはどこ|周辺のどこ)/;
+    if (!areaIntent.test(text || '')) schema.result_area = false;
   }
 
   // ─────────────────────────────────────────────
