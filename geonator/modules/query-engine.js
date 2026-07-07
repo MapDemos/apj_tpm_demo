@@ -30,7 +30,8 @@ class QueryEngine {
     this._clarifyCount = 0;
     this._previousText = null;    // for L1 re-parse
     this._awaitingClarify = false; // last run ended asking for more info (main-input answer merges)
-    this._ratingCache = new Map(); // L2 relevance cache: "intent||name" → definitely|probably|unknown|no (session stability)
+    this._ratingCache = new Map(); // L2-2 relevance cache: "intent||name" → definitely|probably|unknown|no (session stability)
+    this._catCache    = new Map(); // L2-1 category cache: "intent||sortedCats" → { remove_poi_category:Set, remove_class:Set }
   }
 
   /** Localized message bundle for the current UI language. */
@@ -55,7 +56,7 @@ class QueryEngine {
     this._previousText = merged;
     this._awaitingClarify = false;
     this._clarifyCount = 0;
-    this._dbgReport = { schema: null, proximity: null, target: null, conditions: [], evaluation: null, excludedByHardFilter: [] };
+    this._dbgReport = { schema: null, proximity: null, target: null, conditions: [], categoryFilter: [], evaluation: null, excludedByHardFilter: [] };
     this.llm.resetStats?.();
     this._runStart = Date.now();
     this.ui.clearResults();
@@ -662,7 +663,13 @@ class QueryEngine {
       }));
     }
 
-    // [3-B1] L2 relevance rating: remove 'no', tag kept as definitely/probably/unknown
+    // [3-B0] L2-1 category validity filter (通常クエリ collections only): drop candidates
+    // whose poi_category/class is clearly different from the intent. Runs BEFORE the
+    // reach-polygon build (conditions) and BEFORE L2-2 (target) so noise (e.g. コンビニ
+    // named "セブンイレブン天神中央公園") never pollutes downstream geometry/scoring.
+    mainRaw = await this._applyCategoryFilter(schema, mainRaw, condResults);
+
+    // [3-B1] L2-2 relevance rating: remove 'no', tag kept as definitely/probably/unknown
     const { kept, excludedNames } = await this._rateMain(target, mainRaw);
 
     // Debug: target + condition collection breakdown
@@ -687,6 +694,96 @@ class QueryEngine {
     this._dbgReport.conditions = condDebug;
 
     return { main: kept, conditions: condResults };
+  }
+
+  /**
+   * L2-1 category validity filter. Applies to 通常クエリ collections only:
+   *   - target when query_intent === 'specific' (general_poi search via Search Box)
+   *   - conditions of type 'poi'
+   * For each such group: dedupe candidate poi_category(SB)/class(TQ), ask the LLM which
+   * categories are clearly-wrong (remove-set), then drop matching candidates.
+   * Soft: candidates with no category are kept; a removal that would empty a group is skipped.
+   * Mutates condResults[key] in place; returns the (possibly filtered) target list.
+   */
+  async _applyCategoryFilter(schema, mainRaw, condResults) {
+    const target = schema.target;
+    const TARGET_KEY = '__target__';
+    const groups = [];
+
+    // target group (general_poi search only)
+    if (target && target.query_intent === 'specific' && mainRaw?.length) {
+      groups.push(this._buildCatGroup(TARGET_KEY, target.text || this._buildIntentLabel(target), mainRaw));
+    }
+    // poi condition groups
+    for (const c of (schema.conditions || [])) {
+      if (c.type !== 'poi') continue;
+      const key   = c.text ?? c.type;
+      const items = condResults[key];
+      if (items?.length) groups.push(this._buildCatGroup(key, c.text || key, items));
+    }
+
+    // only groups that actually carry a category vocabulary can be judged
+    const judgeable = groups.filter(g => g.poi_category.length || g.class.length);
+    if (judgeable.length === 0) return mainRaw;
+
+    const cacheKeyOf = g => `${g.intent}||${[...g.poi_category].sort().join(',')}||${[...g.class].sort().join(',')}`;
+
+    // send only un-cached groups to the LLM (one batched call). Use simple ASCII keys
+    // (g0,g1,…) for the LLM payload so it doesn't have to echo Japanese keys back.
+    const uncached = judgeable.filter(g => !this._catCache.has(cacheKeyOf(g)));
+    if (uncached.length) {
+      const res = await this.llm.filterCategories(uncached.map((g, i) => ({
+        key: `g${i}`, intent: g.intent, poi_category: g.poi_category, class: g.class,
+      })));
+      if (res) {
+        uncached.forEach((g, i) => {
+          if (res[`g${i}`]) this._catCache.set(cacheKeyOf(g), res[`g${i}`]);
+        });
+      }
+    }
+
+    // apply removals (soft + never-empty)
+    const dbg = [];
+    let outMain = mainRaw;
+    for (const g of judgeable) {
+      const removeSet = this._catCache.get(cacheKeyOf(g));
+      if (!removeSet) continue; // uncached (LLM failed) → keep all
+      const { remove_poi_category, remove_class } = removeSet;
+      if (!remove_poi_category.size && !remove_class.size) continue;
+      const survivors = g.items.filter(it => !this._catMatchesRemove(it, remove_poi_category, remove_class));
+      const after = survivors.length ? survivors : g.items; // never-empty guard
+      dbg.push({
+        label:       g.key === TARGET_KEY ? 'target' : g.key,
+        removePoi:   [...remove_poi_category],
+        removeClass: [...remove_class],
+        before:      g.items.length,
+        after:       after.length,
+      });
+      if (g.key === TARGET_KEY) outMain = after;
+      else condResults[g.key] = after;
+    }
+    if (dbg.length) this._dbgReport.categoryFilter = dbg;
+    return outMain;
+  }
+
+  /** Build a category group: dedupe poi_category(SB) and class/maki(TQ) across items. */
+  _buildCatGroup(key, intent, items) {
+    const poiCat = new Set();
+    const cls    = new Set();
+    for (const it of items) {
+      if (Array.isArray(it.poi_category)) it.poi_category.forEach(c => { if (c) poiCat.add(String(c)); });
+      if (it.cls)  cls.add(String(it.cls));
+      if (it.maki) cls.add(String(it.maki));
+    }
+    return { key, intent, items, poi_category: [...poiCat], class: [...cls] };
+  }
+
+  /** True if the item's own categories intersect the remove-set (→ drop). */
+  _catMatchesRemove(it, removePoi, removeClass) {
+    if (Array.isArray(it.poi_category) && it.poi_category.some(c => removePoi.has(String(c)))) return true;
+    if (it.cls  && removeClass.has(String(it.cls)))  return true;
+    if (it.maki && removeClass.has(String(it.maki))) return true;
+    return false;
   }
 
   async _rateMain(target, candidates) {

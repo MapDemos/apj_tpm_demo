@@ -99,35 +99,47 @@ class LocationFinderApp {
 
   /** Wire the ⚙️ settings modal (per-role model selection) + restore saved prefs. */
   _initSettings() {
-    // Restore saved prefs
+    // Restore saved prefs (migrate old single {L1,L2} → {L1,L2_1,L2_2}: L2 was the
+    // target-relevance model, so it maps to L2_2; L2_1 defaults to Haiku).
     try {
       const saved = JSON.parse(localStorage.getItem('geonator_models') || '{}');
-      if (saved.L1) this.config.L1_MODEL = saved.L1;
-      if (saved.L2) this.config.L2_MODEL = saved.L2;
+      if (saved.L1)   this.config.L1_MODEL   = saved.L1;
+      if (saved.L2_1) this.config.L2_1_MODEL = saved.L2_1;
+      if (saved.L2_2) this.config.L2_2_MODEL = saved.L2_2;
+      else if (saved.L2) this.config.L2_2_MODEL = saved.L2; // legacy key
     } catch (_) {}
 
-    const l1Sel = document.getElementById('l1ModelSelect');
-    const l2Sel = document.getElementById('l2ModelSelect');
-    const modal = document.getElementById('settingsModal');
-    if (l1Sel) l1Sel.value = this.config.L1_MODEL;
-    if (l2Sel) l2Sel.value = this.config.L2_MODEL;
+    const l1Sel  = document.getElementById('l1ModelSelect');
+    const l21Sel = document.getElementById('l2_1ModelSelect');
+    const l22Sel = document.getElementById('l2_2ModelSelect');
+    const modal  = document.getElementById('settingsModal');
+    if (l1Sel)  l1Sel.value  = this.config.L1_MODEL;
+    if (l21Sel) l21Sel.value = this.config.L2_1_MODEL;
+    if (l22Sel) l22Sel.value = this.config.L2_2_MODEL;
 
     const persist = () => {
-      try { localStorage.setItem('geonator_models', JSON.stringify({ L1: this.config.L1_MODEL, L2: this.config.L2_MODEL })); } catch (_) {}
+      try {
+        localStorage.setItem('geonator_models', JSON.stringify({
+          L1: this.config.L1_MODEL, L2_1: this.config.L2_1_MODEL, L2_2: this.config.L2_2_MODEL,
+        }));
+      } catch (_) {}
       this._updateModelBadge();
     };
-    l1Sel?.addEventListener('change', e => { this.config.L1_MODEL = e.target.value; persist(); });
-    l2Sel?.addEventListener('change', e => { this.config.L2_MODEL = e.target.value; persist(); });
+    l1Sel?.addEventListener('change',  e => { this.config.L1_MODEL   = e.target.value; persist(); });
+    l21Sel?.addEventListener('change', e => { this.config.L2_1_MODEL = e.target.value; persist(); });
+    l22Sel?.addEventListener('change', e => { this.config.L2_2_MODEL = e.target.value; persist(); });
 
     this._initScoringSettings();
 
     // Single "↺ すべてデフォルトに戻す" — models + scoring weights + decisiveness at once.
-    const MODEL_DEFAULTS = { L1: 'claude-haiku-4-5-20251001', L2: 'claude-sonnet-4-6' };
+    const MODEL_DEFAULTS = { L1: 'claude-haiku-4-5-20251001', L2_1: 'claude-haiku-4-5-20251001', L2_2: 'claude-sonnet-4-6' };
     document.getElementById('settingsResetBtn')?.addEventListener('click', () => {
-      this.config.L1_MODEL = MODEL_DEFAULTS.L1;
-      this.config.L2_MODEL = MODEL_DEFAULTS.L2;
-      if (l1Sel) l1Sel.value = MODEL_DEFAULTS.L1;
-      if (l2Sel) l2Sel.value = MODEL_DEFAULTS.L2;
+      this.config.L1_MODEL   = MODEL_DEFAULTS.L1;
+      this.config.L2_1_MODEL = MODEL_DEFAULTS.L2_1;
+      this.config.L2_2_MODEL = MODEL_DEFAULTS.L2_2;
+      if (l1Sel)  l1Sel.value  = MODEL_DEFAULTS.L1;
+      if (l21Sel) l21Sel.value = MODEL_DEFAULTS.L2_1;
+      if (l22Sel) l22Sel.value = MODEL_DEFAULTS.L2_2;
       try { localStorage.removeItem('geonator_models'); } catch (_) {}
       this._updateModelBadge();
       this._resetScoring?.(); // weights + decisiveness (defined in _initScoringSettings)
@@ -148,7 +160,7 @@ class LocationFinderApp {
     const el = document.getElementById('model-badge');
     if (!el) return;
     const s = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
-    el.textContent = `L1:${s(this.config.L1_MODEL)} / L2:${s(this.config.L2_MODEL)}`;
+    el.textContent = `L1:${s(this.config.L1_MODEL)} / L2-1:${s(this.config.L2_1_MODEL)} / L2-2:${s(this.config.L2_2_MODEL)}`;
   }
 
   /**
@@ -351,11 +363,10 @@ class LocationFinderApp {
         if (!stats) return;
         const fmt = n => (n || 0).toLocaleString('ja-JP');
         const secs = (stats.ms / 1000).toFixed(1);
-        const l1 = stats.llm?.L1, l2 = stats.llm?.L2;
         const shortModel = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
         const parts = [`⏱ 処理時間 ${secs}s`];
         let totIn = 0, totOut = 0;
-        for (const [role, s] of [['L1', l1], ['L2', l2]]) {
+        for (const [role, s] of [['L1', stats.llm?.L1], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2]]) {
           if (s && s.calls > 0) {
             parts.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
             totIn += s.inTok; totOut += s.outTok;
@@ -427,6 +438,17 @@ class LocationFinderApp {
       L.push('【Step1: condition収集】');
       r.conditions.forEach(c => {
         L.push(`・${c.label} [${c.type}/${c.level}]: ${c.found}件`);
+      });
+    }
+
+    // ── L2-1 categoryフィルタ（通常クエリの種別ノイズ除去） ──
+    if (r.categoryFilter?.length) {
+      L.push('');
+      L.push('【L2-1: categoryフィルタ】');
+      r.categoryFilter.forEach(g => {
+        const rm = [...(g.removePoi || []), ...(g.removeClass || [])];
+        const rmTxt = rm.length ? `除外カテゴリ: ${rm.join('・')}` : '除外なし';
+        L.push(`・${g.label}: ${g.before}→${g.after}件 (${rmTxt})`);
       });
     }
 
@@ -2856,6 +2878,31 @@ class LocationFinderApp {
       chip.querySelector('.chip-text-en').style.display = lang === 'en' ? '' : 'none';
     });
 
+    // Settings modal (all sections)
+    const st = t.settings;
+    if (st) {
+      const setText = (id, v) => { const e = document.getElementById(id); if (e && v != null) e.textContent = v; };
+      // subtitles that contain a trailing hint <span>: set only the leading text node
+      const setLead = (id, v) => { const e = document.getElementById(id); if (e && e.firstChild && v != null) e.firstChild.nodeValue = v + ' '; };
+      setText('set-title', st.title);
+      setText('set-lang-title', st.langTitle);
+      setText('set-lang-row', st.langRow);
+      setText('set-model-title', st.modelTitle);
+      setText('set-l1-label', st.l1);
+      setText('set-l2_1-label', st.l2_1);
+      setText('set-l2_2-label', st.l2_2);
+      setLead('set-weight-title', st.weightTitle);   setText('set-weight-hint', st.weightHint);
+      setText('set-wrel-label', st.wRel);
+      setText('set-wcond-label', st.wCond);
+      setText('set-wanchor-label', st.wAnchor);
+      setLead('set-concl-title', st.conclTitle);     setText('set-concl-hint', st.conclHint);
+      setText('set-dec-cautious', st.decCautious);
+      setText('set-dec-decisive', st.decDecisive);
+      setText('set-score-note', st.scoreNote);
+      setText('settingsResetBtn', st.resetBtn);
+      setText('settingsCloseBtn', st.closeBtn);
+    }
+
     // Update welcome message if conversation hasn't started yet
     const hasUserMsg = document.querySelectorAll('#chatMessages .message.user').length > 0;
     if (!hasUserMsg) {
@@ -3067,6 +3114,28 @@ const LANG = {
       compute_area_from_landmark_bearing: '🧭 ランドマーク方位からエリアを計算中',
       log_flow_step: '📋 フローステップを記録中',
     },
+    // Settings modal
+    settings: {
+      title:       '設定',
+      langTitle:   '言語 / Language',
+      langRow:     '表示言語',
+      modelTitle:  'モデル',
+      l1:          'L1（クエリ解析）',
+      l2_1:        'L2-1（通常クエリの関連性・カテゴリ）',
+      l2_2:        'L2-2（Targetの関連性）',
+      weightTitle: 'スコアの重みづけ',
+      weightHint:  '（何を重視するか・合計100%）',
+      wRel:        '関連性（意図の一致）',
+      wCond:       '条件からの距離（ローソン・バス停等）',
+      wAnchor:     'Proximityからの距離（西大島等）',
+      conclTitle:  '結論の出し方',
+      conclHint:   '（言い切り ⇔ 慎重）',
+      decCautious: '慎重（同程度多め）',
+      decDecisive: '言い切り（gold積極）',
+      scoreNote:   '※ スコアの変更は次の検索から反映されます',
+      resetBtn:    '↺ すべてデフォルトに戻す',
+      closeBtn:    '閉じる',
+    },
   },
   en: {
     appTitle:      'Geonator',
@@ -3120,6 +3189,28 @@ const LANG = {
       compute_bbox_from_points:        '📐 Computing exit coverage bbox',
       compute_area_from_landmark_bearing: '🧭 Computing bearing area',
       log_flow_step: '📋 Logging flow step',
+    },
+    // Settings modal
+    settings: {
+      title:       'Settings',
+      langTitle:   'Language / 言語',
+      langRow:     'Display language',
+      modelTitle:  'Models',
+      l1:          'L1 (query parsing)',
+      l2_1:        'L2-1 (general-query relevance · category)',
+      l2_2:        'L2-2 (target relevance)',
+      weightTitle: 'Score weighting',
+      weightHint:  '(what to prioritize · sums to 100%)',
+      wRel:        'Relevance (intent match)',
+      wCond:       'Distance from conditions (Lawson, bus stop, etc.)',
+      wAnchor:     'Distance from proximity (e.g. Nishi-ojima)',
+      conclTitle:  'How to conclude',
+      conclHint:   '(decisive ⇔ cautious)',
+      decCautious: 'Cautious (more ties)',
+      decDecisive: 'Decisive (favor gold)',
+      scoreNote:   '※ Scoring changes apply from the next search',
+      resetBtn:    '↺ Reset all to defaults',
+      closeBtn:    'Close',
     },
   },
 };

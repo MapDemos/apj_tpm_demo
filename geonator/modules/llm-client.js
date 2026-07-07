@@ -13,8 +13,9 @@ class LLMClient {
   /** Reset per-run stats (tokens, time, calls) keyed by role. */
   resetStats() {
     this.stats = {
-      L1: { model: this.config.L1_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
-      L2: { model: this.config.L2_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
+      L1:   { model: this.config.L1_MODEL,   inTok: 0, outTok: 0, ms: 0, calls: 0 },
+      L2_1: { model: this.config.L2_1_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
+      L2_2: { model: this.config.L2_2_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
     };
   }
 
@@ -50,7 +51,45 @@ class LLMClient {
   }
 
   // ─────────────────────────────────────────────
-  // L2: Intent-match check on candidates
+  // L2-1: category validity check (通常クエリ) — see poi_category/class, not names
+  // ─────────────────────────────────────────────
+
+  /**
+   * For each group, decide which poi_category / class values are CLEARLY NOT the
+   * intent (to remove). Conservative: only clearly-wrong categories are removed;
+   * ambiguous/parent/missing categories are kept. Names are NOT sent — only the
+   * intent text + deduped category vocabularies.
+   * @param {Array<{key:string, intent:string, poi_category:string[], class:string[]}>} groups
+   * @returns {Promise<Object|null>} { [key]: { remove_poi_category:Set, remove_class:Set } } or null on failure
+   */
+  async filterCategories(groups) {
+    if (!groups || groups.length === 0) return {};
+
+    const result = await this._callClaude(
+      this._buildL2_1Prompt(groups),
+      512,
+      this.config.L2_1_MODEL,
+      'L2_1'
+    );
+    try {
+      const json = this._extractJSON(result);
+      if (!json) return null;
+      const out = {};
+      for (const g of groups) {
+        const r = json[g.key] || {};
+        out[g.key] = {
+          remove_poi_category: new Set((r.remove_poi_category || []).map(String)),
+          remove_class:        new Set((r.remove_class        || []).map(String)),
+        };
+      }
+      return out;
+    } catch {
+      return null; // parse failure → caller keeps all (no filtering)
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // L2-2: target relevance check on candidates (name-based, 4-level)
   // ─────────────────────────────────────────────
 
   /**
@@ -64,10 +103,10 @@ class LLMClient {
     if (!candidates || candidates.length === 0) return { definitely: new Set(), probably: new Set(), no: new Set() };
 
     const result = await this._callClaude(
-      this._buildL2Prompt(intentLabel, candidates),
+      this._buildL2_2Prompt(intentLabel, candidates),
       1024,
-      this.config.L2_MODEL,
-      'L2'
+      this.config.L2_2_MODEL,
+      'L2_2'
     );
     try {
       const json = this._extractJSON(result);
@@ -139,11 +178,25 @@ class LLMClient {
     };
   }
 
-  _buildL2Prompt(intentLabel, candidates) {
-    if (typeof PROMPT_L2 === 'undefined') throw new Error('PROMPT_L2 not loaded');
+  _buildL2_1Prompt(groups) {
+    if (typeof PROMPT_L2_1 === 'undefined') throw new Error('PROMPT_L2_1 not loaded');
+    const payload = groups.map(g => ({
+      key:          g.key,
+      intent:       g.intent,
+      poi_category: g.poi_category,
+      class:        g.class,
+    }));
+    return {
+      system: PROMPT_L2_1,
+      user:   `グループ:\n${JSON.stringify(payload, null, 0)}\n\n各グループについて、意図と明確に異なるカテゴリだけを remove した結果を {"<key>":{"remove_poi_category":[...],"remove_class":[...]}, ...} 形式で返してください。迷ったら remove しない。JSONのみ。`,
+    };
+  }
+
+  _buildL2_2Prompt(intentLabel, candidates) {
+    if (typeof PROMPT_L2_2 === 'undefined') throw new Error('PROMPT_L2_2 not loaded');
     const list = candidates.map(c => `{"id":${JSON.stringify(c.id)},"name":${JSON.stringify(c.name ?? '')}}`).join('\n');
     return {
-      system: PROMPT_L2,
+      system: PROMPT_L2_2,
       user:   `探しているもの（意図）：${intentLabel}\n\n候補:\n${list}\n\n各候補が「意図そのもの（意図のインスタンス）か」を判定し、{"definitely":[...],"probably":[...],"no":[...]} 形式でIDを返してください。unknown（判断つかない）は記載不要＝未記載はunknown扱い。JSONのみ。`,
     };
   }

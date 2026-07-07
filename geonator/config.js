@@ -27,7 +27,11 @@ const CONFIG = {
 
   // Per-role models (JS-driven arch). Changeable from the ⚙️ settings modal.
   L1_MODEL:        'claude-haiku-4-5-20251001', // query parsing（構造化・軽量でHaiku既定）
-  L2_MODEL:        'claude-sonnet-4-6',         // candidate filter（関連性のニュアンス判定でSonnet既定）
+  // L2 is split into two independent checks (both changeable in settings):
+  //   L2-1 = 通常クエリのcategory妥当性チェック（poi_category/class を見る・軽量→Haiku既定）
+  //   L2-2 = Targetの関連性チェック（名前ベースのニュアンス判定→Sonnet既定）
+  L2_1_MODEL:      'claude-haiku-4-5-20251001', // category validity（極小入力の分類→Haikuで十分）
+  L2_2_MODEL:      'claude-sonnet-4-6',         // target relevance（名前ニュアンス→Sonnet既定）
 
   // ============================================
   // MAP SETTINGS
