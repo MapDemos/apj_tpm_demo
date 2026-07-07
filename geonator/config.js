@@ -107,7 +107,12 @@ const CONFIG = {
   SCORE_REL_PROBABLY:     0.7,   // 多分そう
   SCORE_REL_UNKNOWN:      0.4,   // わからない（既定・不確実は控えめ）
   GOLD_MIN_SCORE:         0.5,   // gold候補の絶対スコア下限（固定のゴミ足切り。全件低スコアなら単独fullでもgold不可）
-  SCORE_WEIGHT_FLOORS:    0.4,   // target階数(floors)一致の重み。指定時のみ加算（|指定−実階|で減衰）
+  SCORE_WEIGHT_FLOORS:    0.4,   // target階数(floors)一致の重み。FLOORS_MODE='soft'時のみ加算（|指定−実階|で減衰）
+
+  // 判定方式（ハード=採点前に除外 / ソフト=加点）。デフォルトは両方ハード。
+  SAME_BUILDING_MODE:     'hard', // 'hard'（同ビル以外を除外）| 'soft'（同ビルを加点条件として採点）
+  FLOORS_MODE:            'hard', // 'hard'（階数条件外を除外）| 'soft'（階数一致をファジー加点）
+  FLOORS_HARD_TOL:        2,      // FLOORS_MODE='hard'かつvalue指定時の許容（±階・height÷3の丸め誤差吸収）
 
   DEBUG: true,
 };

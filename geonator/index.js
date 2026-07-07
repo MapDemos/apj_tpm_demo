@@ -119,6 +119,12 @@ class LocationFinderApp {
       const b = JSON.parse(localStorage.getItem('geonator_search') || '{}');
       if (Number.isFinite(b.maxConditions)) this.config.MAX_CONDITIONS = Math.max(0, Math.min(5, b.maxConditions));
     } catch (_) {}
+    // Judgement mode: hard/soft for same_building & floors
+    try {
+      const b = JSON.parse(localStorage.getItem('geonator_judge') || '{}');
+      if (b.sameBuilding === 'hard' || b.sameBuilding === 'soft') this.config.SAME_BUILDING_MODE = b.sameBuilding;
+      if (b.floors === 'hard' || b.floors === 'soft')             this.config.FLOORS_MODE       = b.floors;
+    } catch (_) {}
 
     const l1Sel  = document.getElementById('l1ModelSelect');
     const l21Sel = document.getElementById('l2_1ModelSelect');
@@ -126,6 +132,8 @@ class LocationFinderApp {
     const l3Sel  = document.getElementById('l3ModelSelect');
     const nullSel = document.getElementById('l2_1NullSelect');
     const maxCondSel = document.getElementById('maxConditionsSelect');
+    const sbModeSel  = document.getElementById('sameBuildingModeSelect');
+    const flModeSel  = document.getElementById('floorsModeSelect');
     const modal  = document.getElementById('settingsModal');
     if (l1Sel)  l1Sel.value  = this.config.L1_MODEL;
     if (l21Sel) l21Sel.value = this.config.L2_1_MODEL;
@@ -133,6 +141,8 @@ class LocationFinderApp {
     if (l3Sel)  l3Sel.value  = this.config.L3_MODEL;
     if (nullSel) nullSel.value = this.config.L2_1_KEEP_NULL_CATEGORY === false ? 'exclude' : 'include';
     if (maxCondSel) maxCondSel.value = String(this.config.MAX_CONDITIONS);
+    if (sbModeSel) sbModeSel.value = this.config.SAME_BUILDING_MODE ?? 'hard';
+    if (flModeSel) flModeSel.value = this.config.FLOORS_MODE ?? 'hard';
 
     const persist = () => {
       try {
@@ -148,12 +158,26 @@ class LocationFinderApp {
     const persistSearch = () => {
       try { localStorage.setItem('geonator_search', JSON.stringify({ maxConditions: this.config.MAX_CONDITIONS })); } catch (_) {}
     };
+    const persistJudge = () => {
+      try { localStorage.setItem('geonator_judge', JSON.stringify({ sameBuilding: this.config.SAME_BUILDING_MODE, floors: this.config.FLOORS_MODE })); } catch (_) {}
+    };
     l1Sel?.addEventListener('change',  e => { this.config.L1_MODEL   = e.target.value; persist(); });
     l21Sel?.addEventListener('change', e => { this.config.L2_1_MODEL = e.target.value; persist(); });
     l22Sel?.addEventListener('change', e => { this.config.L2_2_MODEL = e.target.value; persist(); });
     l3Sel?.addEventListener('change',  e => { this.config.L3_MODEL   = e.target.value; persist(); });
     nullSel?.addEventListener('change', e => { this.config.L2_1_KEEP_NULL_CATEGORY = e.target.value !== 'exclude'; persistNull(); });
     maxCondSel?.addEventListener('change', e => { this.config.MAX_CONDITIONS = parseInt(e.target.value, 10); persistSearch(); });
+    sbModeSel?.addEventListener('change', e => { this.config.SAME_BUILDING_MODE = e.target.value; persistJudge(); });
+    flModeSel?.addEventListener('change', e => { this.config.FLOORS_MODE       = e.target.value; persistJudge(); });
+
+    // Tab switching (基本 / スコア / 判定方式)
+    const tabs  = Array.from(document.querySelectorAll('.settings-tab'));
+    const pages = Array.from(document.querySelectorAll('.settings-tabpage'));
+    tabs.forEach(tab => tab.addEventListener('click', () => {
+      const key = tab.dataset.stab;
+      tabs.forEach(t => t.classList.toggle('active', t === tab));
+      pages.forEach(p => { p.style.display = p.dataset.stabpage === key ? '' : 'none'; });
+    }));
 
     this._initScoringSettings();
 
@@ -166,13 +190,17 @@ class LocationFinderApp {
       this.config.L3_MODEL   = MODEL_DEFAULTS.L3;
       this.config.L2_1_KEEP_NULL_CATEGORY = false; // default: exclude null-category candidates (strict)
       this.config.MAX_CONDITIONS = 3;              // default condition cap
+      this.config.SAME_BUILDING_MODE = 'hard';     // default: hard filter
+      this.config.FLOORS_MODE        = 'hard';     // default: hard filter
       if (l1Sel)  l1Sel.value  = MODEL_DEFAULTS.L1;
       if (l21Sel) l21Sel.value = MODEL_DEFAULTS.L2_1;
       if (l22Sel) l22Sel.value = MODEL_DEFAULTS.L2_2;
       if (l3Sel)  l3Sel.value  = MODEL_DEFAULTS.L3;
       if (nullSel) nullSel.value = 'exclude';
       if (maxCondSel) maxCondSel.value = '3';
-      try { localStorage.removeItem('geonator_models'); localStorage.removeItem('geonator_l2_1'); localStorage.removeItem('geonator_search'); } catch (_) {}
+      if (sbModeSel) sbModeSel.value = 'hard';
+      if (flModeSel) flModeSel.value = 'hard';
+      try { localStorage.removeItem('geonator_models'); localStorage.removeItem('geonator_l2_1'); localStorage.removeItem('geonator_search'); localStorage.removeItem('geonator_judge'); } catch (_) {}
       this._updateModelBadge();
       this._resetScoring?.(); // weights + decisiveness (defined in _initScoringSettings)
     });
@@ -3073,6 +3101,17 @@ class LocationFinderApp {
       setText('set-dec-cautious', st.decCautious);
       setText('set-dec-decisive', st.decDecisive);
       setText('set-score-note', st.scoreNote);
+      // tabs
+      setText('set-tab-basic', st.tabBasic);
+      setText('set-tab-score', st.tabScore);
+      setText('set-tab-judge', st.tabJudge);
+      // 判定方式 tab
+      setLead('set-judge-title', st.judgeTitle);     setText('set-judge-hint', st.judgeHint);
+      setText('set-samebuilding-row', st.sameBuildingRow);
+      setText('set-floors-row', st.floorsRow);
+      setText('set-sb-hard', st.hardOpt); setText('set-sb-soft', st.softOpt);
+      setText('set-fl-hard', st.hardOpt); setText('set-fl-soft', st.softOpt);
+      setText('set-judge-note', st.judgeNote);
       setText('settingsResetBtn', st.resetBtn);
       setText('settingsCloseBtn', st.closeBtn);
     }
@@ -3316,6 +3355,16 @@ const LANG = {
       decCautious: '慎重（同程度多め）',
       decDecisive: '言い切り（gold積極）',
       scoreNote:   '※ スコアの変更は次の検索から反映されます',
+      tabBasic:    '基本',
+      tabScore:    'スコア',
+      tabJudge:    '判定方式',
+      judgeTitle:  '判定方式',
+      judgeHint:   '（ハード=候補から除外 / ソフト=スコア加点）',
+      sameBuildingRow: '同じビル（same_building）',
+      floorsRow:   '階数（floors）',
+      hardOpt:     'ハード（除外）',
+      softOpt:     'ソフト（加点）',
+      judgeNote:   '※ ハードは条件を満たさない候補を除外、ソフトは満たすほど加点します。判定不能（建物データ無し等）の候補は除外しません。変更は次の検索から反映されます。',
       resetBtn:    '↺ すべてデフォルトに戻す',
       closeBtn:    '閉じる',
     },
@@ -3401,6 +3450,16 @@ const LANG = {
       decCautious: 'Cautious (more ties)',
       decDecisive: 'Decisive (favor gold)',
       scoreNote:   '※ Scoring changes apply from the next search',
+      tabBasic:    'Basic',
+      tabScore:    'Score',
+      tabJudge:    'Match mode',
+      judgeTitle:  'Match mode',
+      judgeHint:   '(hard = exclude candidates / soft = score bonus)',
+      sameBuildingRow: 'Same building (same_building)',
+      floorsRow:   'Floor count (floors)',
+      hardOpt:     'Hard (exclude)',
+      softOpt:     'Soft (bonus)',
+      judgeNote:   '※ Hard excludes candidates that fail the criterion; soft adds a score bonus the closer they match. Candidates that can\'t be judged (no building data, etc.) are not excluded. Applies from the next search.',
       resetBtn:    '↺ Reset all to defaults',
       closeBtn:    'Close',
     },

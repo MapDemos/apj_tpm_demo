@@ -45,6 +45,15 @@
     <div class="settings-panel">
       <div class="settings-title" id="set-title">設定</div>
 
+      <div class="settings-tabbar">
+        <button class="settings-tab active" data-stab="basic" id="set-tab-basic">基本</button>
+        <button class="settings-tab" data-stab="score" id="set-tab-score">スコア</button>
+        <button class="settings-tab" data-stab="judge" id="set-tab-judge">判定方式</button>
+      </div>
+
+      <!-- ===== タブ: 基本（言語・モデル・L2-1 null） ===== -->
+      <div class="settings-tabpage" data-stabpage="basic">
+
       <!-- 表示言語 / Display language -->
       <div class="settings-subtitle" id="set-lang-title">言語 / Language</div>
       <label class="settings-row">
@@ -97,7 +106,10 @@
         </select>
       </label>
 
-      <div class="settings-divider"></div>
+      </div><!-- /tabpage basic -->
+
+      <!-- ===== タブ: スコア（条件上限・重み・結論） ===== -->
+      <div class="settings-tabpage" data-stabpage="score" style="display:none">
 
       <!-- 条件の上限 -->
       <div class="settings-subtitle" id="set-maxcond-title">条件の上限 <span class="settings-hint" id="set-maxcond-hint">（近くにあるものの数・0〜5）</span></div>
@@ -141,6 +153,28 @@
       </div>
 
       <div class="settings-hint" id="set-score-note" style="margin-top:12px">※ スコアの変更は次の検索から反映されます</div>
+
+      </div><!-- /tabpage score -->
+
+      <!-- ===== タブ: 判定方式（ハード=除外 / ソフト=加点） ===== -->
+      <div class="settings-tabpage" data-stabpage="judge" style="display:none">
+        <div class="settings-subtitle" id="set-judge-title">判定方式 <span class="settings-hint" id="set-judge-hint">（ハード=候補から除外 / ソフト=スコア加点）</span></div>
+        <label class="settings-row">
+          <span id="set-samebuilding-row">同じビル（same_building）</span>
+          <select id="sameBuildingModeSelect">
+            <option id="set-sb-hard" value="hard">ハード（除外）</option>
+            <option id="set-sb-soft" value="soft">ソフト（加点）</option>
+          </select>
+        </label>
+        <label class="settings-row">
+          <span id="set-floors-row">階数（floors）</span>
+          <select id="floorsModeSelect">
+            <option id="set-fl-hard" value="hard">ハード（除外）</option>
+            <option id="set-fl-soft" value="soft">ソフト（加点）</option>
+          </select>
+        </label>
+        <div class="settings-hint" id="set-judge-note" style="margin-top:12px">※ ハードは条件を満たさない候補を除外、ソフトは満たすほど加点します。判定不能（建物データ無し等）の候補は除外しません。変更は次の検索から反映されます。</div>
+      </div><!-- /tabpage judge -->
 
       <div class="settings-actions">
         <button id="settingsResetBtn" class="control-btn">↺ すべてデフォルトに戻す</button>

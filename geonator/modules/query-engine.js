@@ -830,6 +830,25 @@ class QueryEngine {
     return null;
   }
 
+  /** floorsハード判定: 実階数 f が spec を満たすか（value は丸め誤差を FLOORS_HARD_TOL で許容）。 */
+  _floorPass(f, spec) {
+    if (!spec) return true;
+    const tol = this.config.FLOORS_HARD_TOL ?? 2;
+    if (spec.value != null)                    return Math.abs(f - spec.value) <= tol;
+    if (spec.min != null && f < spec.min)      return false;
+    if (spec.max != null && f > spec.max)      return false;
+    return true;
+  }
+
+  /** floors spec を日本語ラベルに（除外理由の表示用）。 */
+  _floorSpecLabel(spec) {
+    if (!spec) return '階数';
+    if (spec.value != null) return `${spec.value}階`;
+    if (spec.min != null)   return `${spec.min}階以上`;
+    if (spec.max != null)   return `${spec.max}階以下`;
+    return '階数';
+  }
+
   // Recover building-height intent that L1 didn't emit as target.floors:
   //  (1) a "〜の中(same_building)" poi condition whose text is a height keyword
   //      ("タワマンの中の…") is really about the target's OWN building → fold into
@@ -1235,9 +1254,11 @@ class QueryEngine {
     const allConditions = schema.conditions ?? [];
 
     // ── 絶対条件フィルタ（ハードフィルタ・スコアリング前に候補を除外）──
-    // 現状 same_building(method=building_id) が対象。評価不能なら除外しない(graceful)。
-    // 除外候補は共通の excludedByHardFilter に記録（過剰除外の検知用）。
-    const isAbsolute = c => resolveDistanceParams(c.distance, this.config.DEFAULT_LEVEL).useBuildingId;
+    // same_building(method=building_id) は SAME_BUILDING_MODE='hard' のときだけハード。
+    // 'soft' のときは下の採点ループで「同ビル=closeness1」の条件として扱う（除外しない）。
+    // 評価不能なら除外しない(graceful)。除外候補は excludedByHardFilter に記録。
+    const sameBuildingHard = (this.config.SAME_BUILDING_MODE ?? 'hard') === 'hard';
+    const isAbsolute = c => sameBuildingHard && resolveDistanceParams(c.distance, this.config.DEFAULT_LEVEL).useBuildingId;
     const hardConds  = allConditions.filter(isAbsolute);
     const conditions = allConditions.filter(c => !isAbsolute(c)); // ← 採点対象（ハードは除く）
     for (const hc of hardConds) {
@@ -1252,6 +1273,31 @@ class QueryEngine {
       mainCandidates = kept;
     }
     if (mainCandidates.length === 0) return { full: [], partial: [], none: [] };
+
+    // ── [floors] 建物階数を全候補分まとめて取得（streets-v8 building層・_getBuildingId と
+    // 同一Tilequery URLでキャッシュ共有）。ハード/ソフト両方でここで一度だけ取る。──
+    const floorSpec  = schema.target?.floors || null;
+    const floorsHard = !!floorSpec && (this.config.FLOORS_MODE ?? 'hard') === 'hard';
+    const floorsSoft = !!floorSpec && (this.config.FLOORS_MODE ?? 'hard') === 'soft';
+    if (floorSpec) {
+      await Promise.all(mainCandidates.map(async c => {
+        const lat = c.latitude ?? c.lat, lng = c.longitude ?? c.lng;
+        c._floors = (lat != null && lng != null) ? await this.mcp._getBuildingFloors(lat, lng) : null;
+      }));
+    }
+    // floorsハード: 階数が判明していて仕様を満たさない候補を除外。階数不明(null)は
+    // 判定不能として保持（same_building の graceful と同じ思想）。
+    if (floorsHard) {
+      const kept = [];
+      for (const c of mainCandidates) {
+        if (c._floors == null || this._floorPass(c._floors, floorSpec)) { kept.push(c); continue; }
+        this._dbgReport.excludedByHardFilter.push({
+          name: c.name || '(名前なし)', reason: `絶対条件「${this._floorSpecLabel(floorSpec)}」を満たさない（${c._floors}階相当）`,
+        });
+      }
+      mainCandidates = kept;
+      if (mainCandidates.length === 0) return { full: [], partial: [], none: [] };
+    }
 
     // conditionTracker: candidateId → { total, hit, closenessSum }
     const tracker = new Map();
@@ -1286,11 +1332,25 @@ class QueryEngine {
       return den > 0 ? num / den : 0;
     };
 
+    // [floors] soft mode only: fuzzy score (|Δ| decay). _floors was already fetched above
+    // (used by hard filter too). In hard mode floorsSoft=false → floorScore()===null → term omitted.
+    const wFloors = Math.max(0, this.config.SCORE_WEIGHT_FLOORS ?? 0.4);
+    const floorScore = (c) => {
+      if (!floorsSoft || c._floors == null) return null; // no constraint / hard mode / no height → neutral
+      const TOL = 6, f = c._floors;
+      let d;
+      if (floorSpec.value != null)                          d = Math.abs(f - floorSpec.value);
+      else if (floorSpec.min != null && f < floorSpec.min)  d = floorSpec.min - f;
+      else if (floorSpec.max != null && f > floorSpec.max)  d = f - floorSpec.max;
+      else                                                  d = 0; // inside min/max range
+      return Math.max(0, 1 - d / TOL);
+    };
+
     if (conditions.length === 0) {
-      // No conditions — score = relevance + anchor closeness (no condition term).
+      // No conditions — score = relevance + anchor closeness (+ floors if soft-scored).
       mainCandidates.forEach(c => {
-        const score = weighted([[wRel, relScore(c)], [wAnchor, anchorScore(c)]]);
-        c._matchInfo = { hit: 0, total: 0, labels: [], score: +score.toFixed(3), relevance: c._relevance };
+        const score = weighted([[wRel, relScore(c)], [wAnchor, anchorScore(c)], [wFloors, floorScore(c)]]);
+        c._matchInfo = { hit: 0, total: 0, labels: [], score: +score.toFixed(3), relevance: c._relevance, floors: c._floors ?? null };
       });
       this._assignTiers(mainCandidates, [], []);
       mainCandidates.sort((a, b) => b._matchInfo.score - a._matchInfo.score);
@@ -1338,6 +1398,21 @@ class QueryEngine {
       const refM = distParams.radiusM
         ?? (distParams.minutes ? distParams.minutes * (speed[distParams.profile] || 80) : 250);
 
+      // same_building as a SOFT scored condition (SAME_BUILDING_MODE='soft'): same building
+      // → closeness 1, otherwise miss. (hard mode never reaches here — filtered out above.)
+      if (distParams.useBuildingId) {
+        const items = condCandidates[label] ?? [];
+        if (items.length === 0) continue; // アンカー未取得＝評価不能
+        const { kept } = await this.mcp.filterSameBuilding(mainCandidates, items);
+        const inSame = new Set(kept.map(k => String(k.id)));
+        for (const main of mainCandidates) {
+          if (!inSame.has(String(main.id))) continue;
+          const t = tracker.get(String(main.id));
+          if (t) addHit(t, label, 1);
+        }
+        continue;
+      }
+
       // road / water: per-candidate layer check (streets-v8 road/water layers).
       // 候補ごとに独立なので並列化（結果は候補順に同期適用するので挙動は同一）。
       if (cond.type === 'road' || cond.type === 'water') {
@@ -1376,28 +1451,6 @@ class QueryEngine {
     // 一律 partial(bronze) に落とし、condScore も薄める。type を問わず適用（poi/road/水域/
     // 出口/バス停…）。除外条件は condNotFound で既に注記済み。
     const effTotal = conditions.filter(c => conditionHit.has(c.text ?? c.type)).length;
-
-    // [floors] target floor-count constraint (fuzzy: |Δ| decay). Per-candidate building
-    // height from the streets-v8 building layer — SAME Tilequery URL as _getBuildingId so
-    // the response is cache-shared (no extra request when same_building is also used).
-    const floorSpec = schema.target?.floors || null;
-    const wFloors   = Math.max(0, this.config.SCORE_WEIGHT_FLOORS ?? 0.4);
-    if (floorSpec) {
-      await Promise.all(mainCandidates.map(async c => {
-        const lat = c.latitude ?? c.lat, lng = c.longitude ?? c.lng;
-        c._floors = (lat != null && lng != null) ? await this.mcp._getBuildingFloors(lat, lng) : null;
-      }));
-    }
-    const floorScore = (c) => {
-      if (!floorSpec || c._floors == null) return null; // no constraint / no height data → neutral
-      const TOL = 6, f = c._floors;
-      let d;
-      if (floorSpec.value != null)                          d = Math.abs(f - floorSpec.value);
-      else if (floorSpec.min != null && f < floorSpec.min)  d = floorSpec.min - f;
-      else if (floorSpec.max != null && f > floorSpec.max)  d = f - floorSpec.max;
-      else                                                  d = 0; // inside min/max range
-      return Math.max(0, 1 - d / TOL);
-    };
 
     // Classify (OR — all displayed) + attach continuous score.
     // score = normalize(w_rel×relScore + w_cond×condScore + w_anchor×anchorScore + w_floors×floorScore)。
