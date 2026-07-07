@@ -708,19 +708,24 @@ class QueryEngine {
    * Soft: candidates with no category are kept; a removal that would empty a group is skipped.
    * Mutates condResults[key] in place; returns the (possibly filtered) target list.
    */
-  async _applyCategoryFilter(schema, mainRaw, condResults) {
+  async _applyCategoryFilter(schema, mainRaw, condResults, opts = {}) {
+    // opts.includeTarget=false → skip the target group (e.g. narrow, where the pool is fixed).
+    // opts.condKeys (Set) → only process these condition keys (e.g. narrow: new conditions
+    // only, so already-filtered old conditions aren't re-filtered/shrunk).
+    const { includeTarget = true, condKeys = null } = opts;
     const target = schema.target;
     const TARGET_KEY = '__target__';
     const groups = [];
 
     // target group (general_poi search only)
-    if (target && target.query_intent === 'specific' && mainRaw?.length) {
+    if (includeTarget && target && target.query_intent === 'specific' && mainRaw?.length) {
       groups.push(this._buildCatGroup(TARGET_KEY, target.text || this._buildIntentLabel(target), mainRaw));
     }
     // poi condition groups
     for (const c of (schema.conditions || [])) {
       if (c.type !== 'poi') continue;
       const key   = c.text ?? c.type;
+      if (condKeys && !condKeys.has(key)) continue; // limited to the requested keys
       const items = condResults[key];
       if (items?.length) groups.push(this._buildCatGroup(key, c.text || key, items));
     }
@@ -1214,22 +1219,27 @@ class QueryEngine {
     const bboxes = this._computeDualBbox(this._cache.bbox, merged);
     this._anchorRefM = Math.max(1, this._bboxWidthM(bboxes.targetBbox) / 2);
 
+    // Collect ONLY the newly-added conditions (old conditions' items come from cache).
     const condResults = { ...(this._cache.condCandidates || {}) };
-    const condDebug = [];
+    const newKeys = new Set();
     for (const c of addConds) {
       const key = c.text ?? c.type;
-      if (c.type === 'road' || c.type === 'water') { condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: '候補ごと評価' }); continue; }
-      const items = await this.mcp.collectCondition(c, bboxes.condBbox, null);
-      condResults[key] = items;
-      condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
+      newKeys.add(key);
+      if (c.type === 'road' || c.type === 'water') continue; // per-candidate eval, no collection
+      condResults[key] = await this.mcp.collectCondition(c, bboxes.condBbox, null);
     }
-    // L2-1 category validity on the (new) poi conditions. Pool is fixed, so the target
-    // filter is a cache-hit no-op; we keep the returned pool as-is. Do NOT overwrite
-    // _cache.mainCandidates (that stays the full collected pool for a later re-search);
-    // the narrow subset lives only in `keptPool` and is re-captured as `surfaced` below.
-    const keptPool = await this._applyCategoryFilter(merged, pool, condResults);
+    // L2-1 category validity ONLY on the new poi conditions (target pool is fixed;
+    // old conditions are already filtered — don't re-filter/shrink them).
+    await this._applyCategoryFilter(merged, pool, condResults, { includeTarget: false, condKeys: newKeys });
+    const keptPool = pool; // pool is fixed (target not re-collected)
     this._cache.condCandidates = condResults;
-    this._dbgReport.conditions = [...(this._dbgReport.conditions || []), ...condDebug];
+    // Debug: show ALL conditions (old + new) with item counts so it's clear the score
+    // considers the accumulated conditions, not just the newly added one.
+    this._dbgReport.conditions = (merged.conditions || []).map(c => {
+      const key = c.text ?? c.type;
+      const isLine = c.type === 'road' || c.type === 'water';
+      return { label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: isLine ? '候補ごと評価' : (condResults[key]?.length ?? 0) };
+    });
 
     // Evaluate with the FIXED pool (no target re-collection).
     this.mcp._evalPolygons = [];
