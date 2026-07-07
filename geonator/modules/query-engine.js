@@ -814,12 +814,13 @@ class QueryEngine {
       // Landmarks already used as conditions must not be re-suggested → exclude them from
       // the L3 input entirely (most efficient: no extra tokens, can't be picked).
       const usedCond = new Set((schema?.conditions || []).map(c => norm(c.text ?? c.type)).filter(Boolean));
-      const NEAR_M = 150; // 「すぐ近く」相当
+      const ASSIGN_MAX = 250; // この距離以内の候補にだけ「近い目印」として割り当てる
+      const MARGIN     = 60;  // 最寄り候補が2番目より これ以上近い＝その候補固有と判定
       // poi_label grid over the basis candidates' area (+margin), no Search Box.
       const lats = basis.map(c => c.latitude ?? c.lat).filter(v => v != null);
       const lngs = basis.map(c => c.longitude ?? c.lng).filter(v => v != null);
       if (!lats.length) return [];
-      const mLat = NEAR_M / 111000, mLng = NEAR_M / (111000 * Math.cos(Math.min(...lats) * Math.PI / 180) || 1);
+      const mLat = ASSIGN_MAX / 111000, mLng = ASSIGN_MAX / (111000 * Math.cos(Math.min(...lats) * Math.PI / 180) || 1);
       const bbox = [Math.min(...lngs) - mLng, Math.min(...lats) - mLat, Math.max(...lngs) + mLng, Math.max(...lats) + mLat];
       const grid = await this.mcp.buildPoiLabelGrid(bbox, 65);
       if (!grid?.length) return [];
@@ -829,10 +830,12 @@ class QueryEngine {
         const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
         return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
       };
-      // 役割分担: JS が「幾何的に区別できる目印」を各候補へ機械的に割り当て（重複排除）、
-      // LLM は「その中でどれを使うか（知名度）」を選ぶだけ。
-      // → 各poi_labelが basis候補の何個(≤NEAR_M)の近くにあるか数え、"ちょうど1候補" にしか
-      //   近くない＝その候補固有の目印だけを採用（複数候補に重なるものは全部捨てる）。
+      // 役割分担: JS が「幾何的に区別できる目印」を各候補へ機械的に割り当て、LLM は
+      // 「その中でどれを使うか（知名度）」を選ぶだけ。
+      // 割り当ては固定半径の二値ではなく「最も近い候補＋マージン」で行う：poi_labelは密なので
+      // 固定150m内“ちょうど1候補”だと、候補が近接していると全目印が複数圏に入り全滅する。
+      // 代わりに各目印を最寄り候補に割り当て、2番目の候補よりMARGIN以上近い時だけ「その候補固有」
+      // として採用（＝どの候補にも同程度に近い曖昧な目印だけを捨てる）。
       const pts = basis.slice(0, 8)
         .map((c, i) => ({ i, name: c.name || `候補${i + 1}`, lat: c.latitude ?? c.lat, lng: c.longitude ?? c.lng }))
         .filter(p => p.lat != null && p.lng != null);
@@ -845,10 +848,11 @@ class QueryEngine {
         if (!key || usedCond.has(key) || seenName.has(key)) continue; // 既存条件・同名は除外
         const gl = g.latitude ?? g.lat, gn = g.longitude ?? g.lng;
         if (gl == null || gn == null) continue;
-        const near = pts.filter(p => distM(p.lat, p.lng, gl, gn) <= NEAR_M);
-        if (near.length !== 1) continue;                 // 0個 or 複数候補に重なる → 区別に使えない
+        const ds = pts.map(p => ({ i: p.i, d: distM(p.lat, p.lng, gl, gn) })).sort((a, b) => a.d - b.d);
+        if (ds[0].d > ASSIGN_MAX) continue;               // どの候補からも遠い → 目印にしない
+        if (ds[1] && ds[1].d - ds[0].d < MARGIN) continue; // 複数候補に同程度に近い → 区別に使えない
         seenName.add(key);
-        const arr = byCand.get(near[0].i);
+        const arr = byCand.get(ds[0].i);                  // 最寄り候補固有の目印として割り当て
         if (arr.length < 15) arr.push(g.name);
       }
       const candList = pts.map(p => ({ name: p.name, nearby: byCand.get(p.i) })).filter(c => c.nearby.length);
