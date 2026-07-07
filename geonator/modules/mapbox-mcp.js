@@ -526,7 +526,10 @@ class MapboxMCPClient {
       url += `&proximity=${proximity[0]},${proximity[1]}`;
     }
     if (bbox && bbox.length >= 4) {
-      url += `&bbox=${this._capBBox(bbox).join(',')}`;
+      // Use the actual (already upstream-bounded) search bbox — do NOT re-cap to ±500m,
+      // which was smaller than e.g. an 8-min-walk condition area and excluded outer-ring
+      // POIs (a ドミノピザ at ~550m from center was dropped from condition search).
+      url += `&bbox=${this._capBBox(bbox, this.config.BBOX_MAX_HALF_M || 2000).join(',')}`;
     }
 
     try {
