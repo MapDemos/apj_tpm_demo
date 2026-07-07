@@ -107,6 +107,7 @@ const CONFIG = {
   SCORE_REL_PROBABLY:     0.7,   // 多分そう
   SCORE_REL_UNKNOWN:      0.4,   // わからない（既定・不確実は控えめ）
   GOLD_MIN_SCORE:         0.5,   // gold候補の絶対スコア下限（固定のゴミ足切り。全件低スコアなら単独fullでもgold不可）
+  SCORE_WEIGHT_FLOORS:    0.4,   // target階数(floors)一致の重み。指定時のみ加算（|指定−実階|で減衰）
 
   DEBUG: true,
 };

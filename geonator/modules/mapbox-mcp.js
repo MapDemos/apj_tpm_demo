@@ -1719,6 +1719,25 @@ class MapboxMCPClient {
     } catch (_) { return null; }
   }
 
+  /**
+   * Floor count of the building at a point, from streets-v8 building layer height
+   * (≈ floors × 3m → ÷3). Same Tilequery URL as _getBuildingId, so the response is
+   * cache-shared (no extra request). null when no building / no height data.
+   */
+  async _getBuildingFloors(lat, lng) {
+    const url =
+      `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
+      `?access_token=${this.token}&radius=10&limit=10&layers=building`;
+    try {
+      const res  = await this._fetchTilequeryWithCache(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const building = (data.features || []).find(f => f.properties?.tilequery?.layer === 'building');
+      const h = building?.properties?.height;
+      return (typeof h === 'number' && h > 0) ? Math.max(1, Math.round(h / 3)) : null;
+    } catch (_) { return null; }
+  }
+
   async _checkSameBuilding(anchorLat, anchorLng, candidates) {
     const anchorId = await this._getBuildingId(anchorLat, anchorLng);
 

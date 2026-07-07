@@ -889,6 +889,7 @@ class LocationFinderApp {
         `<div style="font-weight:700;color:${tier.color}">${tier.badge} ${tier.label}${scorePct != null ? `（スコア ${scorePct}）` : ''}</div>` +
         `<strong>${_esc(place.name || '(名前なし)')}</strong>` +
         (rel ? `<div class="popup-reason" style="color:${rel.color}">関連性 ${rel.stars} ${rel.text}</div>` : '') +
+        (mi.floors != null ? `<div class="popup-reason">🏢 ${mi.floors}階相当</div>` : '') +
         (mi.labels?.length ? `<div class="popup-reason">✓ ${_esc(mi.labels.join('、'))}${mi.total ? `（${mi.hit}/${mi.total}）` : ''}</div>` : '');
 
       const marker = new mapboxgl.Marker({ element: el })

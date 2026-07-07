@@ -76,7 +76,7 @@ class QueryEngine {
     const anchors = (schema.proximity?.anchors || []).map(a => `${a.text}[${a.type}/${a.specificity}]`).join(', ');
     await this._step('step-schema', '⓪ クエリ解釈 (QuerySchema)', [
       `proximity: ${anchors || '(なし)'}${schema.proximity?.bearing_filter ? ' 方角=' + schema.proximity.bearing_filter : ''}`,
-      `target: ${schema.target?.text}  intent=${schema.target?.query_intent}`,
+      `target: ${schema.target?.text}  intent=${schema.target?.query_intent}${schema.target?.floors ? '  階数=' + JSON.stringify(schema.target.floors) : ''}`,
       ...(schema.conditions || []).map(c => {
         const d = c.distance || {};
         return `condition: ${c.text ?? c.type} [${c.type}] 距離=${d.level ?? '-'}/${d.method ?? '-'}${d.minutes ? ' ' + d.minutes + '分' : ''}`;
@@ -1333,8 +1333,30 @@ class QueryEngine {
     // 出口/バス停…）。除外条件は condNotFound で既に注記済み。
     const effTotal = conditions.filter(c => conditionHit.has(c.text ?? c.type)).length;
 
+    // [floors] target floor-count constraint (fuzzy: |Δ| decay). Per-candidate building
+    // height from the streets-v8 building layer — SAME Tilequery URL as _getBuildingId so
+    // the response is cache-shared (no extra request when same_building is also used).
+    const floorSpec = schema.target?.floors || null;
+    const wFloors   = Math.max(0, this.config.SCORE_WEIGHT_FLOORS ?? 0.4);
+    if (floorSpec) {
+      await Promise.all(mainCandidates.map(async c => {
+        const lat = c.latitude ?? c.lat, lng = c.longitude ?? c.lng;
+        c._floors = (lat != null && lng != null) ? await this.mcp._getBuildingFloors(lat, lng) : null;
+      }));
+    }
+    const floorScore = (c) => {
+      if (!floorSpec || c._floors == null) return null; // no constraint / no height data → neutral
+      const TOL = 6, f = c._floors;
+      let d;
+      if (floorSpec.value != null)                          d = Math.abs(f - floorSpec.value);
+      else if (floorSpec.min != null && f < floorSpec.min)  d = floorSpec.min - f;
+      else if (floorSpec.max != null && f > floorSpec.max)  d = f - floorSpec.max;
+      else                                                  d = 0; // inside min/max range
+      return Math.max(0, 1 - d / TOL);
+    };
+
     // Classify (OR — all displayed) + attach continuous score.
-    // score = normalize(w_rel×relScore + w_cond×condScore + w_anchor×anchorScore)。
+    // score = normalize(w_rel×relScore + w_cond×condScore + w_anchor×anchorScore + w_floors×floorScore)。
     const full = [], partial = [], none = [];
     for (const [, t] of tracker) {
       // condScore = 有効条件での平均closeness（分母=effTotal、非ヒット条件は0算入）。
@@ -1342,8 +1364,8 @@ class QueryEngine {
       // effTotal===0（有効条件なし）は null にして weighted の重みから除外＝relevance/anchorのみ。
       const condScore = effTotal > 0 ? t.closenessSum / effTotal : null;
       const c = t.candidate;
-      const score = weighted([[wRel, relScore(c)], [wCond, condScore], [wAnchor, anchorScore(c)]]);
-      c._matchInfo = { hit: t.hit, total: effTotal, labels: t.hitLabels, score: +score.toFixed(3), relevance: c._relevance };
+      const score = weighted([[wRel, relScore(c)], [wCond, condScore], [wAnchor, anchorScore(c)], [wFloors, floorScore(c)]]);
+      c._matchInfo = { hit: t.hit, total: effTotal, labels: t.hitLabels, score: +score.toFixed(3), relevance: c._relevance, floors: c._floors ?? null };
       // effTotal===0 のとき hit(0)===effTotal(0) で full 扱い（＝条件なしと同じ挙動）。
       if (t.hit === effTotal)     full.push(c);
       else if (t.hit > 0)         partial.push(c);
