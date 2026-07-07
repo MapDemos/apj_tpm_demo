@@ -1037,3 +1037,6 @@ html, body {
 .hint-suggest-title { font-size: 12px; color: #94a3b8; margin: 8px 0 4px; }
 .hint-suggest { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .hint-suggest-btn { font-size: 12px; }
+
+/* Debug: isolated step panel (click a step to show only its map elements) */
+.debug-step.step-isolated { outline: 2px solid #f59e0b; outline-offset: 1px; }

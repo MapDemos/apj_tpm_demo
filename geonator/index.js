@@ -556,11 +556,20 @@ class LocationFinderApp {
     const wrapper = document.createElement('div');
     wrapper.className = 'message debug-step';
     wrapper.dataset.step = stepId;
+    wrapper.style.cursor = 'pointer';
+    wrapper.title = this._lang === 'en'
+      ? 'Click to show only this step on the map (click again to restore)'
+      : 'クリックでこのステップの地図要素だけ表示（再クリックで元に戻す）';
     const body = (lines || []).map(l => _esc(l)).join('<br>');
     wrapper.innerHTML =
       `<div class="msg-label">🪜 ${_esc(label)}</div>` +
       `<div class="message-bubble">${body}<div style="margin-top:8px">` +
       `<button class="choice-btn step-next-btn">▶ 次へ</button></div></div>`;
+    // Click the panel body (not the ▶次へ button) → isolate this step's map elements.
+    wrapper.addEventListener('click', (e) => {
+      if (e.target.closest('.step-next-btn')) return;
+      this._isolateStep(stepId);
+    });
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
     // Make the pause obvious: the "thinking" spinner would otherwise keep
@@ -580,6 +589,33 @@ class LocationFinderApp {
     };
     this._debugStepResolve = done;
     btn.addEventListener('click', done);
+  }
+
+  /**
+   * Debug: clicking a step panel shows ONLY that step's map elements (exclusive),
+   * clicking the same panel again (or a step with no map layers) restores the default
+   * (all elements visible). Layers are grouped by step; tier markers count as the
+   * Step2 (evaluation) result.
+   */
+  _isolateStep(stepId) {
+    const GROUPS = {
+      'step-proximity': ['dbg-proximity-c', 'dbg-bboxes-l', 'dbg-bbox-labels-sym'],
+      'step-collect':   ['dbg-search-hits-c', 'dbg-search-hits-l', 'dbg-tq-hits-c', 'dbg-tq-hits-l', 'dbg-clusters-ring', 'dbg-clusters-label'],
+      'step-eval':      ['dbg-eval-polys-fill', 'dbg-eval-polys-line', 'dbg-route-buf-f', 'dbg-route-line-l', 'dbg-route-labels-sym'],
+    };
+    const ALL = Object.values(GROUPS).flat();
+    const isolating = this._isolatedStep !== stepId && !!GROUPS[stepId];
+    this._isolatedStep = isolating ? stepId : null;
+
+    const setVis = (lid, on) => { try { if (this.map.getLayer(lid)) this.map.setLayoutProperty(lid, 'visibility', on ? 'visible' : 'none'); } catch (_) {} };
+    for (const lid of ALL) setVis(lid, !isolating || GROUPS[stepId].includes(lid));
+
+    // Tier markers = the evaluated candidates → shown by default and on Step2 (eval).
+    const showMarkers = !isolating || stepId === 'step-eval';
+    this.candidateMarkers.forEach(m => { try { m.getElement().style.display = showMarkers ? '' : 'none'; } catch (_) {} });
+
+    document.querySelectorAll('.debug-step').forEach(el =>
+      el.classList.toggle('step-isolated', isolating && el.dataset.step === stepId));
   }
 
   /** Highlight the chat step message a clicked map element belongs to. */
@@ -1481,6 +1517,11 @@ class LocationFinderApp {
     Object.keys(this._dbg).forEach(k => { this._dbg[k].features = []; });
     ['dbg-proximity','dbg-bboxes','dbg-bbox-labels','dbg-eval-polys','dbg-search-hits','dbg-clusters','dbg-tq-hits','dbg-route-buf','dbg-route-line','dbg-route-labels'].forEach(id => {
       try { this.map.getSource(id)?.setData({ type: 'FeatureCollection', features: [] }); } catch(_){}
+    });
+    // Reset any step isolation: make all debug layers visible again for the next run.
+    this._isolatedStep = null;
+    ['dbg-proximity-c','dbg-bboxes-l','dbg-bbox-labels-sym','dbg-search-hits-c','dbg-search-hits-l','dbg-tq-hits-c','dbg-tq-hits-l','dbg-clusters-ring','dbg-clusters-label','dbg-eval-polys-fill','dbg-eval-polys-line','dbg-route-buf-f','dbg-route-line-l','dbg-route-labels-sym'].forEach(lid => {
+      try { if (this.map.getLayer(lid)) this.map.setLayoutProperty(lid, 'visibility', 'visible'); } catch(_){}
     });
     document.getElementById('mapLegend').style.display = 'none';
   }
