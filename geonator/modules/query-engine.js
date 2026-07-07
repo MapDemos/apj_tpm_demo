@@ -57,6 +57,10 @@ class QueryEngine {
     this._awaitingClarify = false;
     this._clarifyCount = 0;
     this._dbgReport = { schema: null, proximity: null, target: null, conditions: [], categoryFilter: [], evaluation: null, excludedByHardFilter: [] };
+    // 新規トップレベルクエリは毎回まっさらから。前クエリの候補/bbox/schemaを持ち越さない
+    // （前セッションの候補が絞り込み提案に混ざる等のstaleを防ぐ）。絞り込み(refine)は run() を
+    // 通らないので影響なし。
+    this._cache = { bbox: null, mainCandidates: null, condCandidates: null, surfaced: null, schema: null };
     this.llm.resetStats?.();
     this.mcp.resetRequestCounts?.(); // per-query API caps
     this._runStart = Date.now();
@@ -1661,7 +1665,7 @@ class QueryEngine {
 
     if (totalMain === 0) {
       // [L] main 0 → ask for more info
-      this.ui.showMessage(this._m().mainZero(schema.target.text));
+      this.ui.showMessage(this._m().mainZero(schema.proximity?.anchors?.[0]?.text || '', schema.target?.text || ''));
       return;
     }
 
@@ -1802,7 +1806,7 @@ class QueryEngine {
     const pool = (this._cache.surfaced && this._cache.surfaced.length)
       ? this._cache.surfaced
       : this._cache.mainCandidates;
-    if (!pool || !pool.length) { this.ui.showMessage(this._m().mainZero(schema.target?.text || '')); return; }
+    if (!pool || !pool.length) { this.ui.showMessage(this._m().mainZero(schema.proximity?.anchors?.[0]?.text || '', schema.target?.text || '')); return; }
 
     const merged = { ...schema, conditions: [...(schema.conditions || []), ...addConds] };
     fillSchemaDefaults(merged, this.config.DEFAULT_LEVEL, Math.max(merged.conditions.length, this.config.MAX_CONDITIONS));
@@ -1915,7 +1919,7 @@ const MESSAGES = {
     genericMulti:    t => `「${t}」は複数あります。地名や駅名も一緒に教えてください。`,
     intersectionNotFound: t => `「${t}」という名前の交差点が見つかりませんでした。`,
     condNotFound:    k => `「${k}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`,
-    mainZero:        t => `${t}の近くに候補は見つかりませんでした。追加の情報を教えていただけますか？`,
+    mainZero:        (anchor, target) => `${anchor || 'この付近'}の近くに${target ? `「${target}」` : '候補'}は見つかりませんでした。追加の情報を教えていただけますか？`,
     resultPinpoint: hc => hc ? '条件を1つに絞り込めました！' : '候補を1つに特定できました！',
     resultFew:      (n, hc) => `${hc ? '条件に合う候補' : '候補'}が ${n}件 見つかりました。`,
     resultSomewhat: (n, hc) => `${hc ? '条件に合う候補' : '候補'}が少し多めに（${n}件）見つかりました。上位5件を表示します。`,
@@ -1948,7 +1952,7 @@ const MESSAGES = {
     genericMulti:    t => `There are several "${t}". Please add a place or station name.`,
     intersectionNotFound: t => `No intersection named "${t}" was found.`,
     condNotFound:    k => `"${k}" wasn't found in this area (it may not be in the map data).`,
-    mainZero:        t => `No "${t}" found nearby. Could you give more information?`,
+    mainZero:        (anchor, target) => `No ${target ? `"${target}"` : 'candidates'} found near ${anchor || 'this area'}. Could you give more information?`,
     resultPinpoint: hc => hc ? 'Narrowed down to a single match!' : 'Pinpointed a single candidate!',
     resultFew:      (n, hc) => `Found ${n} ${hc ? 'matching candidates' : 'candidates'}.`,
     resultSomewhat: (n, hc) => `Found quite a few ${hc ? 'matching candidates' : 'candidates'} (${n}). Showing the top 5.`,

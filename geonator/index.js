@@ -726,6 +726,7 @@ class LocationFinderApp {
     });
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
+    this._pinCancelToBottom(); // ステップ吹き出しの下にキャンセルを維持
     // Make the pause obvious: the "thinking" spinner would otherwise keep
     // spinning and look like a hang while we wait for the click.
     this._updateThinking(this._lang === 'ja'
@@ -956,6 +957,12 @@ class LocationFinderApp {
     container.scrollTop = container.scrollHeight;
   }
   _hideCancelBtn() { document.getElementById('cancelRow')?.remove(); }
+  /** キャンセル吹き出しを常に最下部（＝最新のエージェント吹き出しの下）に保つ。 */
+  _pinCancelToBottom() {
+    const r = document.getElementById('cancelRow');
+    const c = document.getElementById('chatMessages');
+    if (r && c && c.lastElementChild !== r) { c.appendChild(r); c.scrollTop = c.scrollHeight; }
+  }
 
   /** ソフトキャンセル：以降の新規API発行を止め(mcpが_cancelledを見る)、UIを即復帰、結果描画を抑止。 */
   _cancelQuery() {
@@ -1151,6 +1158,7 @@ class LocationFinderApp {
    */
   _renderCandidatePanel(full, partial, none, summary) {
     this._hideTypingIndicator();
+    this._hideCancelBtn(); // 候補が出たらキャンセルは不要（以降はフィードバック/絞り込み）
     const rows = [...(full || []), ...(partial || [])];
     if (rows.length === 0 && (!none || none.length === 0) && !summary) return;
 
@@ -2712,6 +2720,7 @@ class LocationFinderApp {
     wrapper.appendChild(lbl); wrapper.appendChild(bubble);
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
+    this._pinCancelToBottom(); // 考え中の下にキャンセルを維持
     // 経過秒を毎秒更新（残りカウントダウンは不確実なので出さない）
     const t0 = Date.now();
     const en = this._lang === 'en';
@@ -2764,6 +2773,7 @@ class LocationFinderApp {
 
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
+    this._pinCancelToBottom(); // キャンセル吹き出しを最下部に維持
   }
 
   // ─────────────────────────────────────────────────────────────
