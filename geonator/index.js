@@ -767,7 +767,10 @@ class LocationFinderApp {
     // Example chips
     document.querySelectorAll('.example-chip').forEach(btn => {
       btn.addEventListener('click', () => {
-        input.value = btn.dataset.q;
+        // Pick the current-language query directly from data-q-ja/en (robust — no reliance
+        // on data-q being pre-populated, which was inserting "null" on click).
+        input.value = (this._lang === 'en' ? btn.dataset.qEn : btn.dataset.qJa)
+          || btn.dataset.qJa || btn.dataset.q || '';
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 120) + 'px';
         input.focus();
