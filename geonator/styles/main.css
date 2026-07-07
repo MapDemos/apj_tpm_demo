@@ -1117,4 +1117,13 @@ html, body {
   /* 入力欄は下に余白（ホームバー/セーフエリア） */
   .input-area { padding: 12px 12px calc(20px + env(safe-area-inset-bottom, 0px)); }
   .static-map img { border-radius: 6px; }
+
+  /* 横スクロール抑止：はみ出しをクリップ＋長語も折り返す */
+  html, body { overflow-x: hidden; max-width: 100%; }
+  .app-container, .chat-panel, .chat-messages { max-width: 100%; overflow-x: hidden; }
+  .message, .message-bubble { max-width: 100%; overflow-wrap: anywhere; }
+  .message.debug-step .message-bubble { word-break: break-word; overflow-wrap: anywhere; }
+
+  /* 入力フォーカス時のズーム抑止（iOS Safariは16px未満のinputで自動ズーム） */
+  .chat-input { font-size: 16px; }
 }
