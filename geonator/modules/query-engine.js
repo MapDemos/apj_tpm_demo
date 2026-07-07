@@ -108,7 +108,7 @@ class QueryEngine {
         return `condition: ${c.text ?? c.type} [${c.type}] 距離=${d.level ?? '-'}/${d.method ?? '-'}${d.minutes ? ' ' + d.minutes + '分' : ''}${qe}`;
       }),
     ]);
-    this.ui.thinking?.(); // proximity解決の計算中も考え中表示
+    this.ui.thinking?.(this._m().thinkingResolve); // 場所特定の計算中
 
     await this._executeSearch(schema, merged);
   }
@@ -270,7 +270,7 @@ class QueryEngine {
       `アンカー: ${this._dbgReport.proximity.anchors.join(', ')}`,
       `target収集bbox 約${this._dbgReport.proximity.targetBboxM}m / condition収集bbox 約${this._dbgReport.proximity.condBboxM}m`,
     ]);
-    this.ui.thinking?.(); // 候補収集の計算中も考え中表示
+    this.ui.thinking?.(this._m().thinkingCollect); // 候補収集の計算中
 
     // [3-B] collect candidates (unless cached)
     if (cacheInvalid.candidates) {
@@ -302,7 +302,7 @@ class QueryEngine {
       `target「${this._dbgReport.target?.intent}」: 取得${this._dbgReport.target?.raw} → 除外${this._dbgReport.target?.excluded} → 残${this._dbgReport.target?.kept}`,
       ...(this._dbgReport.conditions || []).map(c => `条件 ${c.label}[${c.type}]: ${c.found}`),
     ]);
-    this.ui.thinking?.(); // 距離評価（候補スコアリング）の計算中も考え中表示＝候補が出る前
+    this.ui.thinking?.(this._m().thinkingEval); // 距離評価（候補スコアリング）の計算中＝候補が出る前
 
     // [3-C] evaluate (collect reach polygons for visualization)
     this.mcp._evalPolygons = [];
@@ -1713,6 +1713,7 @@ class QueryEngine {
 
     const hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
     if (!hint) return;
+    this.ui.thinking?.(this._m().thinkingNarrow); // 絞り込み計算中も考え中表示
 
     // Chosen agent suggestion → use the KNOWN poi items directly (no parse, no re-query).
     if (hint && typeof hint === 'object' && hint.landmark) {
@@ -1904,6 +1905,10 @@ const MESSAGES = {
     resultNoExact:  n => `条件に完全一致する候補はありませんでした。近い候補を${n}件表示します。`,
     resultNone:     hc => hc ? '条件に合う候補を見つけられませんでした。' : '候補が見つかりませんでした。',
     reachTooLarge:  (min, prof, anchor) => `${({ walking: '徒歩', cycling: '自転車', driving: '車' })[prof] || '徒歩'}${min}分以上は範囲が広すぎるため、${anchor || 'この地点'}の周辺で探します。`,
+    thinkingResolve: '場所を特定しています',
+    thinkingCollect: '候補を集めています',
+    thinkingEval:    '条件との距離を評価しています',
+    thinkingNarrow:  '絞り込んでいます',
   },
   en: {
     searching:            'Searching for candidates…',
@@ -1933,5 +1938,9 @@ const MESSAGES = {
     resultNoExact:  n => `No exact match; showing ${n} close candidate(s).`,
     resultNone:     hc => hc ? 'No matching candidates found.' : 'No candidates found.',
     reachTooLarge:  (min, prof, anchor) => `${min}+ min by ${prof || 'walking'} covers too wide an area; searching around ${anchor || 'this point'} instead.`,
+    thinkingResolve: 'Locating the area',
+    thinkingCollect: 'Gathering candidates',
+    thinkingEval:    'Evaluating distances & conditions',
+    thinkingNarrow:  'Narrowing down',
   },
 };

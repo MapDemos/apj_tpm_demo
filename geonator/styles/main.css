@@ -365,6 +365,7 @@ html, body {
 /* チャット内「考えています…」タイピングインジケータ */
 .message.typing-indicator .message-bubble { display: inline-flex; align-items: center; gap: 8px; }
 .typing-text { color: var(--text-2, #94a3b8); font-size: 13px; }
+.typing-elapsed { color: var(--text-3, #475569); font-size: 11px; font-variant-numeric: tabular-nums; }
 .typing-dots { display: inline-flex; gap: 4px; }
 .typing-dots span {
   width: 6px; height: 6px; border-radius: 50%;

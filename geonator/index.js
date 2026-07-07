@@ -467,8 +467,8 @@ class LocationFinderApp {
       },
       // 1次検索bbox（within到達圏で絞られていればその値）を保持。地図OFF時の静的地図の枠に使う。
       setResultBbox(bbox) { self._lastResultBbox = bbox || null; },
-      // 次の計算中に「考えています…」を再表示（候補表示など、次の吹き出しで自動的に消える）
-      thinking() { self._showTypingIndicator(); },
+      // 次の計算中に「今何をしているか」を再表示（次の吹き出しで自動的に消える）
+      thinking(label) { self._showTypingIndicator(label); },
       drawProximityPoints(points) {
         if (!self._mapActive()) return; // 地図OFF: 描画スキップ
         // proximityアンカー（基準点）の地図表示は無効化（分かりづらいとの指摘）。
@@ -2629,8 +2629,8 @@ class LocationFinderApp {
    * @param {string} text
    */
   /** チャット内「考えています…」タイピング吹き出し（送信〜最初の応答の間の“間”を埋める）。 */
-  _showTypingIndicator() {
-    this._hideTypingIndicator(); // 重複防止
+  _showTypingIndicator(label) {
+    this._hideTypingIndicator(); // 重複防止（タイマーもクリア）
     const container = document.getElementById('chatMessages');
     if (!container) return;
     const wrapper = document.createElement('div');
@@ -2642,13 +2642,22 @@ class LocationFinderApp {
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
     bubble.innerHTML =
-      `<span class="typing-text">${LANG[this._lang].thinking}</span>` +
-      `<span class="typing-dots"><span></span><span></span><span></span></span>`;
+      `<span class="typing-text">${label || LANG[this._lang].thinking}</span>` +
+      `<span class="typing-dots"><span></span><span></span><span></span></span>` +
+      `<span class="typing-elapsed" id="typingElapsed"></span>`; // 経過秒（カウントアップ・正直な安心表示）
     wrapper.appendChild(lbl); wrapper.appendChild(bubble);
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
+    // 経過秒を毎秒更新（残りカウントダウンは不確実なので出さない）
+    const t0 = Date.now();
+    const en = this._lang === 'en';
+    const elEl = document.getElementById('typingElapsed');
+    const tick = () => { if (elEl) elEl.textContent = ` ${Math.round((Date.now() - t0) / 1000)}${en ? 's' : '秒'}`; };
+    tick();
+    this._typingTimer = setInterval(tick, 1000);
   }
   _hideTypingIndicator() {
+    if (this._typingTimer) { clearInterval(this._typingTimer); this._typingTimer = null; }
     document.getElementById('typingIndicator')?.remove();
   }
 
