@@ -193,31 +193,29 @@ scopeは**proximityアンカー（施設）が、どの行政区域/エリアの
 `;
 
 /**
- * L1 Refinement Prompt — 既存検索への「追加の絞り込み」入力を差分解析する。
- * 追加(add=新しい近接条件を足すだけ) か、変更/否定(revise=既存condition/target/proximityを
- * 変える・打ち消す) かを判定し、add のときは "足す新条件だけ" を返す。既存候補の絞り込みに使う。
+ * L1 Refinement Prompt — 既存検索への「追加の絞り込み/修正」を差分(delta)として出力する。
+ * 元の理解を作り直さず、変更点だけを返す（JS側が既存スキーマに surgical に適用）。
+ * これにより再解析による条件消失が起きない。
  */
-const PROMPT_L1_REFINE = `ユーザーは既に位置検索を行い、追加の絞り込み情報を入力しました。「現在の理解」（target / proximity / 既存condition）と「追加情報」を見て、次を判定・出力してください。JSONのみ。
+const PROMPT_L1_REFINE = `ユーザーは既に位置検索を行い、追加の絞り込み/修正を入力しました。「現在の理解」（target / proximity / 既存conditions）と「追加情報」を見て、**既存の理解に対する差分(delta)だけ**を出力してください。元の理解を作り直さず、変わった点だけを返します。JSONのみ。
 
-## mode の判定
-- "add": 追加情報が**新しい近接条件を足すだけ**で、既存の condition・target・proximity を変えない。
-  例:「コンビニも近くにある」「近くに川がある」「南側に交差点」
-- "revise": 追加情報が**既存の condition / target / proximity を変更・否定・置換**する。
-  例:「やっぱり公園じゃなくて川」「マンションじゃなくアパート」「○○駅じゃなく△△駅」「コンビニは無い」
+## 出力フィールド
+- add_conditions: **新しく足す近接条件だけ**（既存条件は含めない）。各条件は通常スキーマ形式:
+  { "type": "poi|road|water|intersection|signal|transit_entrance|category_busstop", "text": "...", "query_intent": "specific|category_busstop|null", "queries": ["..."], "direction": null, "distance": { "method": "radius|isochrone", "level": "...|null", "profile": null, "minutes": null, "meters": null } }
+  text/queries は日本語。距離・時間表現は distance に入れる。無ければ []。
+- remove_condition_texts: 既存conditionsのうち**打ち消す/置き換える**ものの text をそのまま。例:「やっぱり公園じゃなく川」→ remove=["<既存の公園conditionのtext>"], add_conditions=[川の条件]。無ければ []。
+- new_target: **探す対象(target)そのもの**が変わる場合のみ { "type":"...", "text":"...", "query_intent":"...", "queries":[...] }。例「マンションじゃなくアパート」。変わらなければ null。
+- new_proximity: **基準地点(駅・場所)** が変わる場合のみ { "anchors":[{ "type","text","specificity","subtype":{"exit":null} }], "scope":null, "bearing_filter":null }。例「○○駅じゃなく△△駅」。変わらなければ null。
+- confirmation: ユーザー向け自然文(敬体・1〜2文)。足す/変える内容を述べ、「今の候補をさらに絞り込みます」または「〜に変更して探し直しますね」と伝える。
 
-## conditions（mode=add のときのみ）
-足す**新しい条件だけ**を配列で返す（既存条件は含めない）。各条件は通常のスキーマと同形式:
-{ "type": "poi|road|water|intersection|signal|transit_entrance|category_busstop", "text": "...", "query_intent": "specific|category_busstop|null", "queries": ["..."], "direction": null, "distance": { "method": "radius|isochrone", "level": "...|null", "profile": null, "minutes": null, "meters": null } }
-- text/queries は日本語。距離・時間表現は distance に入れる。
-- mode=revise のときは空配列 []。
-
-## confirmation（必須・ユーザー向け自然文・敬体）
-- mode=add:「〜も近くにある、ですね。今の候補をさらに絞り込みます。」のように、足す条件を述べて絞り込む旨を伝える。
-- mode=revise:「〜に変更して探し直しますね。少々お待ちください。」のように、変更して再検索する旨を伝える。
+## 判定の原則
+- 単に近接条件を足すだけなら **add_conditions だけ**を埋める（他は空/null）。
+- target・基準地点の変更、または既存条件の打ち消しがある時だけ、該当フィールドを埋める。
+- **迷ったら「足すだけ(add_conditions)」にする**（既存を壊さない）。
 
 ## 出力スキーマ
 \`\`\`json
-{ "mode": "add | revise", "conditions": [ ... ], "confirmation": "..." }
+{ "add_conditions": [], "remove_condition_texts": [], "new_target": null, "new_proximity": null, "confirmation": "..." }
 \`\`\`
 JSONのみ。前後に説明文を入れない。
 `;

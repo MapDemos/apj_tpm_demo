@@ -51,12 +51,12 @@ class LLMClient {
   }
 
   /**
-   * Parse a refinement hint against the current understanding. Decides whether the
-   * hint ADDS a new condition (narrow existing candidates) or REVISES/negates an
-   * existing condition/target/proximity (full re-search).
+   * Parse a refinement hint as a DELTA against the current understanding (never a
+   * full rebuild-from-text, so existing conditions are never lost). Returns the
+   * conditions to add/remove and any target/proximity change, plus a confirmation.
    * @param {object} schema - current QuerySchema
    * @param {string} hintText - user's refinement text
-   * @returns {Promise<{mode:'add'|'revise', conditions:Array, confirmation:string}|null>}
+   * @returns {Promise<{add_conditions:Array, remove_condition_texts:string[], new_target:object|null, new_proximity:object|null, confirmation:string}|null>}
    */
   async parseRefinement(schema, hintText) {
     if (typeof PROMPT_L1_REFINE === 'undefined') throw new Error('PROMPT_L1_REFINE not loaded');
@@ -69,21 +69,23 @@ class LLMClient {
       const result = await this._callClaude(
         {
           system: PROMPT_L1_REFINE,
-          user:   `現在の理解:\n${JSON.stringify(summary)}\n\n追加情報:「${hintText}」\n\nJSONのみを返してください。`,
+          user:   `現在の理解:\n${JSON.stringify(summary)}\n\n追加情報:「${hintText}」\n\n差分JSONのみを返してください。`,
         },
-        800,
+        900,
         this.config.L1_MODEL,
         'L1'
       );
       const json = this._extractJSON(result);
       if (!json) return null;
       return {
-        mode:         json.mode === 'revise' ? 'revise' : 'add',
-        conditions:   Array.isArray(json.conditions) ? json.conditions : [],
-        confirmation: typeof json.confirmation === 'string' ? json.confirmation : '',
+        add_conditions:        Array.isArray(json.add_conditions) ? json.add_conditions : [],
+        remove_condition_texts: Array.isArray(json.remove_condition_texts) ? json.remove_condition_texts.map(String) : [],
+        new_target:            (json.new_target && typeof json.new_target === 'object') ? json.new_target : null,
+        new_proximity:         (json.new_proximity && Array.isArray(json.new_proximity.anchors) && json.new_proximity.anchors.length) ? json.new_proximity : null,
+        confirmation:          typeof json.confirmation === 'string' ? json.confirmation : '',
       };
     } catch {
-      return null; // caller falls back to full re-parse
+      return null;
     }
   }
 

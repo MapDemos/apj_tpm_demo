@@ -1143,42 +1143,51 @@ class QueryEngine {
         this.llm.resetStats?.();
         this._runStart = Date.now();
 
-        // [6-2b] classify the hint: ADD (append condition, narrow existing candidates)
-        // vs REVISE/negate (changes target/proximity/an existing condition → full re-search).
+        // [6-2b] Parse the hint as a DELTA and apply it surgically to the EXISTING
+        // schema. We never rebuild the schema from text, so existing conditions are
+        // never lost (fixes the "first condition ignored" / "2nd refine reverts" bugs).
         const delta = await this.llm.parseRefinement(schema, hint);
+        if (!delta) { this.ui.showMessage(this._m().error_communication); break; }
 
-        // ADD: keep the existing schema's conditions (fixes "first condition ignored" —
-        // we do NOT re-derive conditions from text) and append only the new ones, then
-        // re-evaluate to narrow the already-surfaced candidates.
         const validTypes = SCHEMA_ENUMS.condition_type;
-        const newConds = (delta?.mode === 'add' ? (delta.conditions || []) : [])
-          .filter(c => c && validTypes.includes(c.type));
-
-        if (delta && delta.mode === 'add' && newConds.length) {
-          const mergedConds = [...(schema.conditions || []), ...newConds];
-          const merged = { ...schema, conditions: mergedConds, confirmation: delta.confirmation };
-          // Fill defaults for the new conditions; cap = current length so refinement
-          // additions are never dropped (user is deliberately adding).
-          fillSchemaDefaults(merged, this.config.DEFAULT_LEVEL, mergedConds.length);
-          this._previousText = `${this._previousText}\n追加情報：${hint}`;
-          if (delta.confirmation) this.ui.showMessage(delta.confirmation);
-          // proximity/target unchanged → bbox reused; conditions changed → candidates
-          // re-collected (target search hits mcp cache) and re-evaluated = narrowing.
-          await this._executeSearch(merged, this._previousText);
-          break;
+        const merged = {
+          ...schema,
+          proximity:  schema.proximity,
+          target:     schema.target,
+          conditions: [...(schema.conditions || [])],
+        };
+        // target change (e.g. マンション→アパート)
+        if (delta.new_target && delta.new_target.text) {
+          merged.target = { ...schema.target, ...delta.new_target };
         }
+        // proximity change (e.g. ○○駅→△△駅)
+        if (delta.new_proximity) {
+          merged.proximity = delta.new_proximity;
+        }
+        // remove existing conditions being replaced/negated (e.g. 公園→川)
+        if (delta.remove_condition_texts.length) {
+          const rm = new Set(delta.remove_condition_texts);
+          merged.conditions = merged.conditions.filter(c => !rm.has(c.text));
+        }
+        // append new conditions (the "add" case — accumulates across refinements)
+        const addConds = delta.add_conditions.filter(c => c && validTypes.includes(c.type));
+        merged.conditions = [...merged.conditions, ...addConds];
 
-        // REVISE/negate (or delta parse failed) → full re-parse + re-search.
-        const newSchema = await this._reparseMerged(hint);
-        if (!newSchema) break;
-        const confirmMsg = newSchema.confirmation || delta?.confirmation;
-        if (confirmMsg) this.ui.showMessage(confirmMsg);
+        merged.confirmation = delta.confirmation;
+        // cap = max(current length, MAX_CONDITIONS): refinement additions are never
+        // dropped even if they exceed the initial cap (user is deliberately narrowing).
+        fillSchemaDefaults(merged, this.config.DEFAULT_LEVEL, Math.max(merged.conditions.length, this.config.MAX_CONDITIONS));
 
-        const invalid = this._detectCacheInvalidation(newSchema);
-        if (invalid.bbox) this._cache.bbox = null;
-        if (invalid.candidates) { this._cache.mainCandidates = null; this._cache.condCandidates = null; }
+        // Guard: a malformed delta (e.g. bad new_proximity) must not run a broken schema.
+        if (!validateQuerySchema(merged).ok) { this.ui.showMessage(this._m().error_communication); break; }
 
-        await this._executeSearch(newSchema, this._previousText);
+        this._previousText = `${this._previousText}\n追加情報：${hint}`;
+        this._dbgReport.schema = merged;
+        if (delta.confirmation) this.ui.showMessage(delta.confirmation);
+
+        // _executeSearch's cache invalidation handles it: proximity/target unchanged →
+        // bbox/target reused; changed → recomputed. Then re-evaluate = narrow/re-search.
+        await this._executeSearch(merged, this._previousText);
         break;
       }
 
