@@ -143,6 +143,7 @@ class LocationFinderApp {
     if (maxCondSel) maxCondSel.value = String(this.config.MAX_CONDITIONS);
     if (sbModeSel) sbModeSel.value = this.config.SAME_BUILDING_MODE ?? 'hard';
     if (flModeSel) flModeSel.value = this.config.FLOORS_MODE ?? 'hard';
+    this._markRecommendedModels(); // 各役割の推奨モデルに「（推奨）」を付す
 
     const persist = () => {
       try {
@@ -221,6 +222,26 @@ class LocationFinderApp {
     if (!el) return;
     const s = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
     el.textContent = `L1:${s(this.config.L1_MODEL)} / L2-1:${s(this.config.L2_1_MODEL)} / L2-2:${s(this.config.L2_2_MODEL)} / L3:${s(this.config.L3_MODEL)}`;
+  }
+
+  /** 各役割の推奨モデル（＝既定）のオプションに「（推奨）」を付す。言語に追従。 */
+  _markRecommendedModels() {
+    const suffix = this._lang === 'en' ? ' (Recommended)' : '（推奨）';
+    // MODEL_DEFAULTS と一致させること（役割ごとの既定＝推奨）
+    const rec = {
+      l1ModelSelect:   'claude-haiku-4-5-20251001',
+      l2_1ModelSelect: 'claude-sonnet-4-6',
+      l2_2ModelSelect: 'claude-sonnet-4-6',
+      l3ModelSelect:   'claude-haiku-4-5-20251001',
+    };
+    for (const [id, recVal] of Object.entries(rec)) {
+      const sel = document.getElementById(id);
+      if (!sel) continue;
+      for (const opt of sel.options) {
+        const base = opt.value.includes('sonnet') ? 'Sonnet 4.6' : 'Haiku 4.5';
+        opt.textContent = base + (opt.value === recVal ? suffix : '');
+      }
+    }
   }
 
   /**
@@ -3119,6 +3140,7 @@ class LocationFinderApp {
       setText('settingsResetBtn', st.resetBtn);
       setText('settingsCloseBtn', st.closeBtn);
     }
+    this._markRecommendedModels?.(); // 「（推奨）」/「(Recommended)」を現在の言語で付け直す
 
     // Update welcome message if conversation hasn't started yet
     const hasUserMsg = document.querySelectorAll('#chatMessages .message.user').length > 0;
