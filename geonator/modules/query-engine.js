@@ -60,6 +60,7 @@ class QueryEngine {
     this.llm.resetStats?.();
     this.mcp.resetRequestCounts?.(); // per-query API caps
     this._runStart = Date.now();
+    const gen = (this._runGen = (this._runGen || 0) + 1); // 実行世代（新クエリ/キャンセルで無効化）
     this.ui.clearResults();
 
     // 確認文を「真っ先に」出すため、軽量な確認文(Haiku)をフルのL1解析(Sonnet)と【並行】発行。
@@ -73,6 +74,7 @@ class QueryEngine {
 
     const schema = await this._parseAndValidate(merged, null);
     if (!schema) return; // clarification was handled inside
+    if (this._aborted(gen)) return; // キャンセル/新クエリなら以降の描画をしない
 
     this._dbgReport.schema = schema;
 
@@ -110,8 +112,11 @@ class QueryEngine {
     ]);
     this.ui.thinking?.(this._m().thinkingResolve); // 場所特定の計算中
 
-    await this._executeSearch(schema, merged);
+    await this._executeSearch(schema, merged, gen);
   }
+
+  /** この実行が中断されたか（キャンセル or より新しいクエリが開始）。 */
+  _aborted(gen) { return gen !== this._runGen || !!this.ui.isCancelled?.(); }
 
   // ─────────────────────────────────────────────
   // [2] L1 parse + [A] structural checks + [II] validate
@@ -219,7 +224,7 @@ class QueryEngine {
   // [3-A] Primary search: proximity → bbox
   // ─────────────────────────────────────────────
 
-  async _executeSearch(schema, originalText) {
+  async _executeSearch(schema, originalText, gen = this._runGen) {
     // Clear previous map results/drawings on every (re)execution so follow-up
     // queries don't accumulate stale markers/bboxes on the map.
     this.ui.clearResults?.();
@@ -304,6 +309,7 @@ class QueryEngine {
     ]);
     this.ui.thinking?.(this._m().thinkingEval); // 距離評価（候補スコアリング）の計算中＝候補が出る前
 
+    if (this._aborted(gen)) return; // 収集後キャンセル/新クエリ→評価/描画しない
     // [3-C] evaluate (collect reach polygons for visualization)
     this.mcp._evalPolygons = [];
     const results = await this._evaluate(schema, this._cache.mainCandidates, this._cache.condCandidates);
@@ -322,6 +328,7 @@ class QueryEngine {
       `全一致 ${results.full.length} / 部分一致 ${results.partial.length} / 参考 ${results.none.length}`,
     ]);
 
+    if (this._aborted(gen)) return; // 評価後キャンセル/新クエリ→結果を描画しない
     // [4] show results
     this._showResults(results, schema);
     this.ui.refreshCounts?.();

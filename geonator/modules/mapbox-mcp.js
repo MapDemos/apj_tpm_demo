@@ -30,6 +30,7 @@ class MapboxMCPClient {
     this._tqCacheHits    = 0;   // Tilequery cache hits
     this._isoRequests    = 0;   // Isochrone API request count (actual fetches only)
     this._isoCacheHits   = 0;   // Isochrone cache hits (within-run isoCache)
+    this._capHit         = { tq: 0, sb: 0, iso: 0 }; // 上限到達でスキップした回数（ユーザー通知用）
     this._tqCache        = new Map(); // url → parsed JSON (cleared on chat reset)
     this._poiGridCache      = new Map();
     this._searchResultCache = new Map();
@@ -47,6 +48,7 @@ class MapboxMCPClient {
     this._tqCacheHits = 0;
     this._isoRequests = 0;
     this._isoCacheHits = 0;
+    this._capHit = { tq: 0, sb: 0, iso: 0 };
   }
 
   /**
@@ -439,8 +441,10 @@ class MapboxMCPClient {
         console.log(`[TQ cache HIT #${this._tqCacheHits}] saves=${this._tqCacheHits} actual=${this._tqRequests}`);
       return { ok: true, json: async () => cached };
     }
+    if (this.app?._cancelled) return { ok: true, json: async () => ({ features: [] }) }; // キャンセル中は新規発行しない
     // Safety cap: once the per-query Tilequery budget is hit, skip real requests.
     if (this._tqRequests >= (this.config.TQ_MAX_PER_QUERY ?? 2000)) {
+      this._capHit.tq++;
       if (this.config.DEBUG) console.warn('[MapboxMCP] Tilequery cap reached — skipping request');
       return { ok: true, json: async () => ({ features: [] }) };
     }
@@ -546,8 +550,10 @@ class MapboxMCPClient {
       url += `&bbox=${this._capBBox(bbox, this.config.BBOX_MAX_HALF_M || 2000).join(',')}`;
     }
 
+    if (this.app?._cancelled) return []; // キャンセル中は新規発行しない
     // Safety cap: skip Search Box requests once the per-query budget is hit.
     if (this._sbRequests >= (this.config.SB_MAX_PER_QUERY ?? 100)) {
+      this._capHit.sb++;
       if (this.config.DEBUG) console.warn('[MapboxMCP] Search Box cap reached — skipping request');
       return [];
     }
@@ -2004,7 +2010,8 @@ class MapboxMCPClient {
    */
   async getIsochronePolygon(lat, lng, minutes, profile = 'walking') {
     const prof = ['walking', 'cycling', 'driving'].includes(profile) ? profile : 'walking';
-    if (this._isoRequests >= (this.config.ISO_MAX_PER_QUERY ?? 100)) return null;
+    if (this.app?._cancelled) return null;
+    if (this._isoRequests >= (this.config.ISO_MAX_PER_QUERY ?? 100)) { this._capHit.iso++; return null; }
     try {
       const url =
         `https://api.mapbox.com/isochrone/v1/mapbox/${prof}/${lng},${lat}` +
@@ -2673,6 +2680,7 @@ class MapboxMCPClient {
     const cached = isoCache.get(cacheKey);
     if (cached) { this._isoCacheHits++; return cached; }
     if (this._isoRequests >= (this.config.ISO_MAX_PER_QUERY ?? 100)) {
+      this._capHit.iso++;
       if (this.config.DEBUG) console.warn('[MapboxMCP] Isochrone cap reached — skipping request');
       return null;
     }

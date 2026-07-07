@@ -362,6 +362,23 @@ html, body {
 .settings-subtitle { font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
 .settings-hint { font-size: 11px; font-weight: 400; color: var(--text-2, #94a3b8); }
 .settings-modelwhy { font-size: 11px; color: var(--text-2, #94a3b8); margin: -6px 0 12px; line-height: 1.4; }
+/* 一貫したアクションボタン（緑=やり直す / 赤=キャンセル） */
+.btn-retry, .btn-cancel {
+  align-self: flex-start;
+  margin-top: 6px;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.btn-retry  { background: var(--green, #22c55e); }
+.btn-cancel { background: var(--red-badge, #ef4444); white-space: nowrap; }
+.btn-retry:hover, .btn-cancel:hover { opacity: .85; }
+
 /* チャット内「考えています…」タイピングインジケータ */
 .message.typing-indicator .message-bubble { display: inline-flex; align-items: center; gap: 8px; }
 .typing-text { color: var(--text-2, #94a3b8); font-size: 13px; }

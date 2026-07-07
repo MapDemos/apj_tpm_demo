@@ -469,6 +469,8 @@ class LocationFinderApp {
       setResultBbox(bbox) { self._lastResultBbox = bbox || null; },
       // 次の計算中に「今何をしているか」を再表示（次の吹き出しで自動的に消える）
       thinking(label) { self._showTypingIndicator(label); },
+      // キャンセルされたか（QueryEngineが各局面で確認し、途中で描画を止める）
+      isCancelled() { return !!self._cancelled; },
       drawProximityPoints(points) {
         if (!self._mapActive()) return; // 地図OFF: 描画スキップ
         // proximityアンカー（基準点）の地図表示は無効化（分かりづらいとの指摘）。
@@ -544,6 +546,15 @@ class LocationFinderApp {
           `API: SB ${self.mapboxMCP?._sbRequests ?? 0} / TQ ${self.mapboxMCP?._tqRequests ?? 0} / ISO ${self.mapboxMCP?._isoRequests ?? 0}`,
         ];
         self.addMessage('tool-status', parts.join('\n'));
+        // 上限到達の警告（TQ/SB/ISO）：どのAPIが上限で打ち切られたかを明示
+        const cap = self.mapboxMCP?._capHit;
+        if (cap && (cap.tq || cap.sb || cap.iso)) {
+          const L = LANG[self._lang], caps = [];
+          if (cap.tq)  caps.push(L.capTQ(self.config.TQ_MAX_PER_QUERY ?? 2000));
+          if (cap.sb)  caps.push(L.capSB(self.config.SB_MAX_PER_QUERY ?? 100));
+          if (cap.iso) caps.push(L.capISO(self.config.ISO_MAX_PER_QUERY ?? 100));
+          self.addMessage('error', `${L.capWarnHead}\n${caps.join('\n')}`);
+        }
         // header cumulative token display
         self._tokens.input  += totIn;
         self._tokens.output += totOut;
@@ -872,6 +883,9 @@ class LocationFinderApp {
       }
     });
 
+    // 処理中のキャンセル（赤ボタン）
+    document.getElementById('cancelBtn')?.addEventListener('click', () => this._cancelQuery());
+
     // 地図表示 ON/OFF（OFFで対話パネルを中央表示＝スマホ風）。設定は localStorage に永続化。
     document.getElementById('mapToggleBtn')?.addEventListener('click', () => this._toggleMap());
     this._setMapOff(this._mapOff); // 起動時のDOM反映（bool は initialize() で確定済み）
@@ -891,35 +905,74 @@ class LocationFinderApp {
   }
 
   async _handleSend() {
+    const input = document.getElementById('chatInput');
+    const text  = input.value.trim();
+    if (!text) return;
+    const examples = document.getElementById('examplesArea'); // Hide examples on first send
+    if (examples) examples.style.display = 'none';
+    input.value = '';
+    this.addMessage('user', text);
+    await this._execQuery(text);
+  }
+
+  /** クエリ実行の共通ルーチン（送信・リトライで共有）。キャンセル/エラー(リトライ)を扱う。 */
+  async _execQuery(text) {
     const input   = document.getElementById('chatInput');
     const sendBtn = document.getElementById('sendBtn');
-    const text    = input.value.trim();
-    if (!text) return;
-
-    // Hide examples on first send
-    const examples = document.getElementById('examplesArea');
-    if (examples) examples.style.display = 'none';
-
-    input.value      = '';
+    this._lastQuery = text;
+    this._cancelled = false;
     sendBtn.disabled = true;
     input.disabled   = true;
-
-    this.addMessage('user', text);
     this._advanceMapGen();
     this._showThinking(LANG[this._lang].connecting);
-    this._showTypingIndicator(); // チャット内「考えています…」（最初の吹き出しで自動的に消える）
+    this._showTypingIndicator();
+    this._showCancelBtn();
 
     try {
       await this.processUserMessage(text);
     } catch (err) {
-      this.addMessage('error', `エラー: ${err.message}`);
+      if (!this._cancelled) this._showErrorWithRetry(err, text);
     } finally {
       this._hideThinking();
-      this._hideTypingIndicator(); // 念のため（応答が1つも出なかった場合の保険）
+      this._hideTypingIndicator();
+      this._hideCancelBtn();
       sendBtn.disabled = false;
       input.disabled   = false;
       input.focus();
     }
+  }
+
+  /** キャンセルボタンの表示/非表示（処理中のみ赤いキャンセルを出す）。 */
+  _showCancelBtn() { const b = document.getElementById('cancelBtn'); if (b) b.style.display = ''; }
+  _hideCancelBtn() { const b = document.getElementById('cancelBtn'); if (b) b.style.display = 'none'; }
+
+  /** ソフトキャンセル：以降の新規API発行を止め(mcpが_cancelledを見る)、UIを即復帰、結果描画を抑止。 */
+  _cancelQuery() {
+    if (this._cancelled) return;
+    this._cancelled = true;                 // mcp/queryEngine が参照して中断
+    this._hideThinking();
+    this._hideTypingIndicator();
+    this._hideCancelBtn();
+    this.addMessage('assistant', LANG[this._lang].cancelled);
+    const input = document.getElementById('chatInput'), sendBtn = document.getElementById('sendBtn');
+    if (sendBtn) sendBtn.disabled = false;
+    if (input) { input.disabled = false; input.focus(); }
+  }
+
+  /** エラー表示＋緑の「やり直す」ボタン（同じクエリを再実行）。通信/上限などを細分化して文言化。 */
+  _showErrorWithRetry(err, retryText) {
+    this.addMessage('error', this._errorText(err), { retry: retryText });
+  }
+
+  /** エラー種別を文言化（通信・タイムアウト・レート制限など）。 */
+  _errorText(err) {
+    const t = LANG[this._lang];
+    const m = (err && err.message ? String(err.message) : '').toLowerCase();
+    if (/abort|cancel/.test(m))                       return t.errCancelled;
+    if (/rate|429|too many/.test(m))                  return t.errRateLimit;
+    if (/timeout|timed out|etimedout/.test(m))        return t.errTimeout;
+    if (/network|failed to fetch|fetch|econn|dns|offline/.test(m)) return t.errNetwork;
+    return `${t.errGeneric}${err?.message ? `（${err.message}）` : ''}`;
   }
 
   _resetChat() {
@@ -2661,7 +2714,7 @@ class LocationFinderApp {
     document.getElementById('typingIndicator')?.remove();
   }
 
-  addMessage(role, text) {
+  addMessage(role, text, opts = {}) {
     this._hideTypingIndicator(); // 実メッセージが出る＝考え中を消す
     const container = document.getElementById('chatMessages');
 
@@ -2688,6 +2741,15 @@ class LocationFinderApp {
     bubble.className = 'message-bubble';
     bubble.innerHTML = _formatMsg(text);
     wrapper.appendChild(bubble);
+
+    // 緑の「やり直す」ボタン（エラー時など、同じクエリを再実行）
+    if (opts.retry) {
+      const btn = document.createElement('button');
+      btn.className = 'btn-retry';
+      btn.textContent = LANG[this._lang].retryBtn;
+      btn.onclick = () => this._execQuery(opts.retry);
+      wrapper.appendChild(btn);
+    }
 
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
@@ -3239,6 +3301,10 @@ class LocationFinderApp {
     const mapBtn = document.getElementById('mapToggleBtn');
     if (mapBtn) mapBtn.textContent = this._mapOff ? t.mapShow : t.mapHide;
 
+    // Cancel button label
+    const cxlBtn = document.getElementById('cancelBtn');
+    if (cxlBtn) cxlBtn.textContent = t.cancelBtn;
+
     // Examples label
     const exLabel = document.getElementById('examples-label');
     if (exLabel) exLabel.textContent = t.examplesLabel;
@@ -3497,6 +3563,18 @@ const LANG = {
     // Processing
     connecting:       'Claude APIに接続中…',
     pausedHint:       '⏸ 追加情報を待っています...',
+    retryBtn:         '🔄 やり直す',
+    cancelBtn:        '✕ キャンセル',
+    cancelled:        'キャンセルしました。',
+    errGeneric:       'エラーが発生しました。もう一度お試しください。',
+    errNetwork:       '通信エラーが発生しました。ネットワークを確認してもう一度お試しください。',
+    errTimeout:       '応答がタイムアウトしました。もう一度お試しください。',
+    errRateLimit:     'リクエストが集中しています（レート制限）。少し待ってからやり直してください。',
+    errCancelled:     'キャンセルされました。',
+    capWarnHead:      '⚠ 一部のデータ取得が上限に達し、候補が抜けている可能性があります：',
+    capTQ:            n => `・Tilequery が上限(${n}回)に到達（設定で引き上げ可）`,
+    capSB:            n => `・Search Box が上限(${n}回)に到達（設定で引き上げ可）`,
+    capISO:           n => `・Isochrone が上限(${n}回)に到達（設定で引き上げ可）`,
     debugPaused:      (s) => `⏸ デバッグ一時停止 — ${s}を確認してから「次のステップへ」をクリック`,
     debugNext:        '▶ 次のステップへ',
     debugDone:        '✓ 続行',
@@ -3606,6 +3684,18 @@ const LANG = {
     hintDone:         '✓ Continuing',
     connecting:       'Connecting to Claude…',
     pausedHint:       '⏸ Waiting for your input…',
+    retryBtn:         '🔄 Retry',
+    cancelBtn:        '✕ Cancel',
+    cancelled:        'Cancelled.',
+    errGeneric:       'Something went wrong. Please try again.',
+    errNetwork:       'Network error. Check your connection and try again.',
+    errTimeout:       'The request timed out. Please try again.',
+    errRateLimit:     'Too many requests (rate limit). Please wait a moment and retry.',
+    errCancelled:     'Cancelled.',
+    capWarnHead:      '⚠ Some data hit its per-query limit; a few candidates may be missing:',
+    capTQ:            n => `・Tilequery hit its limit (${n}); raise it in settings`,
+    capSB:            n => `・Search Box hit its limit (${n}); raise it in settings`,
+    capISO:           n => `・Isochrone hit its limit (${n}); raise it in settings`,
     debugPaused:      (s) => `⏸ Debug paused — check the ${s} then click "Next Step"`,
     debugNext:        '▶ Next Step',
     debugDone:        '✓ Done',
