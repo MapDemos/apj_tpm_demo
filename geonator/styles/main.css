@@ -658,7 +658,7 @@ html, body {
 
 .input-area {
   flex-shrink: 0;
-  padding: 10px 13px;
+  padding: 12px 13px 20px;
   border-top: 1px solid var(--border);
   background: var(--bg-panel);
 }
@@ -1092,3 +1092,29 @@ html, body {
   font-size: 12px; cursor: pointer;
 }
 .cand-more-btn:hover { background: #1e3050; color: var(--text-1); }
+
+/* ── スマホ最適化（スマホブラウザ向け） ───────────────────────────── */
+@media (max-width: 768px) {
+  /* body を縦フレックスにして「ヘッダー(可変高) + 本文(残り全部)」を堅牢に。
+     ヘッダーが折り返して高くなっても本文が正しく残り領域を埋め、入力欄も画面内に収まる。 */
+  body { display: flex; flex-direction: column; }
+  .app-header { flex-wrap: wrap; height: auto; padding: 6px 10px; gap: 6px; flex-shrink: 0; }
+  .header-sub, .model-badge, .api-counter, .token-display { display: none; } /* テレメトリは省スペース */
+  .app-header .control-btn, .lang-toggle-btn { font-size: 11px; padding: 5px 8px; }
+
+  .app-container { flex: 1 1 auto; height: auto; min-height: 0; overflow: hidden; }
+
+  /* チャットを全幅に（地図OFF時の中央寄せ・max-width制限も解除） */
+  .chat-panel { width: 100% !important; min-width: 0; border-right: none; }
+  .app-container.map-off { justify-content: stretch; }
+  .app-container.map-off .chat-panel { max-width: none; border-left: none; border-right: none; }
+
+  /* 地図ON時はスマホでは縦積み（地図を下、チャットを主に） */
+  .app-container:not(.map-off) { flex-direction: column; }
+  .app-container:not(.map-off) .map-panel { flex: 0 0 40vh; }
+  .app-container:not(.map-off) .chat-panel { flex: 1 1 auto; }
+
+  /* 入力欄は下に余白（ホームバー/セーフエリア） */
+  .input-area { padding: 12px 12px calc(20px + env(safe-area-inset-bottom, 0px)); }
+  .static-map img { border-radius: 6px; }
+}

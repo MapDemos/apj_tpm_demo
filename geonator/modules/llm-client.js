@@ -13,6 +13,7 @@ class LLMClient {
   /** Reset per-run stats (tokens, time, calls) keyed by role. */
   resetStats() {
     this.stats = {
+      L1c:  { model: this.config.L1_CONFIRM_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
       L1:   { model: this.config.L1_MODEL,   inTok: 0, outTok: 0, ms: 0, calls: 0 },
       L2_1: { model: this.config.L2_1_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
       L2_2: { model: this.config.L2_2_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },

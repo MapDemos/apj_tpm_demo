@@ -225,10 +225,14 @@ class LocationFinderApp {
     this._updateModelBadge();
   }
 
-  /** localStorage から地図OFF設定を読む（初期化で地図生成の要否判断に使う）。 */
+  /** localStorage から地図OFF設定を読む（初期化で地図生成の要否判断に使う）。
+   *  明示設定があればそれを尊重。無ければスマホ幅は既定OFF（スマホ向け軽量表示）。 */
   _readMapOffPref() {
-    try { return !!(JSON.parse(localStorage.getItem('geonator_ui') || '{}').mapOff); }
-    catch (_) { return false; }
+    try {
+      const ui = JSON.parse(localStorage.getItem('geonator_ui') || '{}');
+      if (typeof ui.mapOff === 'boolean') return ui.mapOff;
+    } catch (_) {}
+    return (window.matchMedia?.('(max-width: 768px)')?.matches) ?? (window.innerWidth <= 768);
   }
 
   /** 地図が「有効（ON かつ生成済み）」か。描画系はこれが真の時だけ実行する。 */
@@ -289,7 +293,7 @@ class LocationFinderApp {
     const el = document.getElementById('model-badge');
     if (!el) return;
     const s = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
-    el.textContent = `L1:${s(this.config.L1_MODEL)} / L2-1:${s(this.config.L2_1_MODEL)} / L2-2:${s(this.config.L2_2_MODEL)} / L3:${s(this.config.L3_MODEL)}`;
+    el.textContent = `L1-1:${s(this.config.L1_CONFIRM_MODEL)} / L1-2:${s(this.config.L1_MODEL)} / L2-1:${s(this.config.L2_1_MODEL)} / L2-2:${s(this.config.L2_2_MODEL)} / L3:${s(this.config.L3_MODEL)}`;
   }
 
   /** 各役割の推奨モデル（＝既定）のオプションに「（推奨）」を付す。言語に追従。 */
@@ -360,7 +364,7 @@ class LocationFinderApp {
       });
       const d = this.config.SCORE_DECISIVENESS ?? 0.4;
       if (decSlider) decSlider.value = String(Math.round(d * 100));
-      if (decVal)    decVal.textContent = `言い切り度 ${Math.round(d * 100)}%`;
+      if (decVal)    decVal.textContent = `${LANG[this._lang]?.settings?.decLabel || '言い切り度'} ${Math.round(d * 100)}%`;
     };
 
     const persist = () => {
@@ -526,16 +530,28 @@ class LocationFinderApp {
         const fmt = n => (n || 0).toLocaleString('ja-JP');
         const secs = (stats.ms / 1000).toFixed(1);
         const shortModel = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
-        const parts = [`⏱ 処理時間 ${secs}s`];
-        let totIn = 0, totOut = 0;
-        // Always list all three roles (even 0 calls) so L2-1/L2-2 cost/time is visible.
-        // 0回 = そのクエリで未実行（キャッシュヒット/対象なし）。
-        for (const [role, s] of [['L1', stats.llm?.L1], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
+        // モデル別 概算単価（$/1M tokens: [入力, 出力]）。名前で判定。
+        const PRICE = { opus: [5, 25], fable: [10, 50], sonnet: [3, 15], haiku: [1, 5] };
+        const costOf = s => {
+          const m = (s.model || '').toLowerCase();
+          const p = m.includes('opus') ? PRICE.opus : m.includes('fable') ? PRICE.fable : m.includes('sonnet') ? PRICE.sonnet : PRICE.haiku;
+          return (s.inTok / 1e6) * p[0] + (s.outTok / 1e6) * p[1];
+        };
+        const roleLines = [];
+        let totIn = 0, totOut = 0, totCost = 0;
+        // 全ロールを表示（0回=そのクエリで未実行）。L1-1=確認文の先出し / L1-2=クエリ解析。
+        for (const [role, s] of [['L1-1', stats.llm?.L1c], ['L1-2', stats.llm?.L1], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
           if (!s) continue;
-          parts.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
-          totIn += s.inTok; totOut += s.outTok;
+          roleLines.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
+          totIn += s.inTok; totOut += s.outTok; totCost += costOf(s);
         }
-        parts.push(`API: SB ${self.mapboxMCP?._sbRequests ?? 0} / TQ ${self.mapboxMCP?._tqRequests ?? 0} / ISO ${self.mapboxMCP?._isoRequests ?? 0}`);
+        const en = self._lang === 'en';
+        const parts = [
+          en ? `⏱ ${secs}s ・ 💰 ~$${totCost.toFixed(4)} (≈¥${Math.round(totCost * 155)})`
+             : `⏱ 処理時間 ${secs}s ・ 💰 概算コスト $${totCost.toFixed(4)}（≈¥${Math.round(totCost * 155)}）`,
+          ...roleLines,
+          `API: SB ${self.mapboxMCP?._sbRequests ?? 0} / TQ ${self.mapboxMCP?._tqRequests ?? 0} / ISO ${self.mapboxMCP?._isoRequests ?? 0}`,
+        ];
         self.addMessage('tool-status', parts.join('\n'));
         // header cumulative token display
         self._tokens.input  += totIn;
@@ -3268,6 +3284,9 @@ class LocationFinderApp {
       setLead('set-concl-title', st.conclTitle);     setText('set-concl-hint', st.conclHint);
       setText('set-dec-cautious', st.decCautious);
       setText('set-dec-decisive', st.decDecisive);
+      // 言い切り度の値ラベル（例: 「言い切り度 100%」）も言語に追従
+      const dv = document.getElementById('decisivenessVal');
+      if (dv && st.decLabel) dv.textContent = `${st.decLabel} ${Math.round((this.config.SCORE_DECISIVENESS ?? 1) * 100)}%`;
       setText('set-score-note', st.scoreNote);
       // tabs
       setText('set-tab-basic', st.tabBasic);
@@ -3536,6 +3555,7 @@ const LANG = {
       conclHint:   '（言い切り ⇔ 慎重）',
       decCautious: '慎重（同程度多め）',
       decDecisive: '言い切り（gold積極）',
+      decLabel:    '言い切り度',
       scoreNote:   '※ スコアの変更は次の検索から反映されます',
       tabBasic:    '基本',
       tabScore:    'スコア',
@@ -3643,6 +3663,7 @@ const LANG = {
       conclHint:   '(decisive ⇔ cautious)',
       decCautious: 'Cautious (more ties)',
       decDecisive: 'Decisive (favor gold)',
+      decLabel:    'Decisiveness',
       scoreNote:   '※ Scoring changes apply from the next search',
       tabBasic:    'Basic',
       tabScore:    'Score',
