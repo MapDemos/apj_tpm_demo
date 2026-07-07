@@ -677,6 +677,7 @@ class LocationFinderApp {
    * Tagged with data-step so map elements can highlight it on click.
    */
   _showStepPanel(stepId, label, lines, onNext) {
+    this._hideTypingIndicator();
     const container = document.getElementById('chatMessages');
     const wrapper = document.createElement('div');
     wrapper.className = 'message debug-step';
@@ -889,6 +890,7 @@ class LocationFinderApp {
     this.addMessage('user', text);
     this._advanceMapGen();
     this._showThinking(LANG[this._lang].connecting);
+    this._showTypingIndicator(); // チャット内「考えています…」（最初の吹き出しで自動的に消える）
 
     try {
       await this.processUserMessage(text);
@@ -896,6 +898,7 @@ class LocationFinderApp {
       this.addMessage('error', `エラー: ${err.message}`);
     } finally {
       this._hideThinking();
+      this._hideTypingIndicator(); // 念のため（応答が1つも出なかった場合の保険）
       sendBtn.disabled = false;
       input.disabled   = false;
       input.focus();
@@ -1066,6 +1069,7 @@ class LocationFinderApp {
    * normal and debug mode.
    */
   _renderCandidatePanel(full, partial, none, summary) {
+    this._hideTypingIndicator();
     const rows = [...(full || []), ...(partial || [])];
     if (rows.length === 0 && (!none || none.length === 0) && !summary) return;
 
@@ -2607,7 +2611,32 @@ class LocationFinderApp {
    * @param {'user'|'assistant'|'thinking-msg'|'tool-status'|'error'} role
    * @param {string} text
    */
+  /** チャット内「考えています…」タイピング吹き出し（送信〜最初の応答の間の“間”を埋める）。 */
+  _showTypingIndicator() {
+    this._hideTypingIndicator(); // 重複防止
+    const container = document.getElementById('chatMessages');
+    if (!container) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message assistant typing-indicator';
+    wrapper.id = 'typingIndicator';
+    const lbl = document.createElement('div');
+    lbl.className = 'msg-label';
+    lbl.textContent = LANG[this._lang].roleAssistant;
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+    bubble.innerHTML =
+      `<span class="typing-text">${LANG[this._lang].thinking}</span>` +
+      `<span class="typing-dots"><span></span><span></span><span></span></span>`;
+    wrapper.appendChild(lbl); wrapper.appendChild(bubble);
+    container.appendChild(wrapper);
+    container.scrollTop = container.scrollHeight;
+  }
+  _hideTypingIndicator() {
+    document.getElementById('typingIndicator')?.remove();
+  }
+
   addMessage(role, text) {
+    this._hideTypingIndicator(); // 実メッセージが出る＝考え中を消す
     const container = document.getElementById('chatMessages');
 
     const t = LANG[this._lang];
@@ -3408,6 +3437,7 @@ const LANG = {
     mapShow:       '🗺 地図表示ON',
     staticMapCap:  '上位5件まで表示',
     staticMapAlt:  '検索結果の地図（上位5件）',
+    thinking:      '考えています',
     examplesLabel: '入力例',
     mapReady:      '地図の準備ができました',
     mapLoading:    '地図を読み込み中…',
@@ -3516,6 +3546,7 @@ const LANG = {
     mapShow:       '🗺 Map ON',
     staticMapCap:  'Showing up to top 5',
     staticMapAlt:  'Result map (top 5)',
+    thinking:      'Thinking',
     examplesLabel: 'Examples',
     mapReady:      'Map ready',
     mapLoading:    'Loading map…',
