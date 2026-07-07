@@ -322,6 +322,11 @@ class QueryEngine {
   async _resolveProximity(schema) {
     const anchors = schema.proximity.anchors;
     let resolvedPoints = [];
+    // within（到達距離/時間）指定時は、基準点を1点だけ解決すれば足りる（到達圏がbboxの正）。
+    // 駅の出入口展開・既定半径(400m)は作らない＝出入口tilequeryも省く。ただし出口が明示
+    // された場合だけは出入口が要るので単一点化しない。
+    const w = schema.proximity.within;
+    const wantSinglePoint = !!(w && (w.minutes != null || w.meters != null));
 
     // Optional scope (broad area to locate/disambiguate a POI anchor within):
     // 「鎌倉市のコメダの前の…」→ scope=鎌倉市, anchor=コメダ.
@@ -337,7 +342,7 @@ class QueryEngine {
         return null; // re-entry will happen from feedback loop
       }
 
-      const points = await this._resolveAnchor(anchor, scopeBbox);
+      const points = await this._resolveAnchor(anchor, scopeBbox, wantSinglePoint);
       if (points === null) return null; // clarification/disambiguation in progress or aborted
       if (points.length === 0) {
         this.ui.showMessage(this._m().anchorNotFound(anchor.text));
@@ -402,10 +407,10 @@ class QueryEngine {
     return { bbox, resolvedPoints };
   }
 
-  async _resolveAnchor(anchor, scopeBbox = null) {
+  async _resolveAnchor(anchor, scopeBbox = null, singlePoint = false) {
     switch (anchor.type) {
       case 'station':
-        return await this._resolveStation(anchor);
+        return await this._resolveStation(anchor, singlePoint);
       case 'locality':
       case 'address':
         // Area anchors (地名・丁目) — homonym disambiguation by municipality
@@ -436,7 +441,7 @@ class QueryEngine {
     return [lng - dLng, lat - dLat, lng + dLng, lat + dLat];
   }
 
-  async _resolveStation(anchor) {
+  async _resolveStation(anchor, singlePoint = false) {
     // 1. Search Box → station coordinate (with homonym disambiguation)
     const sbResult = await this.mcp.searchBox(anchor.text, { types: 'poi,address,place' });
     if (!sbResult?.features?.length) return null;
@@ -463,6 +468,12 @@ class QueryEngine {
       chosenFeat = reps[idx >= 0 ? idx : 0];
     }
     const stationCoord = chosenFeat.geometry.coordinates; // [lng, lat]
+
+    // proximity.within 指定時（出口指定なし）は駅中心の1点だけ返す。到達圏(within)がbboxの正
+    // になるので、出入口のtilequery展開も既定半径(400m)も作らない（無駄を省く）。
+    if (singlePoint && !anchor.subtype?.exit) {
+      return [{ lng: stationCoord[0], lat: stationCoord[1] }];
+    }
 
     // 2. Tilequery → all transit entrances
     const entrances = await this.mcp.tilequeryTransitEntrances(stationCoord[1], stationCoord[0], 500);
