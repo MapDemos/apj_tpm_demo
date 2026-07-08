@@ -149,7 +149,7 @@ class QueryEngine {
   // [2] L1 parse + [A] structural checks + [II] validate
   // ─────────────────────────────────────────────
 
-  async _parseAndValidate(userText, previousText, skipTargetClarify = false) {
+  async _parseAndValidate(userText, previousText, skipInterp = false) {
     // ブロークンな入力（音声等）は L1 が場所依頼を取りこぼすことがある。手がかりがありそうな
     // （＝それなりの長さの）入力で not_a_query/必須欠落になったら、注記を付けて再試行する。
     // 挨拶等の短い入力は1回で確定（無駄な再試行をしない）。temp=0でも注記でプロンプトが変わり
@@ -199,21 +199,24 @@ class QueryEngine {
       return null;
     }
 
-    // [target曖昧の確認] "一箇所に絞る"のtarget版。L1がキーワード羅列等で探索対象を確定できず
-    // target.alternatives を挙げた場合、「何をお探しですか？」で確認する（黙って片方に決めない）。
-    // 選ばれた対象で解釈し直す（差し替えの整合は L1 に任せる＝確実）。skipで再帰の二重確認を防止。
-    if (!skipTargetClarify) {
-      const alts = Array.isArray(schema.target?.alternatives) ? schema.target.alternatives.filter(s => s && typeof s === 'string') : [];
-      if (alts.length && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
+    // [解釈の確認] 入力の"構造"（target/proximity/condition の役割・距離の帰属）が2通り以上に
+    // 読める時、L1 が interpretations（完結した日本語文・最大3・先頭=最有力）を返す。JSがボタン＋
+    // 自由入力で「どの意図か」を提示し、選択/入力された文で解釈し直す（＝確実）。UI制御はJS主導。
+    // スキップ（何もせず送信）＝先頭(既定)スキーマで続行。skipInterp で再帰の二重確認を防止。
+    if (!skipInterp) {
+      const interps = Array.isArray(schema.interpretations)
+        ? schema.interpretations.filter(s => s && typeof s === 'string' && s.trim()) : [];
+      if (interps.length > 1 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
         this._clarifyCount++;
-        const opts = [schema.target.text, ...alts].filter((v, i, a) => v && a.indexOf(v) === i).slice(0, this.config.CLARIFY_MAX_CHOICES || 5);
-        const chosen = await this.ui.showChoices(this._m().ask_target, opts);
-        if (chosen && chosen !== schema.target.text) {
-          return await this._parseAndValidate(`${userText}（探しているのは「${chosen}」）`, previousText, true);
+        const sugg = interps.slice(0, this.config.CLARIFY_MAX_CHOICES || 5).map(t => ({ text: t }));
+        const pick = await this.ui.showHintInput(this._m().which_interpretation, sugg);
+        if (pick) { // ボタン選択(obj) or 自由入力(str) → その文で解釈し直す（先頭既定はスキップ時）
+          const hint = (typeof pick === 'object' && pick.text) ? pick.text : String(pick);
+          return await this._parseAndValidate(hint, null, true);
         }
       }
     }
-    if (schema.target) delete schema.target.alternatives; // 以降に持ち越さない
+    if (schema.interpretations) delete schema.interpretations; // 以降に持ち越さない
 
     fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
 
@@ -2362,6 +2365,7 @@ const MESSAGES = {
     searching:            '候補を検索しています…',
     ask_proximity:        'どのあたりをお探しですか？地名や駅名を教えてください。',
     ask_target:           '何をお探しですか？',
+    which_interpretation: 'どの意図に近いですか？下から選ぶか、言い方を変えて教えてください。',
     ask_hint:             'さらに絞り込む情報を教えてください（例：出口番号、近くの交差点名、建物の特徴など）。',
     confirmed:            'ありがとうございました。またお気軽にご相談ください。',
     welcome:              '探している場所を教えてください。近くの駅名・施設名・住所と、条件（近くのお店・道路など）を一緒に伝えていただくと絞り込めます。',
@@ -2406,6 +2410,7 @@ const MESSAGES = {
     searching:            'Searching for candidates…',
     ask_proximity:        'Where should I look? Please give a place or station name.',
     ask_target:           'What are you looking for?',
+    which_interpretation: 'Which did you mean? Pick one below, or rephrase it.',
     ask_hint:             'Add details to narrow it down (e.g. exit number, nearby intersection, building features).',
     confirmed:            'Thank you. Feel free to ask anytime.',
     welcome:              'Tell me the location you are looking for. Share a nearby station, facility, or address, plus conditions (nearby stores, roads, etc.).',
