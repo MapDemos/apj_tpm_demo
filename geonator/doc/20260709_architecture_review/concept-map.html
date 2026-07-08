@@ -61,6 +61,26 @@
   .sact .em{color:var(--ink-3);font-size:12px;}
   @media(max-width:640px){.step{grid-template-columns:24px 1fr;}.flow{grid-column:2;}}
 
+  /* flowchart */
+  .flow{position:relative;padding-left:26px;margin-top:6px;}
+  .flow::before{content:"";position:absolute;left:8px;top:8px;bottom:8px;width:2px;background:var(--line);}
+  .fitem{position:relative;margin:0 0 10px;}
+  .fitem::before{content:"";position:absolute;left:-18px;top:16px;width:14px;height:2px;background:var(--line);}
+  .fphase{position:relative;margin:18px 0 12px;font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--teal-ink);font-weight:800;}
+  .fphase::before{content:"";position:absolute;left:-24px;top:1px;width:16px;height:16px;border-radius:50%;background:var(--teal-bg);border:2px solid var(--teal);}
+  .fp,.fd{background:var(--paper);border:1px solid var(--line);padding:8px 13px;font-size:13px;border-radius:3px;}
+  .fp .em{color:var(--ink-3);font-size:12px;}
+  .fd{border-left:3px solid var(--warn);}
+  .fd .q{font-weight:700;display:block;}
+  .fd .q::before{content:"◇ ";color:var(--warn);}
+  .branches{display:flex;flex-direction:column;gap:6px;margin:8px 0 0 6px;}
+  .fb{font-size:12px;padding:5px 10px;border-radius:3px;border:1px solid var(--line);background:#FBFCFB;color:var(--ink-2);}
+  .fb b{font-family:var(--mono);font-size:10px;padding:1px 6px;border-radius:2px;margin-right:7px;color:#fff;letter-spacing:.02em;}
+  .fb.cont{border-style:dashed;} .fb.cont b{background:var(--ink-3);}
+  .fb.loop{border-color:#BFDCD6;background:var(--teal-bg);color:var(--teal-ink);} .fb.loop b{background:var(--teal);}
+  .fb.exit{border-color:#E4C7C5;background:var(--gap-bg);color:var(--gap);} .fb.exit b{background:var(--gap);}
+  .fb.go{border-color:#D9C79A;background:var(--warn-bg);color:var(--warn);} .fb.go b{background:var(--warn);}
+
   /* section */
   section{margin:0 0 40px;}
   .sec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px;}
@@ -208,6 +228,74 @@
       <div class="phase">④ 結果・フィードバック</div>
       <div class="step"><span class="snum">13</span><span class="flow"><span class="ac js">JS</span><span class="arw">→</span><span class="ac user">User</span></span><span class="sact">結果表示（gold/候補・地図ピン・result_area なら面）／ 0件は追加情報を要求</span></div>
       <div class="step"><span class="snum">14</span><span class="flow"><span class="ac js">JS</span><span class="arw">⇄</span><span class="ac user">User</span></span><span class="sact">フィードバック → 探し直す / 更に絞り込む（L3 が目印提案）→ ⓪へループ</span></div>
+    </div>
+  </section>
+
+  <!-- FLOWCHART -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">フロー</span>
+      <h2>分岐フロー（判定と枝分かれ）</h2>
+      <span class="verdict v-warn">◇=判定 · <span style="color:var(--teal-ink)">loop</span>/<span style="color:var(--warn)">go</span>/<span style="color:var(--gap)">exit</span></span>
+    </div>
+    <p class="sec-note">同じ⓪〜④のフェーズを、<b>判定（◇）と枝分かれ</b>で描いたもの。多くの枝は<b>ユーザーに聞いて戻る（loop）</b>か<b>次へ進む（go）</b>で、行き止まりは<b>終了/ガイド（exit）</b>。破線＝そのまま下へ（主経路）。</p>
+    <div class="flow">
+
+      <div class="fphase">⓪ クエリ解釈</div>
+      <div class="fitem"><div class="fp">入力（多重発火ロック） → <span class="em">L1-1 確認文は並行</span></div></div>
+      <div class="fitem"><div class="fp">L1-2 解析 → QuerySchema</div></div>
+      <div class="fitem"><div class="fd"><span class="q">場所依頼として読めた？</span>
+        <div class="branches">
+          <div class="fb exit"><b>いいえ</b>手がかり0 → 注記付きで最大3回再試行 → なお不可なら not_a_query でガイド（終了）</div>
+          <div class="fb cont"><b>はい</b>↓ 次へ</div>
+        </div></div></div>
+      <div class="fitem"><div class="fd"><span class="q">解釈が割れる？（interpretations ≥ 2）</span>
+        <div class="branches">
+          <div class="fb loop"><b>はい</b>「どの意図？」を提示 → 選択 → ⓪ 解析へ戻る</div>
+          <div class="fb cont"><b>いいえ</b>↓ 次へ</div>
+        </div></div></div>
+
+      <div class="fphase">① 一次検索：proximity 解決</div>
+      <div class="fitem"><div class="fp">Search Box で anchor（駅/地名/POI）を解決</div></div>
+      <div class="fitem"><div class="fd"><span class="q">場所が曖昧？（同名 / 口語 / generic）</span>
+        <div class="branches">
+          <div class="fb loop"><b>はい</b>もしかして / どちら（L1-3 地名解釈）→ 選択</div>
+          <div class="fb cont"><b>いいえ</b>↓ 次へ</div>
+        </div></div></div>
+      <div class="fitem"><div class="fd"><span class="q">範囲が広すぎ？（bbox &gt; 4km・面アンカー）</span>
+        <div class="branches">
+          <div class="fb loop"><b>はい</b>L1-3 で駅/エリアを列挙 → 選択で有界 anchor に絞る</div>
+          <div class="fb cont"><b>いいえ</b>↓ 次へ</div>
+        </div></div></div>
+      <div class="fitem"><div class="fp">near-extent（種別別半径）・scope（県/市区）で探索 bbox 確定</div></div>
+
+      <div class="fphase">② 二次検索 Step1：候補収集 ＋ L2</div>
+      <div class="fitem"><div class="fp">Search Box ＋ Tilequery で target / condition 収集（≤150）</div></div>
+      <div class="fitem"><div class="fp">L2-1 カテゴリ妥当性 ／ L2-2 名前の関連性 → no を除外</div></div>
+      <div class="fitem"><div class="fd"><span class="q">target が過密？（&gt; 150）</span>
+        <div class="branches">
+          <div class="fb go"><b>はい</b>タイト条件（すぐ隣のドミノピザ等）に昇格 → ② 再収集／昇格不可なら目印を聞く</div>
+          <div class="fb cont"><b>いいえ</b>↓ 次へ</div>
+        </div></div></div>
+      <div class="fitem"><div class="fd"><span class="q">0 件？</span>
+        <div class="branches">
+          <div class="fb exit"><b>はい</b>バス停 tileset で再取得／それでも0件なら追加情報を要求（戻る）</div>
+          <div class="fb cont"><b>いいえ</b>↓ 次へ</div>
+        </div></div></div>
+
+      <div class="fphase">③ 二次検索 Step2：距離評価・スコアリング</div>
+      <div class="fitem"><div class="fp">ハード除外（same_building / floors）</div></div>
+      <div class="fitem"><div class="fp">スコア = 関連性 × 条件距離 × アンカー距離 ＋floors</div></div>
+      <div class="fitem"><div class="fp">ティア決定（gold ＋ margin）</div></div>
+
+      <div class="fphase">④ 結果・フィードバック</div>
+      <div class="fitem"><div class="fp">結果表示（gold/候補・地図ピン・result_area なら面）</div></div>
+      <div class="fitem"><div class="fd"><span class="q">フィードバック？</span>
+        <div class="branches">
+          <div class="fb loop"><b>絞込</b>探し直す / 更に絞り込む（L3 が目印提案）→ ⓪ or ② へ戻る</div>
+          <div class="fb exit"><b>完了</b>終了</div>
+        </div></div></div>
+
     </div>
   </section>
 
