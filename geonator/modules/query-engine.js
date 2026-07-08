@@ -861,7 +861,8 @@ class QueryEngine {
    * 透明化の注記を組み立てる（早出し吹き出しと候補パネルで共通利用）。
    *   A: droppedConditionTexts — 上限超過で検索対象から外した地理条件
    *   B: unsupported_features  — 数値化・地図化できない非地理的な特徴（壁が赤い等）
-   * 該当が無ければ '' を返す。A/B 両方あれば改行で連結。
+   *   C: rail条件の申し送り     — 地下鉄など地下の路線と地上線路をデータ上区別できない旨
+   * 該当が無ければ '' を返す。複数あれば改行で連結。
    */
   _exclusionNote(schema) {
     const M = this._m();
@@ -871,6 +872,8 @@ class QueryEngine {
     if (dropped.length) parts.push(M.droppedConditions(dropped.join(sep)));
     const unsup = schema?.unsupported_features || [];
     if (unsup.length) parts.push(M.unsupportedFeatures(unsup.join(sep)));
+    // rail は地下鉄も地上線路も区別できない → 「線路沿い」指定時は申し送り（検索ロジックは不変）。
+    if ((schema?.conditions || []).some(c => c.type === 'rail')) parts.push(M.railSubwayNote());
     return parts.join('\n');
   }
 
@@ -2039,6 +2042,7 @@ const MESSAGES = {
     thinkingNarrow:  '絞り込んでいます',
     droppedConditions: list => `なお、条件が多いため「${list}」は今回の検索には含めていません。`,
     unsupportedFeatures: list => `「${list}」は地図データから判定できないため、検索条件には含めていません。`,
+    railSubwayNote: () => `「線路沿い」は地下鉄など地下を通る路線も線路とみなして検索します（地上の線路だけには限定できません）。`,
   },
   en: {
     searching:            'Searching for candidates…',
@@ -2074,5 +2078,6 @@ const MESSAGES = {
     thinkingNarrow:  'Narrowing down',
     droppedConditions: list => `Note: to keep the search focused, "${list}" ${/,/.test(list) ? 'are' : 'is'} not included in this search.`,
     unsupportedFeatures: list => `"${list}" cannot be determined from map data, so ${/,/.test(list) ? 'they are' : 'it is'} not included as a search condition.`,
+    railSubwayNote: () => `For "along a railway", underground lines such as subways are also treated as railways (surface-only lines cannot be isolated).`,
   },
 };
