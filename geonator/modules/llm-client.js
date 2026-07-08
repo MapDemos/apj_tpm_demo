@@ -270,13 +270,26 @@ class LLMClient {
     return /sonnet-4-6|opus-4-6|haiku-4-5|claude-3/.test(String(model || ''));
   }
 
+  /**
+   * モデル別のタイムアウト下限(ms)。4.6/Haiku 系は速いので下限なし(0)＝呼び出し側/既定に委ねる。
+   * Sonnet 5・Opus 4.7+・Fable 5 は1コールが重く、既定8秒だと L2/L3 でもタイムアウトしがちなので
+   * 下限を引き上げる（L1 は元々 L1_TIMEOUT_MS=20s で十分長い）。
+   */
+  _minTimeoutMs(model) {
+    const m = String(model || '');
+    if (this._supportsTemperature(m)) return 0;      // 4.6世代以前は速い
+    return this.config.SLOW_MODEL_TIMEOUT_MS || 20000; // 5世代/Opus4.7+/Fable5
+  }
+
   async _callClaude(prompt, maxTokens = 400, model = null, role = null, opts = {}) {
     const controller = new AbortController();
+    const useModel = model || this.config.CLAUDE_MODEL;
     // opts.timeoutMs: 呼び出し側でタイムアウトを上書き可能（L1は出力が大きく生成に時間がかかるため長め）。
-    const timeoutMs = opts.timeoutMs || this.config.API_TIMEOUT_MS;
+    // さらにモデル依存の下限を課す：Sonnet 5 等の5世代・Opus 4.7+・Fable 5 は 4.6 より1コールが
+    // 重く、既定8秒では L2/L3 でもタイムアウトしがち → 下限を引き上げる。
+    const timeoutMs = Math.max(opts.timeoutMs || this.config.API_TIMEOUT_MS, this._minTimeoutMs(useModel));
     let timedOut = false;
     const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
-    const useModel = model || this.config.CLAUDE_MODEL;
     const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
     // opts.cacheSystem: システムプロンプトをプロンプトキャッシュ対象にする（不変で使い回す L1/L2 向け）。

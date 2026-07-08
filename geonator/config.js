@@ -9,7 +9,7 @@
 const CONFIG = {
 
   // ビルド確認用バージョン（キャッシュで古いJSを読んでいないかの切り分けに使う）。変更ごとに更新。
-  APP_VERSION: '2026-07-08.1451',
+  APP_VERSION: '2026-07-08.1455',
 
   // ============================================
   // API KEYS
@@ -83,6 +83,7 @@ const CONFIG = {
   MAX_CLARIFY_TURNS:   3,            // max clarification loops before best-effort (HH)
   API_TIMEOUT_MS:      8000,         // per-API-call timeout in ms (GG)
   L1_TIMEOUT_MS:       20000,        // L1(解析)専用タイムアウト。出力が大きく生成に時間がかかるため既定より長め
+  SLOW_MODEL_TIMEOUT_MS: 20000,      // 5世代/Opus4.7+/Fable5 のタイムアウト下限。1コールが重く既定8秒では足りないため
   API_MAX_RETRY:       1,            // retries on timeout (GG)
   L1_MAX_RETRY:        1,            // L1 JSON invalid → retry count (II)
   CANDIDATE_LIMIT:     150,          // max candidates collected per query
