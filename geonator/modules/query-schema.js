@@ -135,6 +135,8 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
         c.queries.unshift(c.text);
       }
       if (c.direction === undefined) c.direction = null;
+      // negate: 「〜が無い/入っていない/ではない」反転条件。既定は false（通常の「〜がある」）。
+      c.negate = c.negate === true;
     }
   }
 

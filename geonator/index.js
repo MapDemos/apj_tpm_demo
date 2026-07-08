@@ -1217,13 +1217,25 @@ class LocationFinderApp {
 
       const row = document.createElement('div');
       row.className = 'cand-row';
-      row.innerHTML =
+      const line = document.createElement('div');
+      line.className = 'cand-line';
+      line.innerHTML =
         `<span class="cand-rank">${i + 1}</span>` +
         `<span class="cand-icon">${icon}</span>` +
         `<span class="cand-name">${_esc(c.name || '(名前なし)')}</span>` +
         `<span class="cand-score">${scorePct}${dist}</span>`;
+      row.appendChild(line);
       row.title = 'クリックで地図上の位置へ';
       row.addEventListener('click', () => this._focusCandidate(c.id, lng, lat));
+
+      // なぜこの候補か（満たした条件・階数）を名前の下に表示。反転条件は（がない/ではない）付き。
+      const reasons = Array.isArray(mi.reasons) ? mi.reasons : [];
+      if (reasons.length) {
+        const rz = document.createElement('div');
+        rz.className = 'cand-reasons';
+        rz.innerHTML = reasons.map(r => `<span class="cand-reason">${_esc(r)}</span>`).join('');
+        row.appendChild(rz);
+      }
 
       const fb = document.createElement('div');
       fb.className = 'cand-fb';
@@ -1241,7 +1253,7 @@ class LocationFinderApp {
       };
       fb.appendChild(mk('✓ 正解', 'correct', 'ok'));
       fb.appendChild(mk('✗ 違う', 'wrong', 'ng'));
-      row.appendChild(fb);
+      line.appendChild(fb);
       panel.appendChild(row);
       rowEls.push(row);
     });

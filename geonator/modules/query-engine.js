@@ -977,6 +977,45 @@ class QueryEngine {
     return '階数';
   }
 
+  /** floors spec を「N階建て(以上/以下)」形式に（候補理由の表示用）。 */
+  _floorReasonLabel(spec) {
+    if (!spec) return '階数';
+    if (spec.value != null) return `${spec.value}階建て`;
+    if (spec.min != null)   return `${spec.min}階建て以上`;
+    if (spec.max != null)   return `${spec.max}階建て以下`;
+    return '階数';
+  }
+
+  /**
+   * 候補ごとの「なぜこの候補か」理由リスト（✔️付き文字列の配列）を組み立てる。
+   * - target.floors を満たす → 「✔️ 5階建て以上（7階相当）」
+   * - 満たした各 condition → 「✔️ すぐ近くにセブンイレブン」（level で近さ表現を出し分け）
+   * - 反転条件(negate) → POI系は「（がない）」、道路/水域系は「（ではない）」を付す
+   * ハード同ビル条件は _matchInfo.labels に載らないが、生存候補は必ず満たしているので別途加える。
+   */
+  _candidateReasons(schema, c) {
+    const out = [];
+    const fs = schema?.target?.floors;
+    if (fs && c._floors != null && this._floorPass(c._floors, fs)) {
+      out.push(`✔️ ${this._floorReasonLabel(fs)}（${c._floors}階相当）`);
+    }
+    const sameBuildingHard = (this.config.SAME_BUILDING_MODE ?? 'hard') === 'hard';
+    const hitSet = new Set(c._matchInfo?.labels ?? []);
+    for (const cond of (schema?.conditions ?? [])) {
+      const label = cond.text ?? cond.type;
+      const lvl = cond.distance?.level;
+      const isHardSame = sameBuildingHard && lvl === 'same_building';
+      // ハード同ビル条件は生存＝満たしている。それ以外はヒット集合で判定。
+      if (!(isHardSame || hitSet.has(label))) continue;
+      const near = lvl === 'same_building' ? '同じビルに'
+                 : (lvl === 'adjacent' || lvl === 'very_close') ? 'すぐ近くに'
+                 : '近くに';
+      const suffix = cond.negate ? (cond.type === 'poi' ? '（がない）' : '（ではない）') : '';
+      out.push(`✔️ ${near}${cond.text ?? cond.type}${suffix}`);
+    }
+    return out;
+  }
+
   // Recover building-height intent that L1 didn't emit as target.floors:
   //  (1) a "〜の中(same_building)" poi condition whose text is a height keyword
   //      ("タワマンの中の…") is really about the target's OWN building → fold into
@@ -1420,12 +1459,16 @@ class QueryEngine {
       const label = hc.text ?? hc.type;
       if (isFrozen(label)) continue; // already applied on the confirmed pool
       const items = condCandidates[label] ?? [];
-      if (items.length === 0) continue; // アンカー未取得＝評価不能 → フィルタしない
+      // 0件: positive は評価不能で全員残す。negate（同ビルに無い）は対象が存在しない＝全員満たすので全員残す。→ どちらも残す。
+      if (items.length === 0) continue;
       const { kept, excluded } = await this.mcp.filterSameBuilding(mainCandidates, items);
-      excluded.forEach(c => this._dbgReport.excludedByHardFilter.push({
-        name: c.name || '(名前なし)', reason: `絶対条件「${label}」(同じビル)を満たさない`,
+      // negate（例:「同じビルにファミマが無い」）→ 同ビル該当(kept)を落とし、非該当(excluded)を残す。
+      const survivors = hc.negate ? excluded : kept;
+      const removed   = hc.negate ? kept    : excluded;
+      removed.forEach(c => this._dbgReport.excludedByHardFilter.push({
+        name: c.name || '(名前なし)', reason: `絶対条件「${label}」(同じビル${hc.negate ? 'に無い' : ''})を満たさない`,
       }));
-      mainCandidates = kept;
+      mainCandidates = survivors;
     }
     if (mainCandidates.length === 0) return { full: [], partial: [], none: [] };
 
@@ -1511,6 +1554,7 @@ class QueryEngine {
       mainCandidates.forEach(c => {
         const score = weighted([[wRel, relScore(c)], [wAnchor, anchorScore(c)], [wFloors, floorScore(c)]]);
         c._matchInfo = { hit: 0, total: 0, labels: [], score: +score.toFixed(3), relevance: c._relevance, floors: c._floors ?? null };
+        c._matchInfo.reasons = this._candidateReasons(schema, c);
       });
       this._assignTiers(mainCandidates, [], []);
       mainCandidates.sort((a, b) => b._matchInfo.score - a._matchInfo.score);
@@ -1562,11 +1606,16 @@ class QueryEngine {
       // → closeness 1, otherwise miss. (hard mode never reaches here — filtered out above.)
       if (distParams.useBuildingId) {
         const items = condCandidates[label] ?? [];
-        if (items.length === 0) continue; // アンカー未取得＝評価不能
+        if (items.length === 0) {
+          // 0件: negate（同じビルにX無い）は対象が存在しない＝全員満たす。positive は評価不能でスキップ。
+          if (cond.negate) for (const main of mainCandidates) { const t = tracker.get(String(main.id)); if (t) addHit(t, label, 1); }
+          continue;
+        }
         const { kept } = await this.mcp.filterSameBuilding(mainCandidates, items);
         const inSame = new Set(kept.map(k => String(k.id)));
         for (const main of mainCandidates) {
-          if (!inSame.has(String(main.id))) continue;
+          const isSame = inSame.has(String(main.id));
+          if (cond.negate ? isSame : !isSame) continue; // negate は非該当のみ満たす
           const t = tracker.get(String(main.id));
           if (t) addHit(t, label, 1);
         }
@@ -1585,24 +1634,38 @@ class QueryEngine {
         }));
         mainCandidates.forEach((main, i) => {
           const res = results[i];
-          if (res.matched && res.nearestM != null && res.nearestM <= refM) {
-            const t = tracker.get(String(main.id));
-            if (t) addHit(t, label, closenessOf(res.nearestM, refM));
-          }
+          const near = res.matched && res.nearestM != null && res.nearestM <= refM;
+          const t = tracker.get(String(main.id));
+          if (!t) return;
+          if (cond.negate) { if (!near) addHit(t, label, 1); }        // negate: 近くに無ければ満たす
+          else if (near)   addHit(t, label, closenessOf(res.nearestM, refM));
         });
         continue;
       }
 
       // point-based conditions (poi / bus stop / intersection / signal)
       const condItems = condCandidates[label] ?? [];
-      if (condItems.length === 0) continue; // 0-item → all miss (S already notified)
+      if (condItems.length === 0) {
+        // 0件: negate（近くにX無い）は対象が存在しない＝全員満たす。positive は評価不能でスキップ。
+        if (cond.negate) for (const main of mainCandidates) { const t = tracker.get(String(main.id)); if (t) addHit(t, label, 1); }
+        continue;
+      }
       const dir = cond.direction || null; // 「南側にアパホテル」→ item must be south of candidate
       // Build reach polygons on the fewer-cardinality side (fewer isochrone calls,
       // and centers the reach on the fixed reference — correct for "X分以内 from anchor").
       const matches = await this.mcp.evaluateDistanceBatch(mainCandidates, condItems, distParams, isoCache, dir);
-      for (const [mid, nearestM] of matches) {
-        const t = tracker.get(mid);
-        if (t) addHit(t, label, closenessOf(nearestM, refM));
+      if (cond.negate) {
+        // negate: 近くに該当POIがある候補を除外し、無い候補が満たす。
+        for (const main of mainCandidates) {
+          if (matches.has(String(main.id))) continue;
+          const t = tracker.get(String(main.id));
+          if (t) addHit(t, label, 1);
+        }
+      } else {
+        for (const [mid, nearestM] of matches) {
+          const t = tracker.get(mid);
+          if (t) addHit(t, label, closenessOf(nearestM, refM));
+        }
       }
     }
 
@@ -1623,6 +1686,7 @@ class QueryEngine {
       const c = t.candidate;
       const score = weighted([[wRel, relScore(c)], [wCond, condScore], [wAnchor, anchorScore(c)], [wFloors, floorScore(c)]]);
       c._matchInfo = { hit: t.hit, total: effTotal, labels: t.hitLabels, score: +score.toFixed(3), relevance: c._relevance, floors: c._floors ?? null };
+      c._matchInfo.reasons = this._candidateReasons(schema, c);
       // effTotal===0 のとき hit(0)===effTotal(0) で full 扱い（＝条件なしと同じ挙動）。
       if (t.hit === effTotal)     full.push(c);
       else if (t.hit > 0)         partial.push(c);
