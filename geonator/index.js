@@ -584,7 +584,7 @@ class LocationFinderApp {
    */
   _renderDebugReport(r) {
     const L = [];
-    L.push('🔧 デバッグ情報');
+    L.push(`🔧 デバッグ情報  (v${this.config.APP_VERSION || '?'})`);
 
     // ── QuerySchema ──
     if (r.schema) {
