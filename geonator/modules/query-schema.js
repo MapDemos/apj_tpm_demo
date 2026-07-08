@@ -107,6 +107,10 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
     } else if (schema.target.text && !schema.target.queries.includes(schema.target.text)) {
       schema.target.queries.unshift(schema.target.text); // ensure original is present
     }
+    // floors.negate: 「N階建てではない/N階じゃない」の反転。既定 false。
+    if (schema.target.floors && typeof schema.target.floors === 'object') {
+      schema.target.floors.negate = schema.target.floors.negate === true;
+    }
   }
 
   // Hard cap: at most `maxConditions` conditions (JS-side block, configurable 0-5).

@@ -962,10 +962,12 @@ class QueryEngine {
   _floorPass(f, spec) {
     if (!spec) return true;
     const tol = this.config.FLOORS_HARD_TOL ?? 2;
-    if (spec.value != null)                    return Math.abs(f - spec.value) <= tol;
-    if (spec.min != null && f < spec.min)      return false;
-    if (spec.max != null && f > spec.max)      return false;
-    return true;
+    let ok;
+    if (spec.value != null)      ok = Math.abs(f - spec.value) <= tol;
+    else if (spec.min != null && f < spec.min) ok = false;
+    else if (spec.max != null && f > spec.max) ok = false;
+    else ok = true;
+    return spec.negate ? !ok : ok; // negate:「N階建てではない」→ 判定を反転
   }
 
   /** floors spec を日本語ラベルに（除外理由の表示用）。 */
@@ -997,7 +999,8 @@ class QueryEngine {
     const out = [];
     const fs = schema?.target?.floors;
     if (fs && c._floors != null && this._floorPass(c._floors, fs)) {
-      out.push(`✔️ ${this._floorReasonLabel(fs)}（${c._floors}階相当）`);
+      const neg = fs.negate ? 'ではない' : '';
+      out.push(`✔️ ${this._floorReasonLabel(fs)}${neg}（${c._floors}階相当）`);
     }
     const sameBuildingHard = (this.config.SAME_BUILDING_MODE ?? 'hard') === 'hard';
     const hitSet = new Set(c._matchInfo?.labels ?? []);
@@ -1487,10 +1490,13 @@ class QueryEngine {
     // 満たすと確認できない以上、ハードでは不合格（除外）にする（例: 20階以上指定で高さ不明の
     // カフェが素通りして検証済みの高層より上位に来る不具合を防ぐ）。緩めたい場合はソフトへ。
     if (floorsHard) {
-      const specLabel = this._floorSpecLabel(floorSpec);
+      const specLabel = this._floorSpecLabel(floorSpec) + (floorSpec.negate ? 'ではない' : '');
       const kept = [];
       for (const c of mainCandidates) {
         if (c._floors != null && this._floorPass(c._floors, floorSpec)) { kept.push(c); continue; }
+        // negate（「N階建てではない」）で階数不明なら fail-open で残す：大半の建物は該当高さ
+        // ではないので、不明を一律除外すると候補が空になりやすい（positive は従来どおり fail-closed）。
+        if (c._floors == null && floorSpec.negate) { kept.push(c); continue; }
         this._dbgReport.excludedByHardFilter.push({
           name: c.name || '(名前なし)',
           reason: c._floors == null
