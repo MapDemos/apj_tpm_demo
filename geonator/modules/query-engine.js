@@ -1897,6 +1897,22 @@ class QueryEngine {
       const covered = new Set(landmarks.map(s => s.candId).filter(id => id != null));
       const floors  = await this._computeFloorSuggestions(schema, covered);
       suggestions = [...landmarks, ...floors];
+
+      // デバッグ: なぜサジェストが出た/出ないのかを可視化（プール・各候補の階数・目印割り当て）。
+      if (this.ui.isDebug?.()) {
+        const basis = this._basisTier(this._cache.surfaced || []).slice(0, 5);
+        const rows = basis.map(c => {
+          const lm = landmarks.find(s => s.candId === c.id);
+          const fl = c._floors == null ? '階数不明' : `${c._floors}階`;
+          return `・${c.name || '(名前なし)'}: ${fl} / ${lm ? '目印=' + lm.landmark : '目印なし'}`;
+        });
+        this.ui.showDebug?.([
+          '🔍 絞り込みサジェスト (narrow)',
+          `プール(surfaced) ${this._cache.surfaced?.length ?? 0}件 / basis ${basis.length}件`,
+          ...rows,
+          `→ 目印サジェスト ${landmarks.length}件 / 階数サジェスト ${floors.length}件${floors.length ? '（' + floors.map(s => s.text).join('、') + '）' : ''}`,
+        ].join('\n'));
+      }
     }
 
     const hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
