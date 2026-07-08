@@ -12,12 +12,13 @@ class LLMClient {
 
   /** Reset per-run stats (tokens, time, calls) keyed by role. */
   resetStats() {
+    // cacheRead/cacheWrite: プロンプトキャッシュのヒット可視化用（read=約0.1倍/write=約1.25倍）。
     this.stats = {
-      L1c:  { model: this.config.L1_CONFIRM_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
-      L1:   { model: this.config.L1_MODEL,   inTok: 0, outTok: 0, ms: 0, calls: 0 },
-      L2_1: { model: this.config.L2_1_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
-      L2_2: { model: this.config.L2_2_MODEL, inTok: 0, outTok: 0, ms: 0, calls: 0 },
-      L3:   { model: this.config.L3_MODEL,   inTok: 0, outTok: 0, ms: 0, calls: 0 },
+      L1c:  { model: this.config.L1_CONFIRM_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
+      L1:   { model: this.config.L1_MODEL,   inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
+      L2_1: { model: this.config.L2_1_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
+      L2_2: { model: this.config.L2_2_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
+      L3:   { model: this.config.L3_MODEL,   inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
     };
   }
 
@@ -100,7 +101,8 @@ class LLMClient {
           this.config.L1_MODEL,
           'L1',
           // L1は出力が大きく生成に時間がかかる → 既定8秒では足りない。専用に長めのタイムアウト。
-          { returnMeta: true, timeoutMs: Math.max(this.config.API_TIMEOUT_MS, this.config.L1_TIMEOUT_MS || 20000) }
+          // cacheSystem: 巨大で不変な L1 システムプロンプトをプロンプトキャッシュ（2回目以降は約90%減）。
+          { returnMeta: true, cacheSystem: true, timeoutMs: Math.max(this.config.API_TIMEOUT_MS, this.config.L1_TIMEOUT_MS || 20000) }
         );
         const json = this._extractJSON(text);
         if (json) return json;
@@ -199,7 +201,8 @@ class LLMClient {
       this._buildL2_1Prompt(groups),
       512,
       this.config.L2_1_MODEL,
-      'L2_1'
+      'L2_1',
+      { cacheSystem: true } // 不変な L2-1 システムプロンプトをプロンプトキャッシュ
     );
     try {
       const json = this._extractJSON(result);
@@ -236,7 +239,8 @@ class LLMClient {
       this._buildL2_2Prompt(intentLabel, candidates),
       1024,
       this.config.L2_2_MODEL,
-      'L2_2'
+      'L2_2',
+      { cacheSystem: true } // 不変な L2-2 システムプロンプトをプロンプトキャッシュ
     );
     try {
       const json = this._extractJSON(result);
@@ -264,6 +268,12 @@ class LLMClient {
     const useModel = model || this.config.CLAUDE_MODEL;
     const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
+    // opts.cacheSystem: システムプロンプトをプロンプトキャッシュ対象にする（不変で使い回す L1/L2 向け）。
+    // 文字列を content ブロック配列にし、末尾に cache_control を付ける（prefixキャッシュ）。
+    const systemField = (opts.cacheSystem && typeof prompt.system === 'string')
+      ? [{ type: 'text', text: prompt.system, cache_control: { type: 'ephemeral' } }]
+      : prompt.system;
+
     try {
       const resp = await fetch(this.config.CLAUDE_API_PROXY, {
         method:  'POST',
@@ -273,7 +283,7 @@ class LLMClient {
           model:      useModel,
           max_tokens: maxTokens,
           temperature: 0,
-          system: prompt.system,
+          system: systemField,
           messages: [{ role: 'user', content: prompt.user }],
         }),
       });
@@ -283,8 +293,10 @@ class LLMClient {
       const s = role && this.stats?.[role];
       if (s) {
         s.model = useModel;
-        s.inTok  += data?.usage?.input_tokens  || 0;
-        s.outTok += data?.usage?.output_tokens || 0;
+        s.inTok      += data?.usage?.input_tokens         || 0;
+        s.outTok     += data?.usage?.output_tokens        || 0;
+        s.cacheRead  += data?.usage?.cache_read_input_tokens     || 0;
+        s.cacheWrite += data?.usage?.cache_creation_input_tokens || 0;
         s.ms     += (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
         s.calls  += 1;
       }

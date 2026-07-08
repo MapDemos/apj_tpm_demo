@@ -549,7 +549,9 @@ class LocationFinderApp {
         // 全ロールを表示（0回=そのクエリで未実行）。L1-1=確認文の先出し / L1-2=クエリ解析。
         for (const [role, s] of [['L1-1', stats.llm?.L1c], ['L1-2', stats.llm?.L1], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
           if (!s) continue;
-          roleLines.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
+          // プロンプトキャッシュ: 読み(💾r=約0.1倍)/書き(w=約1.25倍)があれば併記。
+          const cache = (s.cacheRead || s.cacheWrite) ? ` 💾r${fmt(s.cacheRead)}/w${fmt(s.cacheWrite)}` : '';
+          roleLines.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)}${cache} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
           totIn += s.inTok; totOut += s.outTok;
         }
         const parts = [
