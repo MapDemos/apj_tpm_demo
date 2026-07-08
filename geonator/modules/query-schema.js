@@ -110,6 +110,10 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
   if (schema.proximity && schema.proximity.within === undefined) {
     schema.proximity.within = null;
   }
+  // within.profile_inferred: 移動手段未指定で walking を仮定した時 true（②assumption・JSが通知）
+  if (schema.proximity?.within && typeof schema.proximity.within === 'object') {
+    schema.proximity.within.profile_inferred = schema.proximity.within.profile_inferred === true;
+  }
 
   // target queries default (QE) → fall back to [text]
   if (schema.target) {
@@ -144,13 +148,15 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
     for (const c of schema.conditions) {
       const lineDefault = (c.type === 'road' || c.type === 'rail') ? roadRailDefaultLevel : defaultLevel;
       if (!c.distance) {
-        c.distance = { method: 'radius', level: lineDefault, profile: null, minutes: null, meters: null };
+        c.distance = { method: 'radius', level: lineDefault, profile: null, profile_inferred: false, minutes: null, meters: null };
       } else {
         if (!c.distance.level)  c.distance.level  = lineDefault;
         if (!c.distance.method) c.distance.method = 'radius';
         c.distance.profile  = c.distance.profile  ?? null;
         c.distance.minutes  = c.distance.minutes  ?? null;
         c.distance.meters   = c.distance.meters   ?? null;
+        // profile_inferred: 移動手段が未指定で walking を仮定した時 true（②assumption・JSが通知）
+        c.distance.profile_inferred = c.distance.profile_inferred === true;
       }
       // road/rail「沿い」: L1 が緩いレベル(nearby/somewhat_nearby/far)を付けても線路/道路沿いには
       // 広すぎるので既定(建物100m/自然物150m)へ締める。明示距離(m/分)と より近い明示レベル

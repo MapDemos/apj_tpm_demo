@@ -874,6 +874,10 @@ class QueryEngine {
     if (unsup.length) parts.push(M.unsupportedFeatures(unsup.join(sep)));
     // rail は地下鉄も地上線路も区別できない → 「線路沿い」指定時は申し送り（検索ロジックは不変）。
     if ((schema?.conditions || []).some(c => c.type === 'rail')) parts.push(M.railSubwayNote());
+    // ②assumption: 移動手段未指定の「n分」を徒歩と仮定した → 解釈内容を通知（探索には使う）。
+    const walkAssumed = schema?.proximity?.within?.profile_inferred === true
+      || (schema?.conditions || []).some(c => c.distance?.profile_inferred === true);
+    if (walkAssumed) parts.push(M.walkAssumed());
     return parts.join('\n');
   }
 
@@ -2142,8 +2146,9 @@ const MESSAGES = {
     thinkingEval:    '条件との距離を評価しています',
     thinkingNarrow:  '絞り込んでいます',
     droppedConditions: list => `なお、条件が多いため「${list}」は今回の検索には含めていません。`,
-    unsupportedFeatures: list => `「${list}」は地図データから判定できないため、検索条件には含めていません。`,
+    unsupportedFeatures: list => `「${list}」は地図データから判定できないため条件に含めず、それ以外の分かる範囲で探索します。`,
     railSubwayNote: () => `「線路沿い」は地下鉄など地下を通る路線も線路とみなして検索します（地上の線路だけには限定できません）。`,
+    walkAssumed: () => `移動手段の指定が無い所要時間は「徒歩」として扱いました（自転車・車の場合はお知らせください）。`,
   },
   en: {
     searching:            'Searching for candidates…',
@@ -2178,7 +2183,8 @@ const MESSAGES = {
     thinkingEval:    'Evaluating distances & conditions',
     thinkingNarrow:  'Narrowing down',
     droppedConditions: list => `Note: to keep the search focused, "${list}" ${/,/.test(list) ? 'are' : 'is'} not included in this search.`,
-    unsupportedFeatures: list => `"${list}" cannot be determined from map data, so ${/,/.test(list) ? 'they are' : 'it is'} not included as a search condition.`,
+    unsupportedFeatures: list => `"${list}" cannot be determined from map data, so ${/,/.test(list) ? 'they are' : 'it is'} excluded — I search using the rest of what you gave.`,
     railSubwayNote: () => `For "along a railway", underground lines such as subways are also treated as railways (surface-only lines cannot be isolated).`,
+    walkAssumed: () => `A travel time given without a mode was treated as walking (let me know if you meant cycling or driving).`,
   },
 };
