@@ -81,6 +81,25 @@
   .fb.exit{border-color:#E4C7C5;background:var(--gap-bg);color:var(--gap);} .fb.exit b{background:var(--gap);}
   .fb.go{border-color:#D9C79A;background:var(--warn-bg);color:var(--warn);} .fb.go b{background:var(--warn);}
 
+  /* svg flowchart (draw.io風) */
+  .fc-scroll{overflow-x:auto;border:1px solid var(--line);background:var(--paper);}
+  #fc{min-width:520px;padding:10px 6px;}
+  #fc svg{display:block;width:100%;height:auto;}
+  #fc .ed{stroke:#AEB8B3;stroke-width:1.6;fill:none;}
+  #fc .ed.lp{stroke:#7FB8AE;stroke-dasharray:5 4;}
+  #fc .nd{stroke-width:1.5;}
+  #fc .proc{fill:#fff;stroke:#C6D0CB;}
+  #fc .term{fill:#EEF2F0;stroke:#C6D0CB;}
+  #fc .dec{fill:var(--warn-bg);stroke:var(--warn);}
+  #fc .nt{fill:var(--ink);font-family:var(--jp);font-size:12px;}
+  #fc .el{fill:var(--ink-3);font-family:var(--mono);font-size:10.5px;}
+  #fc .ph{fill:var(--teal-ink);font-family:var(--mono);font-size:15px;font-weight:800;}
+  #fc .br{stroke-width:1.3;}
+  #fc .br.loop{fill:var(--teal-bg);stroke:#9FCFC6;}
+  #fc .br.go{fill:var(--warn-bg);stroke:#D9C79A;}
+  #fc .br.exit{fill:var(--gap-bg);stroke:#E0BFBD;}
+  #fc .bt{fill:#2A302E;font-family:var(--jp);font-size:11px;}
+
   /* section */
   section{margin:0 0 40px;}
   .sec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px;}
@@ -231,73 +250,75 @@
     </div>
   </section>
 
-  <!-- FLOWCHART -->
+  <!-- FLOWCHART (SVG) -->
   <section>
     <div class="sec-head">
       <span class="sec-tag">フロー</span>
       <h2>分岐フロー（判定と枝分かれ）</h2>
-      <span class="verdict v-warn">◇=判定 · <span style="color:var(--teal-ink)">loop</span>/<span style="color:var(--warn)">go</span>/<span style="color:var(--gap)">exit</span></span>
+      <span class="verdict v-warn">◇=判定 · 枝 <span style="color:var(--teal-ink)">loop</span>/<span style="color:var(--warn)">go</span>/<span style="color:var(--gap)">exit</span></span>
     </div>
-    <p class="sec-note">同じ⓪〜④のフェーズを、<b>判定（◇）と枝分かれ</b>で描いたもの。多くの枝は<b>ユーザーに聞いて戻る（loop）</b>か<b>次へ進む（go）</b>で、行き止まりは<b>終了/ガイド（exit）</b>。破線＝そのまま下へ（主経路）。</p>
-    <div class="flow">
-
-      <div class="fphase">⓪ クエリ解釈</div>
-      <div class="fitem"><div class="fp">入力（多重発火ロック） → <span class="em">L1-1 確認文は並行</span></div></div>
-      <div class="fitem"><div class="fp">L1-2 解析 → QuerySchema</div></div>
-      <div class="fitem"><div class="fd"><span class="q">場所依頼として読めた？</span>
-        <div class="branches">
-          <div class="fb exit"><b>いいえ</b>手がかり0 → 注記付きで最大3回再試行 → なお不可なら not_a_query でガイド（終了）</div>
-          <div class="fb cont"><b>はい</b>↓ 次へ</div>
-        </div></div></div>
-      <div class="fitem"><div class="fd"><span class="q">解釈が割れる？（interpretations ≥ 2）</span>
-        <div class="branches">
-          <div class="fb loop"><b>はい</b>「どの意図？」を提示 → 選択 → ⓪ 解析へ戻る</div>
-          <div class="fb cont"><b>いいえ</b>↓ 次へ</div>
-        </div></div></div>
-
-      <div class="fphase">① 一次検索：proximity 解決</div>
-      <div class="fitem"><div class="fp">Search Box で anchor（駅/地名/POI）を解決</div></div>
-      <div class="fitem"><div class="fd"><span class="q">場所が曖昧？（同名 / 口語 / generic）</span>
-        <div class="branches">
-          <div class="fb loop"><b>はい</b>もしかして / どちら（L1-3 地名解釈）→ 選択</div>
-          <div class="fb cont"><b>いいえ</b>↓ 次へ</div>
-        </div></div></div>
-      <div class="fitem"><div class="fd"><span class="q">範囲が広すぎ？（bbox &gt; 4km・面アンカー）</span>
-        <div class="branches">
-          <div class="fb loop"><b>はい</b>L1-3 で駅/エリアを列挙 → 選択で有界 anchor に絞る</div>
-          <div class="fb cont"><b>いいえ</b>↓ 次へ</div>
-        </div></div></div>
-      <div class="fitem"><div class="fp">near-extent（種別別半径）・scope（県/市区）で探索 bbox 確定</div></div>
-
-      <div class="fphase">② 二次検索 Step1：候補収集 ＋ L2</div>
-      <div class="fitem"><div class="fp">Search Box ＋ Tilequery で target / condition 収集（≤150）</div></div>
-      <div class="fitem"><div class="fp">L2-1 カテゴリ妥当性 ／ L2-2 名前の関連性 → no を除外</div></div>
-      <div class="fitem"><div class="fd"><span class="q">target が過密？（&gt; 150）</span>
-        <div class="branches">
-          <div class="fb go"><b>はい</b>タイト条件（すぐ隣のドミノピザ等）に昇格 → ② 再収集／昇格不可なら目印を聞く</div>
-          <div class="fb cont"><b>いいえ</b>↓ 次へ</div>
-        </div></div></div>
-      <div class="fitem"><div class="fd"><span class="q">0 件？</span>
-        <div class="branches">
-          <div class="fb exit"><b>はい</b>バス停 tileset で再取得／それでも0件なら追加情報を要求（戻る）</div>
-          <div class="fb cont"><b>いいえ</b>↓ 次へ</div>
-        </div></div></div>
-
-      <div class="fphase">③ 二次検索 Step2：距離評価・スコアリング</div>
-      <div class="fitem"><div class="fp">ハード除外（same_building / floors）</div></div>
-      <div class="fitem"><div class="fp">スコア = 関連性 × 条件距離 × アンカー距離 ＋floors</div></div>
-      <div class="fitem"><div class="fp">ティア決定（gold ＋ margin）</div></div>
-
-      <div class="fphase">④ 結果・フィードバック</div>
-      <div class="fitem"><div class="fp">結果表示（gold/候補・地図ピン・result_area なら面）</div></div>
-      <div class="fitem"><div class="fd"><span class="q">フィードバック？</span>
-        <div class="branches">
-          <div class="fb loop"><b>絞込</b>探し直す / 更に絞り込む（L3 が目印提案）→ ⓪ or ② へ戻る</div>
-          <div class="fb exit"><b>完了</b>終了</div>
-        </div></div></div>
-
-    </div>
+    <p class="sec-note">シーケンスと同じ⓪〜④を<b>判定(◇)と分岐</b>で。菱形＝判定、矩形＝処理。枝の色は<b>loop（聞いて戻る／破線＝戻り線）・go（次工程へ進める）・exit（終了/ガイド）</b>。</p>
+    <div class="fc-scroll"><div id="fc">フロー図を描画中…</div></div>
   </section>
+
+  <script>
+  (function(){
+    var CX=230, y0=42, RH=80, W=880, DHW=142, DHH=33, PW=270, PH=46, TW=160, TH=42;
+    var N=[
+      {t:'term',l:'ユーザー入力'},
+      {t:'proc',l:'L1-2 解析 → QuerySchema',ph:'⓪'},
+      {t:'dec', l:'場所依頼として読めた？', down:'はい', fork:'いいえ', br:{l:'not_a_query（再試行3回のち）',k:'exit'}},
+      {t:'dec', l:'解釈が割れる？', down:'いいえ', fork:'はい', br:{l:'意図ピッカー（どの意図？）',k:'loop',to:1}},
+      {t:'proc',l:'anchor 解決（Search Box）',ph:'①'},
+      {t:'dec', l:'場所が曖昧？', down:'いいえ', fork:'はい', br:{l:'もしかして／どちら（L1-3）',k:'loop',to:4}},
+      {t:'dec', l:'範囲が広すぎ？', down:'いいえ', fork:'はい', br:{l:'広域絞り込み（L1-3）',k:'loop',to:4}},
+      {t:'proc',l:'near-extent・scope → bbox 確定'},
+      {t:'proc',l:'収集（SB＋TQ）→ L2 除外',ph:'②'},
+      {t:'dec', l:'過密？（150超）', down:'いいえ', fork:'はい', br:{l:'タイト条件に昇格 → 再収集',k:'go',to:8}},
+      {t:'dec', l:'0 件？', down:'いいえ', fork:'はい', br:{l:'バス停／追加情報を要求',k:'exit'}},
+      {t:'proc',l:'ハード除外 → スコア → ティア',ph:'③'},
+      {t:'proc',l:'結果表示',ph:'④'},
+      {t:'dec', l:'フィードバック？', down:'完了', fork:'絞り込む', br:{l:'探し直す／絞り込む（L3）',k:'loop',to:1}},
+      {t:'term',l:'終了'}
+    ];
+    N.forEach(function(n,i){n.cy=y0+i*RH;});
+    function hh(n){return n.t==='dec'?DHH:(n.t==='term'?TH/2:PH/2);}
+    function hw(n){return n.t==='dec'?DHW:(n.t==='term'?TW/2:PW/2);}
+    var esc=function(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+    var ED='',SH='',LB='',ar='marker-end="url(#ah)"';
+    for(var i=0;i<N.length-1;i++){
+      var a=N[i],b=N[i+1],y1=a.cy+hh(a),y2=b.cy-hh(b);
+      ED+='<line x1="'+CX+'" y1="'+y1+'" x2="'+CX+'" y2="'+y2+'" class="ed" '+ar+'/>';
+      if(a.down)LB+='<text x="'+(CX+9)+'" y="'+((y1+y2)/2+4)+'" class="el">'+esc(a.down)+'</text>';
+    }
+    var rail=772;
+    N.forEach(function(n){
+      if(!n.br)return;
+      var by=n.cy,bx=404,bw=340;
+      ED+='<line x1="'+(CX+DHW)+'" y1="'+by+'" x2="'+bx+'" y2="'+by+'" class="ed" '+ar+'/>';
+      LB+='<text x="'+((CX+DHW+bx)/2)+'" y="'+(by-7)+'" class="el" text-anchor="middle">'+esc(n.fork)+'</text>';
+      SH+='<rect x="'+bx+'" y="'+(by-20)+'" width="'+bw+'" height="40" rx="8" class="br '+n.br.k+'"/>';
+      LB+='<text x="'+(bx+14)+'" y="'+(by+4)+'" class="bt">'+esc(n.br.l)+'</text>';
+      if(n.br.to!=null){
+        var tg=N[n.br.to],tx=CX+hw(tg),ty=tg.cy;
+        ED+='<path d="M'+(bx+bw)+' '+by+' H'+rail+' V'+ty+' H'+tx+'" class="ed lp" '+ar+'/>';
+        rail+=15;
+      }
+    });
+    N.forEach(function(n){
+      if(n.t==='proc')SH+='<rect x="'+(CX-PW/2)+'" y="'+(n.cy-PH/2)+'" width="'+PW+'" height="'+PH+'" rx="4" class="nd proc"/>';
+      else if(n.t==='term')SH+='<rect x="'+(CX-TW/2)+'" y="'+(n.cy-TH/2)+'" width="'+TW+'" height="'+TH+'" rx="21" class="nd term"/>';
+      else{var p=[CX+','+(n.cy-DHH),(CX+DHW)+','+n.cy,CX+','+(n.cy+DHH),(CX-DHW)+','+n.cy].join(' ');SH+='<polygon points="'+p+'" class="nd dec"/>';}
+      LB+='<text x="'+CX+'" y="'+(n.cy+5)+'" class="nt" text-anchor="middle">'+esc(n.l)+'</text>';
+      if(n.ph)LB+='<text x="24" y="'+(n.cy+6)+'" class="ph">'+n.ph+'</text>';
+    });
+    var H=N[N.length-1].cy+50;
+    var svg='<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="1クエリの分岐フロー図">'
+      +'<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto"><path d="M0,0 L7.5,3 L0,6 z" fill="#8A938F"/></marker></defs>'
+      +ED+SH+LB+'</svg>';
+    document.getElementById('fc').innerHTML=svg;
+  })();
+  </script>
 
   <div class="legend">
     <span class="legend-item"><span class="dot ok"></span>一貫（MECE・そのまま）</span>
