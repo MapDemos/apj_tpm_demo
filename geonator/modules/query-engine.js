@@ -6,6 +6,11 @@
  * UI callbacks are injected via constructor so this module is DOM-independent.
  */
 
+// 線（line）ジオメトリ条件：候補ごとに周囲のレイヤーを見る（point収集しない）。
+// road=道路 / water=河川湖沼 / rail=線路（すべて streets-v8 の road/water レイヤー由来）。
+const LINE_COND_TYPES = new Set(['road', 'water', 'rail']);
+const isLineCond = (type) => LINE_COND_TYPES.has(type);
+
 class QueryEngine {
   /**
    * @param {{ mcp: MapboxMCPClient, llm: LLMClient, ui: UICallbacks, config: object }} opts
@@ -1220,9 +1225,9 @@ class QueryEngine {
     if (conditions?.length) {
       await Promise.all(conditions.map(async (c) => {
         const key = c.text ?? c.type;
-        // road/water are evaluated per-candidate against the road/water layer
+        // road/water/rail are evaluated per-candidate against the road/water layer
         // (they're lines, not points) — no item collection here.
-        if (c.type === 'road' || c.type === 'water') {
+        if (isLineCond(c.type)) {
           condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: '候補ごと評価' });
           return;
         }
@@ -1654,15 +1659,15 @@ class QueryEngine {
         continue;
       }
 
-      // road / water: per-candidate layer check (streets-v8 road/water layers).
+      // road / water / rail: per-candidate layer check (streets-v8 road/water layers).
       // 候補ごとに独立なので並列化（結果は候補順に同期適用するので挙動は同一）。
-      if (cond.type === 'road' || cond.type === 'water') {
+      if (isLineCond(cond.type)) {
         const roadOpts = cond.type === 'road' ? this._roadOpts(cond.text) : null;
         const results = await Promise.all(mainCandidates.map(main => {
           const lat = main.latitude ?? main.lat, lng = main.longitude ?? main.lng;
-          return cond.type === 'road'
-            ? this.mcp.roadNear(lat, lng, refM, roadOpts)
-            : this.mcp.waterNear(lat, lng, refM);
+          if (cond.type === 'road') return this.mcp.roadNear(lat, lng, refM, roadOpts);
+          if (cond.type === 'rail') return this.mcp.railNear(lat, lng, refM);
+          return this.mcp.waterNear(lat, lng, refM);
         }));
         mainCandidates.forEach((main, i) => {
           const res = results[i];
@@ -1931,7 +1936,7 @@ class QueryEngine {
       const key = c.text ?? c.type;
       if (preItems && preItems[key]) { condResults[key] = preItems[key]; continue; } // known poi → no query, no L2-1
       newKeys.add(key);
-      if (c.type === 'road' || c.type === 'water') continue; // per-candidate eval, no collection
+      if (isLineCond(c.type)) continue; // per-candidate eval, no collection
       condResults[key] = await this.mcp.collectCondition(c, bboxes.condBbox, null);
     }
     // L2-1 category validity ONLY on the new poi conditions (target pool is fixed;
@@ -1943,7 +1948,7 @@ class QueryEngine {
     // considers the accumulated conditions, not just the newly added one.
     this._dbgReport.conditions = (merged.conditions || []).map(c => {
       const key = c.text ?? c.type;
-      const isLine = c.type === 'road' || c.type === 'water';
+      const isLine = isLineCond(c.type);
       return { label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: isLine ? '候補ごと評価' : (condResults[key]?.length ?? 0) };
     });
 

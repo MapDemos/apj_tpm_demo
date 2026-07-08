@@ -2451,6 +2451,32 @@ class MapboxMCPClient {
   }
 
   /**
+   * Is there a railway near (lat,lng)? Uses streets-v8 road layer, but keeps ONLY the
+   * rail classes (the inverse of roadNear). JR/私鉄/ケーブル/路面電車の区別はせず、
+   * class に 'rail' を含むもの（major_rail/minor_rail/service_rail）をすべて「線路」とみなす。
+   * ロジックは roadNear と同一（有無＋最短距離のみ）。
+   * @returns {Promise<{matched:boolean, nearestM:number|null}>}
+   */
+  async railNear(lat, lng, radiusM) {
+    const r = Math.min(Math.max(Math.ceil(radiusM), 30), 500);
+    const url = `${this.config.TILEQUERY_API}/${lng},${lat}.json` +
+      `?access_token=${this.token}&radius=${r}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road`;
+    try {
+      const res = await this._fetchTilequeryWithCache(url);
+      if (!res.ok) return { matched: false, nearestM: null };
+      const data = await res.json();
+      let best = null;
+      for (const f of (data.features || [])) {
+        const cls = f.properties?.class;
+        if (!cls || !/rail/.test(cls)) continue; // rail 系クラスのみ（~rail）
+        const d = Math.round(f.properties?.tilequery?.distance ?? 9999);
+        if (best === null || d < best) best = d;
+      }
+      return { matched: best !== null, nearestM: best };
+    } catch { return { matched: false, nearestM: null }; }
+  }
+
+  /**
    * Is there water near (lat,lng)? Uses streets-v8 water/waterway layer.
    * (川/海/湖の区別はデータ上つかない — 有無と距離のみ。)
    * @returns {Promise<{matched:boolean, nearestM:number|null}>}
