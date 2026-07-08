@@ -31,6 +31,16 @@
   .dot{width:11px;height:11px;border-radius:50%;flex:none;}
   .dot.ok{background:var(--ok);} .dot.warn{background:var(--warn);} .dot.gap{background:var(--gap);} .dot.neu{background:var(--ink-3);}
 
+  /* schema tree */
+  .tree-scroll{overflow-x:auto;border:1px solid var(--line);background:var(--paper);}
+  .tree{font-family:var(--mono);font-size:12.5px;line-height:1.9;padding:16px 20px;min-width:560px;color:var(--ink);}
+  .tl{white-space:pre;}
+  .tg{color:#B7C1BD;}
+  .tf{color:var(--ink);font-weight:700;}
+  .tt{color:var(--teal-ink);}
+  .tc{color:var(--ink-3);}
+  .tk{color:var(--teal-ink);font-weight:800;}
+
   /* section */
   section{margin:0 0 40px;}
   .sec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px;}
@@ -98,6 +108,47 @@
     <h1>自然言語ロケーション探索 — 概念マップ</h1>
     <p class="thesis">役割の3分割（proximity / target / condition）は<b>MECE で健全</b>。問題はその下の層——<b>「場所の同定・曖昧解決」「親子（部位）」「フォールバック」が同じ問題に別々の機構を積み重ねて重複している</b>こと。これがオーナーが仕様を頭に保持できない主因。各軸を「1問題＝1系統」に統合するのが目標。</p>
   </header>
+
+  <!-- QUERY SCHEMA TREE -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">データモデル</span>
+      <h2>QuerySchema（L1-2 の出力）</h2>
+      <span class="verdict v-ok">全機構はこの木の枝を解決する補助</span>
+    </div>
+    <p class="sec-note">自然文はまず<b>この1本の木</b>に構造化される。以降の全軸（曖昧解決・部位・距離・フォールバック）は、結局<b>この枝のどれかを確実に解決するための補助</b>にすぎない。</p>
+    <div class="tree-scroll"><div class="tree">
+<div class="tl"><span class="tk">QuerySchema</span></div>
+<div class="tl"><span class="tg">├─ </span><span class="tf">proximity</span><span class="tc">  基準（どこを起点に・常に1つ）</span></div>
+<div class="tl"><span class="tg">│  ├─ </span><span class="tf">anchors[]</span><span class="tc">  基準アンカー（通常1つ／「AとBの間」で2つ）</span></div>
+<div class="tl"><span class="tg">│  │  ├─ </span><span class="tf">type</span> <span class="tt">⟨station | poi | address | locality | intersection⟩</span></div>
+<div class="tl"><span class="tg">│  │  ├─ </span><span class="tf">text</span></div>
+<div class="tl"><span class="tg">│  │  ├─ </span><span class="tf">specificity</span> <span class="tt">⟨specific | generic⟩</span></div>
+<div class="tl"><span class="tg">│  │  └─ </span><span class="tf">subtype.exit</span><span class="tc">  駅の出口（A4出口）→ transit系タイル</span></div>
+<div class="tl"><span class="tg">│  ├─ </span><span class="tf">scope</span> <span class="tt">⟨locality | place⟩</span><span class="tc">  県/市区でハード限定（岩手県の青山）</span></div>
+<div class="tl"><span class="tg">│  ├─ </span><span class="tf">within</span> <span class="tt">⟨level | 分=isochrone | m⟩</span><span class="tc">  明示された到達範囲</span></div>
+<div class="tl"><span class="tg">│  └─ </span><span class="tf">bearing_filter</span> <span class="tt">⟨north | south | east | west⟩</span></div>
+<div class="tl"><span class="tg">├─ </span><span class="tf">target</span><span class="tc">  探す物（常に1つ・答えとして表示）</span></div>
+<div class="tl"><span class="tg">│  ├─ </span><span class="tf">text</span></div>
+<div class="tl"><span class="tg">│  ├─ </span><span class="tf">query_intent</span> <span class="tt">⟨category_mansion | category_apartment | category_building | specific⟩</span></div>
+<div class="tl"><span class="tg">│  ├─ </span><span class="tf">queries[]</span><span class="tc">  QE（検索語）展開</span></div>
+<div class="tl"><span class="tg">│  └─ </span><span class="tf">floors</span><span class="tc">  階数（ハード条件）</span></div>
+<div class="tl"><span class="tg">├─ </span><span class="tf">conditions[]</span><span class="tc">  近接の制約（複数・重要順・OR評価）</span></div>
+<div class="tl"><span class="tg">│  ├─ </span><span class="tf">type</span> <span class="tt">⟨poi | road | water | rail | intersection | signal | transit_entrance | category_busstop⟩</span></div>
+<div class="tl"><span class="tg">│  ├─ </span><span class="tf">text</span> / <span class="tf">queries[]</span></div>
+<div class="tl"><span class="tg">│  ├─ </span><span class="tf">negate</span><span class="tc">  否定（〜が無い）</span></div>
+<div class="tl"><span class="tg">│  ├─ </span><span class="tf">direction</span></div>
+<div class="tl"><span class="tg">│  └─ </span><span class="tf">distance</span></div>
+<div class="tl"><span class="tg">│     ├─ </span><span class="tf">method</span> <span class="tt">⟨radius | isochrone⟩</span></div>
+<div class="tl"><span class="tg">│     ├─ </span><span class="tf">level</span> <span class="tt">⟨same_building | adjacent | very_close | nearby | somewhat_nearby | far⟩</span></div>
+<div class="tl"><span class="tg">│     ├─ </span><span class="tf">profile</span> <span class="tt">⟨walking | cycling | driving⟩</span></div>
+<div class="tl"><span class="tg">│     └─ </span><span class="tf">minutes</span> / <span class="tf">meters</span></div>
+<div class="tl"><span class="tg">├─ </span><span class="tf">confirmation</span><span class="tc">  ユーザー向けの確認文</span></div>
+<div class="tl"><span class="tg">├─ </span><span class="tf">unsupported_features[]</span><span class="tc">  地図化できない特徴（築浅・壁が赤い等）</span></div>
+<div class="tl"><span class="tg">├─ </span><span class="tf">result_area</span><span class="tc">  エリア表示モード（点でなく面）</span></div>
+<div class="tl"><span class="tg">└─ </span><span class="tf">interpretations[]</span><span class="tc">  解釈が割れる時のみ（最大3・→構造クラリファイ）</span></div>
+    </div></div>
+  </section>
 
   <div class="legend">
     <span class="legend-item"><span class="dot ok"></span>一貫（MECE・そのまま）</span>
