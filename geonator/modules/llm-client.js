@@ -323,7 +323,7 @@ class LLMClient {
       : '';
     return {
       system: PROMPT_L1,
-      user:   `ユーザー入力：「${userText}」\n\n地理的な条件は重要な順に、上限を超える分も含めてすべて conditions 配列に入れてください（システムが上限${maxC}件を適用し、超過分はユーザーへ通知します）。非地理的な特徴のみ confirmation で言及してください。${langNote}QuerySchema JSONのみを返してください。`,
+      user:   `ユーザー入力：「${userText}」\n\n地理的な条件は重要な順に、上限を超える分も含めてすべて conditions 配列に入れてください（システムが上限${maxC}件を適用し、超過分はユーザーへ通知します）。地図データで判定できない非地理的な特徴は unsupported_features 配列に入れてください（confirmation では触れない。JSが決定的に通知します）。${langNote}QuerySchema JSONのみを返してください。`,
     };
   }
 

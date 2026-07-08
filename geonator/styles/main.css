@@ -58,6 +58,12 @@ html, body {
   color: var(--text-1);
   letter-spacing: .02em;
 }
+.app-version {
+  font-size: 10px;
+  color: var(--text-2);
+  opacity: .7;
+  font-variant-numeric: tabular-nums;
+}
 
 .header-right {
   margin-left: auto;

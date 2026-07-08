@@ -86,6 +86,10 @@ class LocationFinderApp {
       // 6. Welcome message (bilingual via LANG)
       this.addMessage('assistant', LANG[this._lang].welcome);
 
+      // Build version in header (キャッシュで古いJSを読んでいないかの確認用)
+      const verEl = document.getElementById('app-version');
+      if (verEl) verEl.textContent = `v${this.config.APP_VERSION || '?'}`;
+
     } catch (err) {
       console.error('[App] initialize() failed:', err);
       this.addMessage('error', `初期化エラー: ${err.message}`);
@@ -449,10 +453,10 @@ class LocationFinderApp {
         // with the result summary as the header of the SAME bubble.
         self._renderCandidatePanel(full, partial, none, summary, droppedNote);
       },
-      async showFeedback(proximityLabel) {
+      async showFeedback(proximityLabel, opts) {
         self._hideCancelBtn(); // フィードバック待ち＝キャンセル不要
         return new Promise(resolve => {
-          self._showFeedbackButtons(resolve, proximityLabel);
+          self._showFeedbackButtons(resolve, proximityLabel, opts);
         });
       },
       clearResults() {
@@ -592,6 +596,8 @@ class LocationFinderApp {
         const d = c.distance || {};
         L.push(`・condition: ${c.text ?? c.type} [${c.type}]  距離=${d.level}/${d.method}${d.minutes ? ' ' + d.minutes + '分' : ''}${d.profile ? ' ' + d.profile : ''}`);
       });
+      if (s.droppedConditionTexts?.length) L.push(`・除外(上限超過): ${s.droppedConditionTexts.join('、')}`);
+      if (s.unsupported_features?.length)  L.push(`・除外(非対応の特徴): ${s.unsupported_features.join('、')}`);
       if (s.confirmation) L.push(`・確認文: ${s.confirmation}`);
     }
 
@@ -670,13 +676,13 @@ class LocationFinderApp {
    *   narrow   — 更に絞り込む（今の候補プールの中だけで絞る）
    *   research — 〈proximity〉周辺で探し直す（条件を足して再検索）
    */
-  _showFeedbackButtons(onAction, proximityLabel) {
+  _showFeedbackButtons(onAction, proximityLabel, opts = {}) {
     const container = document.createElement('div');
     container.className = 'feedback-buttons';
     container.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;';
 
     const px = (proximityLabel || '').trim();
-    const buttons = this._lang === 'en'
+    let buttons = this._lang === 'en'
       ? [
           { label: '✅ Finish',            value: 'done' },
           { label: '🔍 Narrow down',       value: 'narrow' },
@@ -687,6 +693,8 @@ class LocationFinderApp {
           { label: '🔍 更に絞り込む',        value: 'narrow' },
           { label: px ? `🔄 ${px}周辺で探し直す` : '🔄 条件を足して探し直す', value: 'research' },
         ];
+    // 候補が1件以下なら「更に絞り込む」は無意味（絞る対象が無い）ので隠す。
+    if (opts.canNarrow === false) buttons = buttons.filter(b => b.value !== 'narrow');
 
     // Keep the resolver so _resetChat can cancel a pending feedback wait — otherwise
     // clearing chat while awaiting feedback leaves run() hung (input stays disabled).

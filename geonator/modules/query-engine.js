@@ -85,13 +85,10 @@ class QueryEngine {
     // 高速確認がまだ出ていなければ（Haiku失敗/解析の方が速かった等）L1の confirmation を表示。
     if (!confirmShown && schema.confirmation) { confirmShown = true; this.ui.showMessage(schema.confirmation); }
 
-    // 上限超過で切り捨てた条件は、表示された確認文(Haiku/Sonnet いずれか)に載らないことがあるため
-    // JS側で決定的に注記する（発見: 高速確認は除外に触れない）。透明化: A=落とした条件のみ。
-    const dropped = schema.droppedConditionTexts || [];
-    if (dropped.length) {
-      const sep = this.ui.getLang?.() === 'en' ? ', ' : '、';
-      this.ui.showMessage(this._m().droppedConditions(dropped.join(sep)));
-    }
+    // 除外事項は表示された確認文(Haiku/Sonnet いずれか)に載らないことがあるため、JS側で決定的に
+    // 注記する。透明化 A=上限超過の地理条件 / B=非地理的な特徴(壁が赤い等)。両方を1吹き出しに。
+    const exNote = this._exclusionNote(schema);
+    if (exNote) this.ui.showMessage(exNote);
 
     // [STEP] QuerySchema — show the parsed intent early so the operator can sanity-check
     // L1's interpretation (target / conditions / distances) before any search runs.
@@ -853,6 +850,23 @@ class QueryEngine {
     let s = `🔎 ${px ? `${px}周辺で` : ''}「${tgt}」を検索`;
     if (conds.length) s += `\n条件: ${conds.join(' / ')}`;
     return s;
+  }
+
+  /**
+   * 透明化の注記を組み立てる（早出し吹き出しと候補パネルで共通利用）。
+   *   A: droppedConditionTexts — 上限超過で検索対象から外した地理条件
+   *   B: unsupported_features  — 数値化・地図化できない非地理的な特徴（壁が赤い等）
+   * 該当が無ければ '' を返す。A/B 両方あれば改行で連結。
+   */
+  _exclusionNote(schema) {
+    const M = this._m();
+    const sep = this._langCode() === 'en' ? ', ' : '、';
+    const parts = [];
+    const dropped = schema?.droppedConditionTexts || [];
+    if (dropped.length) parts.push(M.droppedConditions(dropped.join(sep)));
+    const unsup = schema?.unsupported_features || [];
+    if (unsup.length) parts.push(M.unsupportedFeatures(unsup.join(sep)));
+    return parts.join('\n');
   }
 
   /** Basis pool for narrow suggestions = full-match candidates (else partial). */
@@ -1776,10 +1790,8 @@ class QueryEngine {
     else                        summary = M.resultNone(hasCond);
 
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
-    // 上限超過で除外した条件を結果の場所でも透明化（冒頭の早出し吹き出しに加え、候補パネルにも併記）。
-    const dropped = schema.droppedConditionTexts || [];
-    const sep = this._langCode() === 'en' ? ', ' : '、';
-    const droppedNote = dropped.length ? this._m().droppedConditions(dropped.join(sep)) : '';
+    // 除外事項(A:上限超過の地理条件 / B:非地理的な特徴)を結果の場所でも透明化（早出し吹き出しに加えパネルにも併記）。
+    const droppedNote = this._exclusionNote(schema);
     this.ui.showResults(full, partial, displayNone, summary, conditionLabels, droppedNote);
 
     // [大体の位置] area result: draw an approximate area (convex hull) around the
@@ -1799,7 +1811,10 @@ class QueryEngine {
 
   async _handleFeedback(schema, originalText) {
     const proximityLabel = (schema?.proximity?.anchors || []).map(a => a.text).filter(Boolean).join('・') || null;
-    const action = await this.ui.showFeedback(proximityLabel);
+    // 「更に絞り込む」は現在の候補プール(surfaced=full+partial)の中で絞る操作。プールが1件以下なら
+    // 絞り込む対象が無い＝無意味なのでボタンを隠す。
+    const canNarrow = (this._cache.surfaced?.length || 0) > 1;
+    const action = await this.ui.showFeedback(proximityLabel, { canNarrow });
 
     if (action === 'done') {
       this.ui.showMessage(this._m().confirmed);
@@ -2018,6 +2033,7 @@ const MESSAGES = {
     thinkingEval:    '条件との距離を評価しています',
     thinkingNarrow:  '絞り込んでいます',
     droppedConditions: list => `なお、条件が多いため「${list}」は今回の検索には含めていません。`,
+    unsupportedFeatures: list => `「${list}」は地図データから判定できないため、検索条件には含めていません。`,
   },
   en: {
     searching:            'Searching for candidates…',
@@ -2052,5 +2068,6 @@ const MESSAGES = {
     thinkingEval:    'Evaluating distances & conditions',
     thinkingNarrow:  'Narrowing down',
     droppedConditions: list => `Note: to keep the search focused, "${list}" ${/,/.test(list) ? 'are' : 'is'} not included in this search.`,
+    unsupportedFeatures: list => `"${list}" cannot be determined from map data, so ${/,/.test(list) ? 'they are' : 'it is'} not included as a search condition.`,
   },
 };

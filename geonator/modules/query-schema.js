@@ -152,6 +152,12 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
   // area (convex hull of candidates) instead of pinpointing a single spot.
   if (schema.result_area === undefined) schema.result_area = false;
 
+  // unsupported_features: 数値化・地図化できない非地理的特徴（築浅・壁が赤い・ペット可等）を
+  // L1が構造化して出す → JSが決定的に通知する（確認文の散文任せにしない）。文字列配列に正規化。
+  schema.unsupported_features = Array.isArray(schema.unsupported_features)
+    ? schema.unsupported_features.map(x => (typeof x === 'string' ? x : String(x?.text ?? ''))).filter(Boolean)
+    : [];
+
   return schema;
 }
 

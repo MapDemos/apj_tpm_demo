@@ -1,0 +1,20 @@
+#!/bin/sh
+# ─────────────────────────────────────────────────────────────
+# Auto-stamp the build version into geonator/config.js APP_VERSION
+# on every commit, so it never depends on a human remembering to bump.
+# Format: YYYY-MM-DD.HHMM  (local commit time). Committed → served by
+# GitHub Pages too. Header shows it (index.js reads config.APP_VERSION).
+#
+# Enabled via:  git config core.hooksPath .githooks   (run once per clone)
+# ─────────────────────────────────────────────────────────────
+CONFIG="geonator/config.js"
+[ -f "$CONFIG" ] || exit 0
+
+STAMP=$(date '+%Y-%m-%d.%H%M')
+
+# BSD/macOS sed in-place. Only rewrites the APP_VERSION line.
+sed -i '' -E "s/APP_VERSION: '[^']*'/APP_VERSION: '$STAMP'/" "$CONFIG" || exit 0
+
+# Re-stage so the stamped value is part of THIS commit.
+git add "$CONFIG"
+exit 0
