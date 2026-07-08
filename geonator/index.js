@@ -931,6 +931,7 @@ class LocationFinderApp {
   }
 
   async _handleSend() {
+    if (this._querying) return; // 多重発火ガード（実行中は無視・入力は消さない）
     const input = document.getElementById('chatInput');
     const text  = input.value.trim();
     if (!text) return;
@@ -943,6 +944,8 @@ class LocationFinderApp {
 
   /** クエリ実行の共通ルーチン（送信・リトライで共有）。キャンセル/エラー(リトライ)を扱う。 */
   async _execQuery(text) {
+    if (this._querying) return; // 多重発火ガード（click+Enter同時/連打での二重起動を防ぐ・同期的に確保）
+    this._querying = true;
     const input   = document.getElementById('chatInput');
     const sendBtn = document.getElementById('sendBtn');
     this._lastQuery = text;
@@ -959,6 +962,7 @@ class LocationFinderApp {
     } catch (err) {
       if (!this._cancelled) this._showErrorWithRetry(err, text);
     } finally {
+      this._querying = false; // ロック解除
       this._hideThinking();
       this._hideTypingIndicator();
       this._hideCancelBtn();
