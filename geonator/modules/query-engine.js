@@ -139,6 +139,8 @@ class QueryEngine {
     try {
       schema = await this.llm.parseQuery(userText, previousText, this._langCode());
     } catch (e) {
+      // デバッグモードでは根本原因（打ち切り・不正JSON・HTTP等）をそのまま可視化する。
+      this.ui.showDebug?.(`⚠️ L1解析エラー\n${e?.message || String(e)}`);
       this.ui.showMessage(this._m().error_communication);
       return null;
     }
@@ -154,6 +156,8 @@ class QueryEngine {
     const validation = validateQuerySchema(schema);
     if (!validation.ok) {
       console.warn('[QueryEngine] L1 schema invalid:', validation.errors);
+      // デバッグモードでは検証エラーの中身（どのフィールドが不正か）を可視化する。
+      this.ui.showDebug?.(`⚠️ L1スキーマ検証エラー\n${(validation.errors || []).join('\n')}`);
       // If it lacks the essentials, it's more likely a non-query than a comm error.
       if (!schema?.proximity?.anchors?.length || !schema?.target?.text) {
         this.ui.showMessage(this._m().not_a_query);

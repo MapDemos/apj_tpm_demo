@@ -530,6 +530,11 @@ class LocationFinderApp {
         if (!self._debugMode || !report) return;
         self.addMessage('debug', self._renderDebugReport(report));
       },
+      // デバッグ専用の詳細メッセージ（エラー原因など）。通常モードでは何も出さない。
+      showDebug(text) {
+        if (!self._debugMode || !text) return;
+        self.addMessage('debug', text);
+      },
       showRunStats(stats) {
         if (!stats) return;
         const fmt = n => (n || 0).toLocaleString('ja-JP');
@@ -983,6 +988,8 @@ class LocationFinderApp {
   /** エラー表示＋緑の「やり直す」ボタン（同じクエリを再実行）。通信/上限などを細分化して文言化。 */
   _showErrorWithRetry(err, retryText) {
     this.addMessage('error', this._errorText(err), { retry: retryText });
+    // デバッグモードでは生のエラー内容（スタック/メッセージ）も併記して原因追跡できるようにする。
+    if (this._debugMode && err) this.addMessage('debug', `⚠️ ${err.message || String(err)}${err.stack ? '\n' + err.stack : ''}`);
   }
 
   /** エラー種別を文言化（通信・タイムアウト・レート制限など）。 */

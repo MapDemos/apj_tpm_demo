@@ -87,22 +87,37 @@ class LLMClient {
    */
   async parseQuery(userText, previousText = null, lang = 'ja') {
     const fullText = previousText ? `${previousText}\n追加情報：${userText}` : userText;
+    // 上限超過分も含め全条件＋各poiのqueries[]を出すため出力が長くなり得る。max_tokens不足だと
+    // JSONが途中で切れてパース失敗→「通信エラー」になる。余裕を持たせる（§透明化A）。
+    const MAX_TOK = 3000;
 
+    let lastDetail = '';
     for (let attempt = 0; attempt <= this.config.L1_MAX_RETRY; attempt++) {
       try {
-        const result = await this._callClaude(
+        const { text, stop_reason } = await this._callClaude(
           this._buildL1Prompt(fullText, lang),
-          1500,  // QuerySchema with QE queries[] + multiple conditions can be long
+          MAX_TOK,
           this.config.L1_MODEL,
-          'L1'
+          'L1',
+          // L1は出力が大きく生成に時間がかかる → 既定8秒では足りない。専用に長めのタイムアウト。
+          { returnMeta: true, timeoutMs: Math.max(this.config.API_TIMEOUT_MS, this.config.L1_TIMEOUT_MS || 20000) }
         );
-        const json = this._extractJSON(result);
+        const json = this._extractJSON(text);
         if (json) return json;
+        // JSONが取れない＝打ち切り or 不正JSON。原因を詳細化（デバッグ表示・リトライ判断用）。
+        const truncated = stop_reason === 'max_tokens';
+        const tail = (text || '').slice(-160).replace(/\s+/g, ' ');
+        lastDetail = truncated
+          ? `L1 response truncated (stop_reason=max_tokens, max_tokens=${MAX_TOK}). 条件を減らすか max_tokens を上げてください。tail="…${tail}"`
+          : `L1 returned unparseable JSON (stop_reason=${stop_reason}). tail="…${tail}"`;
+        // 打ち切りは再試行しても同じ長さで切れる（temp=0・決定的）→ リトライせず即中断。
+        if (truncated) break;
       } catch (e) {
-        if (attempt === this.config.L1_MAX_RETRY) throw e;
+        // ネットワーク/HTTP等の一過性エラーはリトライ価値がある→ ループ継続（最終試行後にthrow）。
+        lastDetail = e?.message || String(e);
       }
     }
-    throw new Error('L1: failed to produce valid JSON after retries');
+    throw new Error(lastDetail || 'L1: failed to produce valid JSON after retries');
   }
 
   /**
@@ -240,9 +255,12 @@ class LLMClient {
   // Internal
   // ─────────────────────────────────────────────
 
-  async _callClaude(prompt, maxTokens = 400, model = null, role = null) {
+  async _callClaude(prompt, maxTokens = 400, model = null, role = null, opts = {}) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.config.API_TIMEOUT_MS);
+    // opts.timeoutMs: 呼び出し側でタイムアウトを上書き可能（L1は出力が大きく生成に時間がかかるため長め）。
+    const timeoutMs = opts.timeoutMs || this.config.API_TIMEOUT_MS;
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
     const useModel = model || this.config.CLAUDE_MODEL;
     const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -270,7 +288,16 @@ class LLMClient {
         s.ms     += (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
         s.calls  += 1;
       }
-      return data?.content?.[0]?.text ?? '';
+      const text = data?.content?.[0]?.text ?? '';
+      // opts.returnMeta: 呼び出し側（L1）が stop_reason を見て打ち切り(max_tokens)を検知できるようにする。
+      if (opts.returnMeta) return { text, stop_reason: data?.stop_reason ?? null, usage: data?.usage ?? null };
+      return text;
+    } catch (e) {
+      // abort は「時間切れ」。素の "signal is aborted without reason" では原因が分からないので明示化。
+      if (timedOut || e?.name === 'AbortError') {
+        throw new Error(`LLM timeout after ${timeoutMs}ms (model=${useModel}, max_tokens=${maxTokens})`);
+      }
+      throw e;
     } finally {
       clearTimeout(timeout);
     }
@@ -296,7 +323,7 @@ class LLMClient {
       : '';
     return {
       system: PROMPT_L1,
-      user:   `ユーザー入力：「${userText}」\n\nconditionは重要な順に最大${maxC}件まで採用してください（入り切らない条件は confirmation で言及）。${langNote}QuerySchema JSONのみを返してください。`,
+      user:   `ユーザー入力：「${userText}」\n\n地理的な条件は重要な順に、上限を超える分も含めてすべて conditions 配列に入れてください（システムが上限${maxC}件を適用し、超過分はユーザーへ通知します）。非地理的な特徴のみ confirmation で言及してください。${langNote}QuerySchema JSONのみを返してください。`,
     };
   }
 

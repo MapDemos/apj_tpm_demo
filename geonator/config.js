@@ -77,6 +77,7 @@ const CONFIG = {
   DEFAULT_LEVEL:       'very_close', // distance level when user gives no distance expression
   MAX_CLARIFY_TURNS:   3,            // max clarification loops before best-effort (HH)
   API_TIMEOUT_MS:      8000,         // per-API-call timeout in ms (GG)
+  L1_TIMEOUT_MS:       20000,        // L1(解析)専用タイムアウト。出力が大きく生成に時間がかかるため既定より長め
   API_MAX_RETRY:       1,            // retries on timeout (GG)
   L1_MAX_RETRY:        1,            // L1 JSON invalid → retry count (II)
   CANDIDATE_LIMIT:     150,          // max candidates collected per query
