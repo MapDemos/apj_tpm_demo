@@ -177,7 +177,7 @@
       <h2>1クエリの処理フロー</h2>
       <span class="verdict v-ok">JS主導：LLMは意味判断のみ</span>
     </div>
-    <p class="sec-note">上の QuerySchema を作り、その各枝を解決していく時間順。<b>フロー制御・幾何・API裏取りは JS</b>、LLM は解析・解釈・関連性の<b>意味判断だけ</b>を答える。ユーザーへの聞き返しは途中に差し込まれ、選択後に続行する。</p>
+    <p class="sec-note">フェーズはコードの debug 表記に対応：<b>⓪クエリ解釈 → ①一次検索(proximity解決) → ②二次検索 Step1(候補収集＋L2) → ③二次検索 Step2(距離評価・スコアリング) → ④結果・フィードバック</b>。<b>フロー制御・幾何・API裏取りは JS</b>、LLM は解析・解釈・関連性の<b>意味判断だけ</b>。聞き返しは途中に差し込まれ選択後に続行。</p>
     <div class="seq-actors">
       <span class="ac user">User</span>
       <span class="ac js">JS（query-engine）</span>
@@ -185,27 +185,29 @@
       <span class="ac mb">Mapbox</span>
     </div>
     <div class="seq">
-      <div class="phase">A · 入力と解析（L1）</div>
+      <div class="phase">⓪ クエリ解釈（L1 / QuerySchema）</div>
       <div class="step"><span class="snum">1</span><span class="flow"><span class="ac user">User</span><span class="arw">→</span><span class="ac js">JS</span></span><span class="sact">クエリ入力（多重発火はロック）</span></div>
       <div class="step"><span class="snum">2</span><span class="flow"><span class="ac js">JS</span><span class="arw">⇉</span><span class="ac llm">LLM</span></span><span class="sact">確認文の先出し（L1-1・Haiku）<span class="em"> ／ 3と並行</span></span></div>
       <div class="step"><span class="snum">3</span><span class="flow"><span class="ac js">JS</span><span class="arw">⇉</span><span class="ac llm">LLM</span></span><span class="sact">解析 → QuerySchema（L1-2・Sonnet）<span class="tag">not_a_query時 最大3回再試行</span></span></div>
       <div class="step"><span class="snum">4</span><span class="flow"><span class="ac llm">LLM</span><span class="arw">→</span><span class="ac js">JS</span><span class="arw">→</span><span class="ac user">User</span></span><span class="sact">解釈が割れる時のみ「どの意図？」→ 選択で再解析<span class="tag">構造クラリファイ</span></span></div>
       <div class="step"><span class="snum">5</span><span class="flow"><span class="ac js">JS</span><span class="arw">→</span><span class="ac user">User</span></span><span class="sact">確認文を表示（〜を探しますね）</span></div>
 
-      <div class="phase">B · 場所の解決（proximity）</div>
+      <div class="phase">① 一次検索：proximity 解決（どこを探すか）</div>
       <div class="step"><span class="snum">6</span><span class="flow"><span class="ac js">JS</span><span class="arw">→</span><span class="ac mb">Mapbox</span></span><span class="sact">Search Box で anchor（駅/地名/POI）を解決</span></div>
       <div class="step"><span class="snum">7</span><span class="flow"><span class="ac js">JS</span><span class="arw">⇄</span><span class="ac llm">LLM</span><span class="arw">→</span><span class="ac user">User</span></span><span class="sact">曖昧なら L1-3（地名解釈/広域列挙）→「もしかして/絞り込み」<span class="tag">場所同定クラリファイ</span></span></div>
-      <div class="step"><span class="snum">8</span><span class="flow"><span class="ac js">JS</span></span><span class="sact"><span class="em">［幾何］</span> 広すぎゲート・near-extent（種別別半径）・scope（県/市区）ハード限定</span></div>
+      <div class="step"><span class="snum">8</span><span class="flow"><span class="ac js">JS</span></span><span class="sact"><span class="em">［幾何］</span> 広すぎゲート・near-extent（種別別半径）・scope（県/市区）ハード限定 → 探索bbox確定</span></div>
 
-      <div class="phase">C · 収集・フィルタ・採点</div>
-      <div class="step"><span class="snum">9</span><span class="flow"><span class="ac js">JS</span><span class="arw">→</span><span class="ac mb">Mapbox</span></span><span class="sact">Search Box ＋ Tilequery で target / condition を収集</span></div>
+      <div class="phase">② 二次検索 Step1：候補収集 ＋ L2フィルタ</div>
+      <div class="step"><span class="snum">9</span><span class="flow"><span class="ac js">JS</span><span class="arw">→</span><span class="ac mb">Mapbox</span></span><span class="sact">Search Box ＋ Tilequery で target / condition を収集（≤150）</span></div>
       <div class="step"><span class="snum">10</span><span class="flow"><span class="ac js">JS</span><span class="arw">⇄</span><span class="ac llm">LLM</span></span><span class="sact">L2-1 カテゴリ妥当性 ／ L2-2 名前の関連性（no を除外）</span></div>
-      <div class="step"><span class="snum">11</span><span class="flow"><span class="ac js">JS</span></span><span class="sact"><span class="em">［幾何］</span> スコア（関連性 × 条件距離 × アンカー距離 ＋floors）＋ ハード除外 → ティア決定</span></div>
+      <div class="step"><span class="snum">11</span><span class="flow"><span class="ac js">JS</span><span class="arw">↺</span><span class="ac mb">Mapbox</span></span><span class="sact">過密(&gt;150)→タイト条件に昇格し再収集 ／ 0件→バス停tileset<span class="tag">降格ラダー</span></span></div>
 
-      <div class="phase">D · 結果・フォールバック・フィードバック</div>
-      <div class="step"><span class="snum">12</span><span class="flow"><span class="ac js">JS</span><span class="arw">→</span><span class="ac user">User</span></span><span class="sact">結果表示（gold/候補・地図ピン・result_area なら面）</span></div>
-      <div class="step"><span class="snum">13</span><span class="flow"><span class="ac js">JS</span><span class="arw">↺</span><span class="ac mb">Mapbox</span></span><span class="sact">過密→タイト条件に昇格 ／ 0件→バス停・聞き返し<span class="tag">降格ラダー</span></span></div>
-      <div class="step"><span class="snum">14</span><span class="flow"><span class="ac js">JS</span><span class="arw">⇄</span><span class="ac user">User</span></span><span class="sact">フィードバック → 探し直す / 更に絞り込む（L3 が目印提案）→ ①へループ</span></div>
+      <div class="phase">③ 二次検索 Step2：距離評価・スコアリング</div>
+      <div class="step"><span class="snum">12</span><span class="flow"><span class="ac js">JS</span></span><span class="sact"><span class="em">［幾何］</span> ハード除外（same_building / floors）→ スコア（関連性 × 条件距離 × アンカー距離 ＋floors）→ ティア（gold / margin）</span></div>
+
+      <div class="phase">④ 結果・フィードバック</div>
+      <div class="step"><span class="snum">13</span><span class="flow"><span class="ac js">JS</span><span class="arw">→</span><span class="ac user">User</span></span><span class="sact">結果表示（gold/候補・地図ピン・result_area なら面）／ 0件は追加情報を要求</span></div>
+      <div class="step"><span class="snum">14</span><span class="flow"><span class="ac js">JS</span><span class="arw">⇄</span><span class="ac user">User</span></span><span class="sact">フィードバック → 探し直す / 更に絞り込む（L3 が目印提案）→ ⓪へループ</span></div>
     </div>
   </section>
 
