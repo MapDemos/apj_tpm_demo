@@ -1,0 +1,321 @@
+<style>
+  :root{
+    --ground:#F5F7F6; --paper:#FFFFFF;
+    --ink:#152220; --ink-2:#47534F; --ink-3:#7C8783;
+    --line:#DFE5E1; --line-2:#ECF0ED;
+    --teal:#0E7A6E; --teal-ink:#0A564E; --teal-bg:#E7F1EF;
+    --ok:#2E7D55; --ok-bg:#E6F2EA;
+    --warn:#9A5A12; --warn-bg:#F6EEDC;
+    --gap:#A5393A; --gap-bg:#F5E6E4;
+    --jp:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","YuGothic","Noto Sans JP","Meiryo",system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono","SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box;}
+  .doc{
+    font-family:var(--jp); color:var(--ink); background:var(--ground);
+    line-height:1.62; -webkit-font-smoothing:antialiased;
+    padding:clamp(20px,4vw,56px) clamp(16px,4vw,40px);
+  }
+  .wrap{max-width:1060px;margin:0 auto;}
+
+  /* header */
+  .masthead{border-bottom:2px solid var(--ink);padding-bottom:22px;margin-bottom:8px;}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);margin:0 0 10px;}
+  h1{font-size:clamp(24px,4vw,31px);line-height:1.15;margin:0 0 12px;letter-spacing:-.01em;text-wrap:balance;font-weight:800;}
+  .thesis{font-size:15px;color:var(--ink-2);max-width:64ch;margin:0;}
+  .thesis b{color:var(--ink);font-weight:700;}
+
+  /* legend */
+  .legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin:18px 0 40px;padding:13px 16px;background:var(--paper);border:1px solid var(--line);}
+  .legend-item{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-2);}
+  .dot{width:11px;height:11px;border-radius:50%;flex:none;}
+  .dot.ok{background:var(--ok);} .dot.warn{background:var(--warn);} .dot.gap{background:var(--gap);} .dot.neu{background:var(--ink-3);}
+
+  /* section */
+  section{margin:0 0 40px;}
+  .sec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px;}
+  .sec-tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--teal);border:1px solid var(--teal);padding:2px 7px;border-radius:2px;white-space:nowrap;}
+  h2{font-size:19px;margin:0;font-weight:750;letter-spacing:-.005em;}
+  .verdict{font-family:var(--mono);font-size:11px;font-weight:600;padding:2px 8px;border-radius:2px;letter-spacing:.02em;}
+  .v-ok{background:var(--ok-bg);color:var(--ok);}
+  .v-warn{background:var(--warn-bg);color:var(--warn);}
+  .v-gap{background:var(--gap-bg);color:var(--gap);}
+  .sec-note{font-size:13.5px;color:var(--ink-2);margin:8px 0 16px;max-width:72ch;}
+  .sec-note b{color:var(--ink);}
+
+  /* table */
+  .tbl-scroll{overflow-x:auto;border:1px solid var(--line);background:var(--paper);}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:640px;}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line-2);vertical-align:top;}
+  th{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:700;background:#FBFCFB;border-bottom:1px solid var(--line);}
+  tr:last-child td{border-bottom:none;}
+  td.mono,code{font-family:var(--mono);font-size:12px;}
+  code{background:#F0F3F1;padding:1px 5px;border-radius:3px;color:var(--teal-ink);}
+  td.mono{color:var(--ink);white-space:nowrap;}
+  .ref{font-family:var(--mono);font-size:11px;color:var(--ink-3);white-space:nowrap;}
+  .st{font-family:var(--mono);font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:2px;white-space:nowrap;display:inline-block;}
+  .st.ok{background:var(--ok-bg);color:var(--ok);}
+  .st.warn{background:var(--warn-bg);color:var(--warn);}
+  .st.gap{background:var(--gap-bg);color:var(--gap);}
+  .st.neu{background:#EEF1EF;color:var(--ink-2);}
+
+  /* target model callout */
+  .target{background:var(--teal-bg);border:1px solid #BFDCD6;padding:18px 20px;margin-top:10px;}
+  .target h3{margin:0 0 6px;font-size:14px;color:var(--teal-ink);font-family:var(--mono);letter-spacing:.03em;text-transform:uppercase;}
+  .target p{margin:0;font-size:13.5px;color:#1D3A35;}
+  .target p b{color:var(--teal-ink);}
+
+  /* backbone grid */
+  .roles{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+  @media(max-width:720px){.roles{grid-template-columns:1fr;}}
+  .role{background:var(--paper);border:1px solid var(--line);border-top:3px solid var(--ok);padding:14px 16px;}
+  .role h4{margin:0 0 3px;font-size:14.5px;}
+  .role .kicker{font-family:var(--mono);font-size:11px;color:var(--ok);margin:0 0 9px;}
+  .role ul{margin:0;padding-left:0;list-style:none;font-size:12px;color:var(--ink-2);}
+  .role li{padding:3px 0;border-bottom:1px dotted var(--line);}
+  .role li:last-child{border-bottom:none;}
+  .role li code{font-size:11px;}
+
+  /* consolidation / gaps */
+  .cons{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:720px){.cons{grid-template-columns:1fr;}}
+  .card{background:var(--paper);border:1px solid var(--line);padding:16px 18px;}
+  .card.gap-card{border-left:3px solid var(--gap);}
+  .card.cons-card{border-left:3px solid var(--teal);}
+  .card h3{margin:0 0 10px;font-size:14px;}
+  .card ul{margin:0;padding-left:18px;font-size:13px;color:var(--ink-2);}
+  .card li{padding:3px 0;}
+  .card li b{color:var(--ink);}
+
+  .foot{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink-3);font-family:var(--mono);}
+  .arrow{color:var(--teal);font-weight:700;}
+</style>
+
+<div class="doc"><div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Geonator · 機構棚卸し / MECE 監査</p>
+    <h1>自然言語ロケーション探索 — 概念マップ</h1>
+    <p class="thesis">役割の3分割（proximity / target / condition）は<b>MECE で健全</b>。問題はその下の層——<b>「場所の同定・曖昧解決」「親子（部位）」「フォールバック」が同じ問題に別々の機構を積み重ねて重複している</b>こと。これがオーナーが仕様を頭に保持できない主因。各軸を「1問題＝1系統」に統合するのが目標。</p>
+  </header>
+
+  <div class="legend">
+    <span class="legend-item"><span class="dot ok"></span>一貫（MECE・そのまま）</span>
+    <span class="legend-item"><span class="dot warn"></span>重複（統合候補）</span>
+    <span class="legend-item"><span class="dot gap"></span>穴 / 未実装</span>
+    <span class="legend-item"><span class="dot neu"></span>実装済（個別）</span>
+    <span class="legend-item" style="margin-left:auto;color:var(--ink-3)">参照＝<code style="background:none;padding:0">query-engine.js</code> 行番号</span>
+  </div>
+
+  <!-- BACKBONE -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">背骨</span>
+      <h2>役割（エンティティの3分割）</h2>
+      <span class="verdict v-ok">一貫 · 触らない</span>
+    </div>
+    <p class="sec-note">1クエリ＝<b>proximity（基準）1つ・target（探す物）1つ・condition（制約）複数</b>。ここは MECE で、全体の背骨。以降の軸はすべてこの3つの「解決」を助ける補助機構。</p>
+    <div class="roles">
+      <div class="role">
+        <h4>proximity</h4>
+        <p class="kicker">どこを基準に</p>
+        <ul>
+          <li><code>anchors[]</code> type: station/poi/address/locality/intersection</li>
+          <li><code>subtype.exit</code>（駅出口）</li>
+          <li><code>scope</code>（県/市区でハード限定）</li>
+          <li><code>within</code>（到達範囲）</li>
+          <li><code>bearing_filter</code>（方角）</li>
+        </ul>
+      </div>
+      <div class="role">
+        <h4>target</h4>
+        <p class="kicker">何を探す</p>
+        <ul>
+          <li><code>text</code>（探す物）</li>
+          <li><code>query_intent</code> mansion/apartment/building/specific</li>
+          <li><code>queries[]</code>（QE展開）</li>
+          <li><code>floors</code>（階数・ハード）</li>
+        </ul>
+      </div>
+      <div class="role">
+        <h4>conditions[]</h4>
+        <p class="kicker">近接の制約</p>
+        <ul>
+          <li><code>type</code> poi/road/water/rail/…/category_busstop</li>
+          <li><code>distance</code> level/method/minutes/meters</li>
+          <li><code>negate</code>（否定）/ <code>direction</code></li>
+          <li><code>queries[]</code>（poiのみ）</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- AXIS: place identity clarify -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">軸 · 場所の同定</span>
+      <h2>「どの場所？」の曖昧解決</h2>
+      <span class="verdict v-warn">重複 5 → 統合候補</span>
+    </div>
+    <p class="sec-note">すべて「<b>proximity の場所が一意に定まらない → ユーザーに確認</b>」の亜種。5つの別関数・別メッセージに散っている＝<b>非MECEの筆頭</b>。</p>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>機構</th><th>いつ</th><th>UI</th><th>参照</th><th>状態</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">whichArea</td><td>同名地が複数の市区（池袋＝複数区）</td><td>showChoices</td><td class="ref">:594/:680</td><td><span class="st warn">重複</span></td></tr>
+        <tr><td class="mono">whichPoi</td><td>同名POIが複数（東京タワー水族館…）</td><td>showChoices</td><td class="ref">:764</td><td><span class="st warn">重複</span></td></tr>
+        <tr><td class="mono">didYouMean</td><td>口語/部分地名（青山→南青山）L1-3が解釈</td><td>showChoices</td><td class="ref">:655</td><td><span class="st warn">重複</span></td></tr>
+        <tr><td class="mono">_narrowBroadProximity</td><td>広すぎ（鎌倉市）→駅/エリア列挙 L1-3</td><td>showHintInput</td><td class="ref">:842</td><td><span class="st warn">重複</span></td></tr>
+        <tr><td class="mono">_clarifyGenericAnchor</td><td>基準が一般カテゴリ（コンビニ等）</td><td>showMessage</td><td class="ref">:821</td><td><span class="st warn">重複</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="target"><h3>統合先</h3><p><b>1つの「場所同定クラリファイ」</b>に集約。トリガー理由を <code>reason: homonym | colloquial | broad | generic</code> のenumで持ち、UI（ボタン/入力）と候補生成だけ分岐。＝5関数→1機構＋4理由。</p></div>
+  </section>
+
+  <!-- AXIS: structure clarify -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">軸 · 構造の曖昧</span>
+      <h2>「意図の構造」の曖昧解決</h2>
+      <span class="verdict v-ok">新設 1 · 妥当</span>
+    </div>
+    <p class="sec-note">役割（どれがtarget/condition）・距離の帰属が2通り以上に読める時。上の「場所同定」とは<b>別系統として正しく分離</b>できている（2系統目）。</p>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>機構</th><th>いつ</th><th>UI</th><th>参照</th><th>状態</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">interpretations picker</td><td>「新丸子駅 マンション ローソン 3分」＝役割/帰属が割れる。L1-2が最大3案を返す</td><td>showHintInput</td><td class="ref">:212</td><td><span class="st ok">一貫</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="target"><h3>あるべき二分</h3><p>明確化は<b>この2系統だけ</b>にする：<b>①場所同定</b>（上）＝どの場所か／<b>②構造</b>（ここ）＝どの読みか。今の5+1を「2系統」に畳めば頭に収まる。</p></div>
+  </section>
+
+  <!-- AXIS: parent/part -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">軸 · 親子（部位）</span>
+      <h2>「Xの部位/中のY」の表現</h2>
+      <span class="verdict v-warn">重複 3 + 穴 1</span>
+    </div>
+    <p class="sec-note">「親（建物）に従属する要素」という同じ関係が、4つの別概念に分散。<b>データ有無で解決が変わる</b>のが本質（駅出口＝在る / 通用口＝無い / 実在POI＝same_building）。</p>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>機構</th><th>対象</th><th>解決</th><th>状態</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">subtype.exit + transit_entrance</td><td>駅の出口（A4出口）</td><td>transit系タイル（データ有）</td><td><span class="st warn">重複2表現</span></td></tr>
+        <tr><td class="mono">same_building</td><td>実在POIが同ビル（大船駅のスタバ）</td><td>建物ID一致（既存）</td><td><span class="st neu">実装済</span></td></tr>
+        <tr><td class="mono">container / children</td><td>データ無し部位（アミコの通用口）</td><td>親建物にフォールバック</td><td><span class="st gap">未実装</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="target"><h3>統合先</h3><p><b>「部位」1概念＋種別ディスパッチ解決</b>：駅出口→transit / 実在POI→same_building / <b>データ無し部位→親建物へ降格表示</b>（＝真に新規で要るのはここだけ）。駅出口の既存路は壊さない。</p></div>
+  </section>
+
+  <!-- AXIS: distance / extent -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">軸 · 距離 / 範囲</span>
+      <h2>「どこまで / どれだけ近い」</h2>
+      <span class="verdict v-warn">要ドキュメント化</span>
+    </div>
+    <p class="sec-note"><b>収集extent（どこまで候補を集めるか）</b>と<b>マッチ距離（採点でどれだけ近いか）</b>は別物。分離自体は正しいが、関係が明文化されておらず混同しやすい。</p>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>機構</th><th>役割</th><th>値</th><th>状態</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">within</td><td>proximity到達（明示距離/時間）</td><td>level / isochrone分 / m</td><td><span class="st neu">実装済</span></td></tr>
+        <tr><td class="mono">near-extent (type別)</td><td>曖昧「近く」の収集半径</td><td>POI400 / 駅600 / 地名800</td><td><span class="st neu">実装済</span></td></tr>
+        <tr><td class="mono">DISTANCE_TABLE</td><td>conditionのlevel→半径/iso</td><td>adjacent50…somewhat800</td><td><span class="st neu">実装済</span></td></tr>
+        <tr><td class="mono">condition margin</td><td>収集bboxの拡張幅</td><td>maxConditionRadiusM</td><td><span class="st neu">実装済</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="target"><h3>整理方針</h3><p>2概念に明記：<b>収集extent</b>（広めOK・取りこぼし防止）／<b>マッチ距離</b>（採点・実距離で並ぶ）。「広め収集でも精度は採点が守る」を仕様書に1行で固定。</p></div>
+  </section>
+
+  <!-- AXIS: L2 filter -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">軸 · 候補フィルタ (L2)</span>
+      <h2>関連性・カテゴリの足切り</h2>
+      <span class="verdict v-warn">非対称 · 要明記</span>
+    </div>
+    <p class="sec-note">2段（粗→細）。ただし<b>適用範囲が非対称</b>で、コメントにしか書かれていない。</p>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>機構</th><th>見るもの</th><th>適用範囲</th><th>状態</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">L2-1 filterCategories</td><td>poi_category / class（分野）</td><td>主に target</td><td><span class="st warn">非対称</span></td></tr>
+        <tr><td class="mono">L2-2 rateCandidates</td><td>名前（4段階の意図一致）</td><td>target ＋ poi条件</td><td><span class="st warn">非対称</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="target"><h3>整理方針</h3><p>「L2-1＝カテゴリ（主にtarget）／L2-2＝名前（target＋poi条件）」の非対称を<b>仕様書に明記</b>。condition側 L2-2 除外が debug 非可視なのは別途<b>穴</b>（下記）。</p></div>
+  </section>
+
+  <!-- AXIS: fallback -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">軸 · フォールバック</span>
+      <h2>「見つからない / 多すぎ」の降格</h2>
+      <span class="verdict v-warn">重複 4 → 統合候補</span>
+    </div>
+    <p class="sec-note">すべて「<b>理想の答えが出せない → より粗い/別の手がかりへ降格</b>」。4系統に散在。</p>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>機構</th><th>発火</th><th>降格先</th><th>参照</th><th>状態</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">_resolveOverflow / _findPromotableAnchor</td><td>target過密（&gt;150）</td><td>タイト条件を起点に昇格 or 目印clarify</td><td class="ref">:1451/:1400</td><td><span class="st warn">重複</span></td></tr>
+        <tr><td class="mono">mainZero</td><td>0件</td><td>追加情報を要求</td><td class="ref">:2073</td><td><span class="st warn">重複</span></td></tr>
+        <tr><td class="mono">bus-stop fallback</td><td>0件（mapbox-mcp）</td><td>バス停tilesetで再取得</td><td class="ref">mcp</td><td><span class="st warn">重複</span></td></tr>
+        <tr><td class="mono">container fallback</td><td>データ無し部位が不在</td><td>親建物を表示</td><td class="ref">未</td><td><span class="st gap">未実装</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="target"><h3>統合先</h3><p><b>「最具体 → 粗」1系統の降格ラダー</b>：タイト条件(パチンコ) <span class="arrow">▸</span> 親building(アミコ) <span class="arrow">▸</span> より粗いbbox <span class="arrow">▸</span> ユーザーに聞く。今の4分岐をこの1ラダーに写像。</p></div>
+  </section>
+
+  <!-- AXIS: LLM roles -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">軸 · LLM 役割</span>
+      <h2>各コールの担当</h2>
+      <span class="verdict v-ok">概ね一貫 · 命名注意</span>
+    </div>
+    <p class="sec-note">JS主導＝<b>LLMは意味判断だけ、フロー/幾何/裏取りはJS</b>。役割分割は概ねMECEだが、L1-3が2役を兼ねる。</p>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>役割</th><th>モデル</th><th>仕事</th><th>関数</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">L1-1</td><td>Haiku</td><td>確認文の先出し（〜を探しますね）</td><td class="mono">confirmInput</td></tr>
+        <tr><td class="mono">L1-2</td><td>Sonnet</td><td>自然文→スキーマ ＋ interpretations</td><td class="mono">parseQuery</td></tr>
+        <tr><td class="mono">L1-3</td><td>Sonnet</td><td><b>地名解釈＋広域絞り込み（2役）</b></td><td class="mono">interpretPlaceName / suggestProximityAnchors</td></tr>
+        <tr><td class="mono">L2-1</td><td>Sonnet</td><td>カテゴリ妥当性</td><td class="mono">filterCategories</td></tr>
+        <tr><td class="mono">L2-2</td><td>Sonnet</td><td>名前の関連性（4段階）</td><td class="mono">rateCandidates</td></tr>
+        <tr><td class="mono">L3</td><td>Haiku</td><td>絞り込み目印の提案（後段）</td><td class="mono">suggestLandmarks / suggestProminentLandmarks</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- CONSOLIDATION TARGET + GAPS -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">結論</span>
+      <h2>統合後のMECEモデル ＆ 穴</h2>
+    </div>
+    <div class="cons">
+      <div class="card cons-card">
+        <h3>目標＝この5軸だけで全部説明できる状態</h3>
+        <ul>
+          <li><b>エンティティ</b>：役割(3) × 種別(POI/駅/エリア/部位/カテゴリ) × 親子(container)</li>
+          <li><b>関係</b>：距離・到達 / 包含(same-building) / 方角</li>
+          <li><b>明確化＝2系統だけ</b>：①場所同定（homonym/colloquial/broad/generic を1機構）②構造(interpretations)</li>
+          <li><b>フォールバック＝1ラダー</b>：タイト条件 ▸ 親building ▸ 粗bbox ▸ 聞く</li>
+          <li><b>フィルタ</b>：L2-1 カテゴリ / L2-2 名前（適用範囲を明記）</li>
+        </ul>
+      </div>
+      <div class="card gap-card">
+        <h3>穴（優先度順）</h3>
+        <ul>
+          <li><b>生きた概念仕様書が無い</b>＝最大の穴。このマップを README 化してオーナーのグリップを維持</li>
+          <li><b>データ無し建物部位→親フォールバック</b>（通用口）未実装</li>
+          <li><b>岩手県 scope</b> が L1 で確実に scope に入るか未検証（debug表示済）</li>
+          <li><b>condition側 L2-2 除外</b>が debug 非可視（正当な候補が黙って落ちても見えない）</li>
+          <li><b>bbox閾値ズレ</b>：広すぎゲート4km vs グリッド1500 ＝「2次検索は必ずTQ」が未保証</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">現状＝役割3はMECE / その下は 重複5(場所同定)・重複4(フォールバック)・重複3+穴1(部位)。 次の一手＝機能追加を止め、この軸へ写像する統合パス＋仕様書化。</p>
+
+</div></div>
