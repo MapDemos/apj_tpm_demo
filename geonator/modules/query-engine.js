@@ -149,7 +149,7 @@ class QueryEngine {
   // [2] L1 parse + [A] structural checks + [II] validate
   // ─────────────────────────────────────────────
 
-  async _parseAndValidate(userText, previousText) {
+  async _parseAndValidate(userText, previousText, skipTargetClarify = false) {
     // ブロークンな入力（音声等）は L1 が場所依頼を取りこぼすことがある。手がかりがありそうな
     // （＝それなりの長さの）入力で not_a_query/必須欠落になったら、注記を付けて再試行する。
     // 挨拶等の短い入力は1回で確定（無駄な再試行をしない）。temp=0でも注記でプロンプトが変わり
@@ -198,6 +198,22 @@ class QueryEngine {
       }
       return null;
     }
+
+    // [target曖昧の確認] "一箇所に絞る"のtarget版。L1がキーワード羅列等で探索対象を確定できず
+    // target.alternatives を挙げた場合、「何をお探しですか？」で確認する（黙って片方に決めない）。
+    // 選ばれた対象で解釈し直す（差し替えの整合は L1 に任せる＝確実）。skipで再帰の二重確認を防止。
+    if (!skipTargetClarify) {
+      const alts = Array.isArray(schema.target?.alternatives) ? schema.target.alternatives.filter(s => s && typeof s === 'string') : [];
+      if (alts.length && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
+        this._clarifyCount++;
+        const opts = [schema.target.text, ...alts].filter((v, i, a) => v && a.indexOf(v) === i).slice(0, this.config.CLARIFY_MAX_CHOICES || 5);
+        const chosen = await this.ui.showChoices(this._m().ask_target, opts);
+        if (chosen && chosen !== schema.target.text) {
+          return await this._parseAndValidate(`${userText}（探しているのは「${chosen}」）`, previousText, true);
+        }
+      }
+    }
+    if (schema.target) delete schema.target.alternatives; // 以降に持ち越さない
 
     fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
 
