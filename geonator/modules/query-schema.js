@@ -9,7 +9,7 @@ const SCHEMA_ENUMS = {
   query_intent:   ['category_mansion', 'category_apartment', 'category_building', 'specific', 'category_busstop', 'category_busstop_location', 'intersection', 'signal'],
   condition_type: ['poi', 'road', 'water', 'rail', 'intersection', 'signal', 'transit_entrance', 'category_busstop'],
   distance_method: ['radius', 'isochrone'],
-  distance_level: ['same_building', 'adjacent', 'very_close', 'nearby', 'somewhat_nearby', 'far'],
+  distance_level: ['same_building', 'adjacent', 'roadside', 'very_close', 'nearby', 'somewhat_nearby', 'far'],
   profile:        ['walking', 'cycling', 'driving'],
   bearing_filter: ['north', 'south', 'east', 'west', null],
 };
@@ -71,9 +71,20 @@ function validateQuerySchema(schema) {
 }
 
 /**
+ * ターゲットが自然物（公園・川・海・山 等）か、テキストのキーワードで判定する。
+ * query_intent には自然物カテゴリが無いためテキストで見る（取りこぼしは許容＝既定100m側に倒れる）。
+ * road/rail「沿い」の既定半径を、自然物なら 150m(very_close)、それ以外(建物等)なら 100m(roadside) に振り分ける用。
+ */
+function isNaturalTarget(target) {
+  const t = target?.text || '';
+  return /(公園|河川|運河|河口|[^\p{L}]?川$|川沿|海岸|海辺|海$|湖|池|沼|山$|山沿|丘|緑地|森|林|浜|ビーチ|滝|湿地|干潟|庭園|渓谷|岬|水辺|堤防|土手)/u.test(t);
+}
+
+/**
  * Fill in default values for optional fields.
  * - distance with no level → level = CONFIG.DEFAULT_LEVEL
  * - conditions missing distance → default distance object
+ * - road/rail conditions with no explicit distance → roadside(100m) / natural target なら very_close(150m)
  * @param {object} schema
  * @param {string} defaultLevel
  * @returns {object} mutated schema
@@ -124,13 +135,18 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
     schema.droppedConditionTexts = [];
   }
 
+  // road/rail「沿い」の既定レベル：建物ターゲットは roadside(100m)、自然物は very_close(150m)。
+  // 明示距離（分/m や level）がある場合は尊重し、ここでは「未指定時の既定」だけを差し替える。
+  const roadRailDefaultLevel = isNaturalTarget(schema.target) ? 'very_close' : 'roadside';
+
   // condition distance + queries defaults
   if (schema.conditions) {
     for (const c of schema.conditions) {
+      const lineDefault = (c.type === 'road' || c.type === 'rail') ? roadRailDefaultLevel : defaultLevel;
       if (!c.distance) {
-        c.distance = { method: 'radius', level: defaultLevel, profile: null, minutes: null, meters: null };
+        c.distance = { method: 'radius', level: lineDefault, profile: null, minutes: null, meters: null };
       } else {
-        if (!c.distance.level)  c.distance.level  = defaultLevel;
+        if (!c.distance.level)  c.distance.level  = lineDefault;
         if (!c.distance.method) c.distance.method = 'radius';
         c.distance.profile  = c.distance.profile  ?? null;
         c.distance.minutes  = c.distance.minutes  ?? null;

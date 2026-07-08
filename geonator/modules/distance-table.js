@@ -10,6 +10,7 @@ const DISTANCE_TABLE = {
   // centroids, so "目の前" can be 30-50m by point distance). Scoring ranks the
   // truly-close ones to the top (gold), so a wide threshold no longer over-dilutes.
   adjacent:        { method: 'circle',      radius_m: 50,    iso_min: null }, // always circle, never isochrone
+  roadside:        { method: 'both',        radius_m: 100,   iso_min: 1   }, // road/rail「沿い」建物向け（自然物ターゲットは very_close=150m）。JSが付与
   very_close:      { method: 'both',        radius_m: 150,   iso_min: 2   },
   nearby:          { method: 'both',        radius_m: 400,   iso_min: 5   },
   somewhat_nearby: { method: 'both',        radius_m: 800,   iso_min: 10  },
