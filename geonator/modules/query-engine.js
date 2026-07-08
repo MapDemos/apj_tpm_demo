@@ -928,10 +928,11 @@ class QueryEngine {
       // （index.js _renderCandidatePanel の LIMIT=5）なので、その5件に揃える。
       const TOP_N = 5;
       const pts = basis.slice(0, TOP_N)
-        .map((c, i) => ({ i, name: c.name || `候補${i + 1}`, lat: c.latitude ?? c.lat, lng: c.longitude ?? c.lng }))
+        .map((c, i) => ({ i, id: c.id, name: c.name || `候補${i + 1}`, lat: c.latitude ?? c.lat, lng: c.longitude ?? c.lng }))
         .filter(p => p.lat != null && p.lng != null);
       if (pts.length < 2) return [];
       const byCand = new Map(pts.map(p => [p.i, []]));   // 候補index → 固有目印名[]
+      const nameToCandIdx = new Map();                   // 目印key → 割り当て候補index（どの候補の目印か）
       const seenName = new Set();
       for (const g of grid) {
         if (!g.name) continue;
@@ -945,7 +946,7 @@ class QueryEngine {
         seenName.add(key);
         const arr = byCand.get(ds[0].i);                  // 最寄り候補固有の目印として割り当て
         // class(cls/maki) も同梱：LLMが「ガソスタ>マンション」のような目印の質を判断できる。
-        if (arr.length < 15) arr.push({ name: g.name, cls: g.cls || g.maki || null });
+        if (arr.length < 15) { arr.push({ name: g.name, cls: g.cls || g.maki || null }); nameToCandIdx.set(key, ds[0].i); }
       }
       const candList = pts.map(p => ({ name: p.name, nearby: byCand.get(p.i) })).filter(c => c.nearby.length);
       if (!candList.length) return []; // 幾何的に区別できる目印が無い → 出さない（絞り込めないので）
@@ -954,6 +955,7 @@ class QueryEngine {
       const allowed = new Set(candList.flatMap(c => c.nearby.map(n => norm(n.name))));
       const names = await this.llm.suggestLandmarks(candList, this._langCode());
       if (!names.length) return [];
+      const idxToId = new Map(pts.map(p => [p.i, p.id])); // 候補index → 候補id（candId 付与用）
       const out = [];
       const usedNames = new Set();
       for (const nm of names) {
@@ -962,7 +964,9 @@ class QueryEngine {
         const items = grid.filter(g => g.name && norm(g.name) === key);
         if (!items.length) continue; // unresolvable → skip (no re-query)
         usedNames.add(key);
-        out.push({ text: this._landmarkPhrase(nm, SUGGEST_LEVEL), landmark: nm, items, level: SUGGEST_LEVEL });
+        // candId: この目印がどの候補のものか。_handleFeedback が「目印の付いた候補」を判定し、
+        // 目印の無い候補にだけ階数サジェストを足す（併用）ために使う。
+        out.push({ text: this._landmarkPhrase(nm, SUGGEST_LEVEL), landmark: nm, items, level: SUGGEST_LEVEL, candId: idxToId.get(nameToCandIdx.get(key)) });
       }
       return out;
     } catch { return []; }
@@ -973,8 +977,11 @@ class QueryEngine {
    * ルール: 「その階数を持つ候補が1つだけ（＝一意）」の階数のみ提案する。同じ階数が2候補以上ある場合
    * その階数では絞り込めないので出さない。全候補が同階数/階数不明なら [] を返す（＝提案なし）。
    * 選択時は _narrowByFloors がその階数の候補だけに絞る。
+   * @param {Set} coveredIds 既に目印サジェストが付いた候補id（それらには階数を出さない＝目印を優先）。
+   *   ※一意判定は「全候補」に対して行う（_narrowByFloors は全候補を階数でフィルタするため、
+   *     coveredな候補と階数が衝突すると一意に絞れない）。
    */
-  async _computeFloorSuggestions(schema) {
+  async _computeFloorSuggestions(schema, coveredIds = new Set()) {
     try {
       const basis = this._basisTier(this._cache.surfaced || []).slice(0, 5);
       if (basis.length < 2) return [];
@@ -985,7 +992,7 @@ class QueryEngine {
           c._floors = (lat != null && lng != null) ? await this.mcp._getBuildingFloors(lat, lng) : null;
         }
       }));
-      // 各階数を持つ候補数を数え、一意（=1件）な階数だけを差別化候補にする。
+      // 各階数を持つ候補数を数え（全候補対象）、一意（=1件）な階数だけを差別化候補にする。
       const countByFloor = new Map();
       for (const c of basis) {
         if (c._floors == null) continue;
@@ -997,10 +1004,11 @@ class QueryEngine {
         const f = c._floors;
         if (f == null || seen.has(f)) continue;
         if (countByFloor.get(f) !== 1) continue; // 同じ階数が2候補以上 → 区別に使えないので出さない
+        if (coveredIds.has(c.id)) continue;       // 既に目印が付いた候補は階数を出さない（目印優先）
         seen.add(f);
         out.push({ text: this._floorPhrase(f), floors: f });
       }
-      return out; // 一意な階数が1つも無ければ [] ＝提案なし
+      return out; // 一意かつ目印なしの階数が1つも無ければ [] ＝提案なし
     } catch { return []; }
   }
 
@@ -1881,10 +1889,14 @@ class QueryEngine {
     // [L3] Agent suggestions (narrow only): differentiating landmarks near the top-tier
     // candidates, offered as buttons alongside free input. Each carries its resolved
     // poi_label items so choosing one never re-queries.
-    let suggestions = action === 'narrow' ? await this._computeSuggestions(schema) : [];
-    // [フォールバック] 区別できるPOI目印が無い時は、候補の階数で区別する提案を出す。
-    if (action === 'narrow' && !suggestions.length) {
-      suggestions = await this._computeFloorSuggestions(schema);
+    // 目印サジェスト（候補ごと）＋ 目印が付かなかった候補には階数サジェストを併用。
+    // 例）A は離れていて固有の目印あり、B/C は目印なし → A=目印, B/C=階数（一意なら）。
+    let suggestions = [];
+    if (action === 'narrow') {
+      const landmarks = await this._computeSuggestions(schema);
+      const covered = new Set(landmarks.map(s => s.candId).filter(id => id != null));
+      const floors  = await this._computeFloorSuggestions(schema, covered);
+      suggestions = [...landmarks, ...floors];
     }
 
     const hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
