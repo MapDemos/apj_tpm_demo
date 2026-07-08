@@ -212,11 +212,11 @@
   <!-- SEQUENCE -->
   <section>
     <div class="sec-head">
-      <span class="sec-tag">シーケンス</span>
-      <h2>1クエリの処理フロー</h2>
+      <span class="sec-tag">処理の流れ ①</span>
+      <h2>処理の流れ（シーケンス図版）</h2>
       <span class="verdict v-ok">JS主導：LLMは意味判断のみ</span>
     </div>
-    <p class="sec-note">フェーズはコードの debug 表記に対応：<b>⓪クエリ解釈 → ①一次検索(proximity解決) → ②二次検索 Step1(候補収集＋L2) → ③二次検索 Step2(距離評価・スコアリング) → ④結果・フィードバック</b>。<b>フロー制御・幾何・API裏取りは JS</b>、LLM は解析・解釈・関連性の<b>意味判断だけ</b>。聞き返しは途中に差し込まれ選択後に続行。</p>
+    <p class="sec-note"><b>下の「フロー図版」と同じ処理</b>を、時間順・アクター視点で描いたもの（内容は同一）。フェーズはコードの debug 表記に対応：<b>⓪クエリ解釈 → ①一次検索(proximity解決) → ②二次検索 Step1(候補収集＋L2) → ③二次検索 Step2(距離評価・スコアリング) → ④結果・フィードバック</b>。<b>フロー制御・幾何・API裏取りは JS</b>、LLM は解析・解釈・関連性の<b>意味判断だけ</b>。聞き返しは途中に差し込まれ選択後に続行。</p>
     <div class="seq-actors">
       <span class="ac user">User</span>
       <span class="ac js">JS（query-engine）</span>
@@ -253,11 +253,11 @@
   <!-- FLOWCHART (SVG) -->
   <section>
     <div class="sec-head">
-      <span class="sec-tag">フロー</span>
-      <h2>分岐フロー（判定と枝分かれ）</h2>
+      <span class="sec-tag">処理の流れ ②</span>
+      <h2>処理の流れ（フロー図版）</h2>
       <span class="verdict v-warn">◇=判定 · 枝 <span style="color:var(--teal-ink)">loop</span>/<span style="color:var(--warn)">go</span>/<span style="color:var(--gap)">exit</span></span>
     </div>
-    <p class="sec-note">シーケンスと同じ⓪〜④を<b>判定(◇)と分岐</b>で。菱形＝判定、矩形＝処理。枝の色は<b>loop（聞いて戻る／破線＝戻り線）・go（次工程へ進める）・exit（終了/ガイド）</b>。</p>
+    <p class="sec-note"><b>上の「シーケンス図版」と同じ処理（内容は同一）</b>を、判定(◇)と分岐の視点で描き直したもの。菱形＝判定、矩形＝処理。枝の色は<b>loop（聞いて戻る／破線＝戻り線）・go（次工程へ進める）・exit（終了/ガイド）</b>。同じ⓪〜④フェーズ。</p>
     <div class="fc-scroll"><div id="fc">フロー図を描画中…</div></div>
   </section>
 
@@ -319,6 +319,27 @@
     document.getElementById('fc').innerHTML=svg;
   })();
   </script>
+
+  <!-- JS ASSUMPTION NOTES -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">申し送り</span>
+      <h2>JS 申し送りノート（スキーマではない）</h2>
+      <span class="verdict v-ok">値でなく派生した通知</span>
+    </div>
+    <p class="sec-note">QuerySchema の<b>値ではなく</b>、JS がスキーマから<b>派生してユーザーに出す前提・注記</b>。だから上の木には現れない（保存する値ではないため）。「地下鉄も線路沿いとみなす」もこれ。</p>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>ノート</th><th>いつ出る（起点）</th><th>参照</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">railSubwayNote</td><td>condition に <code>type:rail</code>（「線路沿い」）→ 地下鉄など地下路線も線路とみなす</td><td class="ref">:1124</td></tr>
+        <tr><td class="mono">walkAssumed</td><td><code>within.profile_inferred</code>＝移動手段未指定で徒歩を仮定した時</td><td class="ref">:1126</td></tr>
+        <tr><td class="mono">droppedConditions</td><td>condition が上限（MAX_CONDITIONS）超過で切り捨てた時</td><td class="ref">:1120</td></tr>
+        <tr><td class="mono">unsupportedFeatures</td><td><code>unsupported_features[]</code> 有り（築浅・壁が赤い等・地図化不可）</td><td class="ref">:1122</td></tr>
+        <tr><td class="mono">reachTooLarge</td><td>「n分以上」の到達圏が広すぎ → 周辺で探索に切替えた時</td><td class="ref">:489</td></tr>
+        <tr><td class="mono">no_condition_match</td><td>条件に完全一致0件 → 参考として候補を表示する時</td><td class="ref">結果段</td></tr>
+      </tbody>
+    </table></div>
+  </section>
 
   <div class="legend">
     <span class="legend-item"><span class="dot ok"></span>一貫（MECE・そのまま）</span>
