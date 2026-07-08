@@ -968,6 +968,47 @@ class QueryEngine {
     } catch { return []; }
   }
 
+  /**
+   * [フォールバック] 近傍に区別できるPOI目印が無い時、候補の建物階数(height÷3)で区別する提案を作る。
+   * ルール: 「その階数を持つ候補が1つだけ（＝一意）」の階数のみ提案する。同じ階数が2候補以上ある場合
+   * その階数では絞り込めないので出さない。全候補が同階数/階数不明なら [] を返す（＝提案なし）。
+   * 選択時は _narrowByFloors がその階数の候補だけに絞る。
+   */
+  async _computeFloorSuggestions(schema) {
+    try {
+      const basis = this._basisTier(this._cache.surfaced || []).slice(0, 5);
+      if (basis.length < 2) return [];
+      // 階数を取得（初回評価で c._floors 済みなら再利用。_getBuildingId と同一URLでキャッシュ共有）。
+      await Promise.all(basis.map(async c => {
+        if (c._floors === undefined) {
+          const lat = c.latitude ?? c.lat, lng = c.longitude ?? c.lng;
+          c._floors = (lat != null && lng != null) ? await this.mcp._getBuildingFloors(lat, lng) : null;
+        }
+      }));
+      // 各階数を持つ候補数を数え、一意（=1件）な階数だけを差別化候補にする。
+      const countByFloor = new Map();
+      for (const c of basis) {
+        if (c._floors == null) continue;
+        countByFloor.set(c._floors, (countByFloor.get(c._floors) || 0) + 1);
+      }
+      const out = [];
+      const seen = new Set();
+      for (const c of basis) {
+        const f = c._floors;
+        if (f == null || seen.has(f)) continue;
+        if (countByFloor.get(f) !== 1) continue; // 同じ階数が2候補以上 → 区別に使えないので出さない
+        seen.add(f);
+        out.push({ text: this._floorPhrase(f), floors: f });
+      }
+      return out; // 一意な階数が1つも無ければ [] ＝提案なし
+    } catch { return []; }
+  }
+
+  /** Localized floor-count phrasing for a floor suggestion button. */
+  _floorPhrase(f) {
+    return this._langCode() === 'en' ? `About ${f} floors` : `約${f}階建て`;
+  }
+
   /** Localized "right nearby" phrasing for a resolved landmark suggestion. */
   _landmarkPhrase(name, level = 'very_close') {
     const en = this._langCode() === 'en';
@@ -1840,11 +1881,21 @@ class QueryEngine {
     // [L3] Agent suggestions (narrow only): differentiating landmarks near the top-tier
     // candidates, offered as buttons alongside free input. Each carries its resolved
     // poi_label items so choosing one never re-queries.
-    const suggestions = action === 'narrow' ? await this._computeSuggestions(schema) : [];
+    let suggestions = action === 'narrow' ? await this._computeSuggestions(schema) : [];
+    // [フォールバック] 区別できるPOI目印が無い時は、候補の階数で区別する提案を出す。
+    if (action === 'narrow' && !suggestions.length) {
+      suggestions = await this._computeFloorSuggestions(schema);
+    }
 
     const hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
     if (!hint) return;
     this.ui.thinking?.(this._m().thinkingNarrow); // 絞り込み計算中も考え中表示
+
+    // 階数サジェスト選択 → その階数の候補だけに絞る（再検索せず表示中の候補をフィルタ）。
+    if (hint && typeof hint === 'object' && hint.floors != null) {
+      await this._narrowByFloors(schema, hint.floors);
+      return;
+    }
 
     // Chosen agent suggestion → use the KNOWN poi items directly (no parse, no re-query).
     if (hint && typeof hint === 'object' && hint.landmark) {
@@ -1899,6 +1950,28 @@ class QueryEngine {
     this.ui.showMessage(this._criteriaSummary(merged));
 
     await this._executeSearch(merged, this._previousText);
+  }
+
+  /**
+   * 階数サジェスト適用: 表示中の候補(surfaced)を、選ばれた階数の候補だけに絞って出し直す。
+   * 提案階数は一意（その階数を持つ候補は1つ）なので通常1件＝ピンポイントになる。再検索せず、
+   * 提案生成時に取得済みの c._floors でフィルタするだけ（安全・低コスト）。
+   */
+  async _narrowByFloors(schema, floorValue) {
+    const pool = (this._cache.surfaced && this._cache.surfaced.length)
+      ? this._cache.surfaced
+      : this._cache.mainCandidates;
+    if (!pool || !pool.length) {
+      this.ui.showMessage(this._m().mainZero(schema.proximity?.anchors?.[0]?.text || '', schema.target?.text || ''));
+      return;
+    }
+    const keep = pool.filter(c => c._floors === floorValue);
+    this._previousText = `${this._previousText}\n絞り込み：${this._floorPhrase(floorValue)}`;
+    this.ui.clearResults?.();
+    // 選ばれた階数の候補を結果として提示（_showResults が surfaced を keep に更新する）。
+    this._showResults({ full: keep, partial: [], none: [] }, schema);
+    this.ui.showRunStats?.({ ms: Date.now() - (this._runStart || Date.now()), llm: this.llm.stats });
+    await this._handleFeedback(schema, this._previousText);
   }
 
   /**
