@@ -158,17 +158,17 @@ class LLMClient {
    * @param {string|null} previousText - full previous query text for re-parse
    * @returns {Promise<object>} raw QuerySchema (before validation/filling)
    */
-  async parseQuery(userText, previousText = null, lang = 'ja') {
+  async parseQuery(userText, previousText = null, lang = 'ja', retryHint = '') {
     const fullText = previousText ? `${previousText}\n追加情報：${userText}` : userText;
     // 上限超過分も含め全条件＋各poiのqueries[]を出すため出力が長くなり得る。max_tokens不足だと
-    // JSONが途中で切れてパース失敗→「通信エラー」になる。余裕を持たせる（§透明化A）。
-    const MAX_TOK = 3000;
+    // JSONが途中で切れてパース失敗→「通信エラー」になる。余裕を持たせる（§透明化A・config化）。
+    const MAX_TOK = this.config.L1_MAX_TOKENS || 3000;
 
     let lastDetail = '';
     for (let attempt = 0; attempt <= this.config.L1_MAX_RETRY; attempt++) {
       try {
         const { text, stop_reason } = await this._callClaude(
-          this._buildL1Prompt(fullText, lang),
+          this._buildL1Prompt(fullText, lang, retryHint),
           MAX_TOK,
           this.config.L1_MODEL,
           'L1',
@@ -426,7 +426,7 @@ class LLMClient {
     return JSON.parse(match[1].trim());
   }
 
-  _buildL1Prompt(userText, lang = 'ja') {
+  _buildL1Prompt(userText, lang = 'ja', retryHint = '') {
     // Full prompt text lives in prompts/prompt-l1.js (loaded separately).
     // Here we just compose the call structure. The condition cap is injected at call
     // time (configurable) so L1 emits ≤N conditions and the confirmation stays consistent.
@@ -437,9 +437,11 @@ class LLMClient {
     const langNote = lang === 'en'
       ? ' confirmation フィールドだけは英語で書いてください（他のフィールドは日本語のまま。地名・施設名は日本語表記のままでよい）。'
       : '';
+    // retryHint: 前回抽出に失敗した時の再試行で付与（壊れた音声入力を丁寧に拾い直させる注記）。
+    const hint = retryHint ? `\n\n【システム注記】${retryHint}` : '';
     return {
       system: PROMPT_L1,
-      user:   `ユーザー入力：「${userText}」\n\n地理的な条件は重要な順に、上限を超える分も含めてすべて conditions 配列に入れてください（システムが上限${maxC}件を適用し、超過分はユーザーへ通知します）。地図データで判定できない非地理的な特徴は unsupported_features 配列に入れてください（confirmation では触れない。JSが決定的に通知します）。${langNote}QuerySchema JSONのみを返してください。`,
+      user:   `ユーザー入力：「${userText}」\n\n地理的な条件は重要な順に、上限を超える分も含めてすべて conditions 配列に入れてください（システムが上限${maxC}件を適用し、超過分はユーザーへ通知します）。地図データで判定できない非地理的な特徴は unsupported_features 配列に入れてください（confirmation では触れない。JSが決定的に通知します）。${langNote}${hint}QuerySchema JSONのみを返してください。`,
     };
   }
 

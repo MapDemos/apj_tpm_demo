@@ -42,6 +42,19 @@ class QueryEngine {
   /** Localized message bundle for the current UI language. */
   _m() { return MESSAGES[this.ui.getLang?.() === 'en' ? 'en' : 'ja']; }
 
+  /** エラー原因を推定して優しい文言に振り分ける（極力「通信エラー」の一言を避ける・デモ配慮）。
+   *  タイムアウト/混雑(429)/サーバ(5xx)/長すぎ(切れ)/解釈不能 を区別し、無ければ穏当な既定。 */
+  _friendlyError(err) {
+    const s = String(err?.message || err || '');
+    const M = this._m();
+    if (/timeout/i.test(s))               return M.err_timeout;
+    if (/HTTP\s*429|rate limit/i.test(s)) return M.err_busy;
+    if (/HTTP\s*5\d\d/.test(s))           return M.err_server;
+    if (/truncated|max_tokens/i.test(s))  return M.err_toolong;
+    if (/unparseable|JSON/i.test(s))      return M.err_understand;
+    return M.error_communication; // 穏当な既定（文言から「通信エラー」は撤去済み）
+  }
+
   /** Debug-mode step gate: pause until the operator clicks "next" (no-op otherwise). */
   async _step(stepId, label, lines) {
     if (this.ui.isDebug?.()) await this.ui.debugStep?.(stepId, label, lines || []);
@@ -137,20 +150,37 @@ class QueryEngine {
   // ─────────────────────────────────────────────
 
   async _parseAndValidate(userText, previousText) {
-    let schema;
-    try {
-      schema = await this.llm.parseQuery(userText, previousText, this._langCode());
-    } catch (e) {
-      // デバッグモードでは根本原因（打ち切り・不正JSON・HTTP等）をそのまま可視化する。
-      this.ui.showDebug?.(`⚠️ L1解析エラー\n${e?.message || String(e)}`);
-      this.ui.showMessage(this._m().error_communication);
-      return null;
+    // ブロークンな入力（音声等）は L1 が場所依頼を取りこぼすことがある。手がかりがありそうな
+    // （＝それなりの長さの）入力で not_a_query/必須欠落になったら、注記を付けて再試行する。
+    // 挨拶等の短い入力は1回で確定（無駄な再試行をしない）。temp=0でも注記でプロンプトが変わり
+    // 出力が変わり得る＋一過性エラー(ネットワーク等)も拾える。デモでの取りこぼし対策。
+    const MAX_TRY = Math.max(1, this.config.L1_PARSE_MAX_RETRY ?? 3);
+    const substantial = (userText || '').trim().length >= 12;
+    let schema = null, lastErr = null;
+    for (let attempt = 0; attempt < MAX_TRY; attempt++) {
+      const retryHint = attempt === 0 ? '' :
+        '前回この入力から場所依頼を抽出できませんでした。壊れた音声入力の可能性があります。挨拶・相槌・脱線・言い直しの前半は無視し、地名/駅/施設/条件を丁寧に拾ってスキーマ化してください。手がかりが少しでもあれば not_a_query にしないこと。';
+      try {
+        schema = await this.llm.parseQuery(userText, previousText, this._langCode(), retryHint);
+      } catch (e) {
+        lastErr = e; schema = null;
+        // 429(混雑)は投げ直しても悪化するだけ → 再試行せず即中断。
+        if (/HTTP\s*429|rate limit/i.test(String(e?.message || e))) break;
+        continue; // その他の一過性エラー → 次の試行へ
+      }
+      const noClue = !schema?.not_a_query && !schema?.proximity?.anchors?.length && !schema?.target?.text;
+      if (!(schema?.not_a_query || noClue)) break;  // 使えるスキーマが取れた
+      if (!substantial) break;                      // 短い入力＝本当に非クエリ。再試行しない
+      schema = null;                                // substantial なら注記付きで再試行
     }
-
-    // Not a location query (greeting / chit-chat / no location clue) → guide the user
-    const noLocationClue = !schema?.proximity?.anchors?.length && !schema?.target?.text;
-    if (schema?.not_a_query || noLocationClue) {
-      this.ui.showMessage(this._m().not_a_query);
+    if (!schema) {
+      if (lastErr) {
+        // デバッグモードでは根本原因（打ち切り・不正JSON・HTTP等）をそのまま可視化する。
+        this.ui.showDebug?.(`⚠️ L1解析エラー\n${lastErr?.message || String(lastErr)}`);
+        this.ui.showMessage(this._friendlyError(lastErr));
+      } else {
+        this.ui.showMessage(this._m().not_a_query); // 再試行しても場所依頼と取れなかった
+      }
       return null;
     }
 
@@ -164,7 +194,7 @@ class QueryEngine {
       if (!schema?.proximity?.anchors?.length || !schema?.target?.text) {
         this.ui.showMessage(this._m().not_a_query);
       } else {
-        this.ui.showMessage(this._m().error_communication);
+        this.ui.showMessage(this._m().err_understand); // 構造が崩れた＝解釈できなかった扱い
       }
       return null;
     }
@@ -232,8 +262,8 @@ class QueryEngine {
       // Same floors recovery as _parseAndValidate across clarify/refine re-parses.
       this._applyFloorsInference(schema, combined);
       return schema;
-    } catch {
-      this.ui.showMessage(this._m().error_communication);
+    } catch (e) {
+      this.ui.showMessage(this._friendlyError(e));
       return null;
     }
   }
@@ -2141,14 +2171,14 @@ class QueryEngine {
     }
 
     const delta = await this.llm.parseRefinement(schema, hint, this._langCode());
-    if (!delta) { this.ui.showMessage(this._m().error_communication); return; }
+    if (!delta) { this.ui.showMessage(this._m().err_understand); return; }
     const validTypes = SCHEMA_ENUMS.condition_type;
     const addConds = delta.add_conditions.filter(c => c && validTypes.includes(c.type));
 
     // ── narrow: filter WITHIN the already-surfaced Target candidates (pool fixed,
     // target NOT re-collected). Purely additive — only new conditions apply. ──
     if (action === 'narrow') {
-      if (!addConds.length) { this.ui.showMessage(this._m().error_communication); return; }
+      if (!addConds.length) { this.ui.showMessage(this._m().err_understand); return; }
       if (delta.confirmation) this.ui.showMessage(delta.confirmation);
       await this._narrowWithin(schema, addConds);
       return;
@@ -2172,7 +2202,7 @@ class QueryEngine {
     merged.confirmation = delta.confirmation;
     fillSchemaDefaults(merged, this.config.DEFAULT_LEVEL, Math.max(merged.conditions.length, this.config.MAX_CONDITIONS));
 
-    if (!validateQuerySchema(merged).ok) { this.ui.showMessage(this._m().error_communication); return; }
+    if (!validateQuerySchema(merged).ok) { this.ui.showMessage(this._m().err_understand); return; }
 
     this._previousText = `${this._previousText}\n追加情報：${hint}`;
     this._dbgReport.schema = merged;
@@ -2323,7 +2353,12 @@ const MESSAGES = {
     distance_too_far:     'その範囲は広すぎます。もっと近い目印を教えてください。',
     bbox_too_large:       'その範囲は広すぎます。もっと絞れる情報を教えてください。',
     proximity_too_broad:  'もう少し具体的な地名（町名・丁目等）か駅名を教えてください。',
-    error_communication:  '通信エラーが発生しました。もう一度お試しください。',
+    error_communication:  'うまくいきませんでした。もう一度お試しください。',
+    err_timeout:          '応答に少し時間がかかっています。もう一度お試しください。',
+    err_busy:             'ただいま混み合っているようです。少し待ってからもう一度お試しください。',
+    err_server:           'サーバーが一時的に不安定なようです。少し待ってお試しください。',
+    err_toolong:          '情報が多くてうまくまとめきれませんでした。条件を少し減らすか、言い方を変えてお試しください。',
+    err_understand:       'うまく聞き取れませんでした。探している場所（駅・地名・施設）と、探しているものを教えていただけますか？',
     clarify_limit:        '情報が不足しています。分かる範囲で場所を教えてください。',
     not_a_query:          '場所の情報が読み取れませんでした。駅名・施設名・住所などと、探しているものを教えてください。（例：西大島駅の近くのマンション、バス停が目の前）',
     anchorNotFound:  t => `${t}が見つかりませんでした。別の地名や駅名をお試しください。`,
@@ -2362,7 +2397,12 @@ const MESSAGES = {
     distance_too_far:     'That range is too wide. Please give a closer landmark.',
     bbox_too_large:       'That area is too large. Please provide something more specific.',
     proximity_too_broad:  'Please give a more specific place (town/block) or a station name.',
-    error_communication:  'A communication error occurred. Please try again.',
+    error_communication:  'That did not go through. Please try again.',
+    err_timeout:          'This is taking a little longer than usual. Please try again.',
+    err_busy:             'Things are a bit busy right now. Please wait a moment and try again.',
+    err_server:           'The server seems temporarily unstable. Please try again shortly.',
+    err_toolong:          'That was a lot to take in. Try removing a condition or rephrasing.',
+    err_understand:       "I couldn't quite catch that. Could you tell me the place (station / area / facility) and what you're looking for?",
     clarify_limit:        'Not enough information. Please tell me the location as best you can.',
     not_a_query:          "I couldn't read a location. Please give a station/facility/address and what you are looking for (e.g. a condo near Nishi-ojima station with a bus stop right in front).",
     anchorNotFound:  t => `Couldn't find "${t}". Please try another place or station name.`,

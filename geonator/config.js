@@ -9,7 +9,7 @@
 const CONFIG = {
 
   // ビルド確認用バージョン（キャッシュで古いJSを読んでいないかの切り分けに使う）。変更ごとに更新。
-  APP_VERSION: '2026-07-08.1751',
+  APP_VERSION: '2026-07-08.2324',
 
   // ============================================
   // API KEYS
@@ -96,7 +96,9 @@ const CONFIG = {
   L1_TIMEOUT_MS:       20000,        // L1(解析)専用タイムアウト。出力が大きく生成に時間がかかるため既定より長め
   SLOW_MODEL_TIMEOUT_MS: 20000,      // 5世代/Opus4.7+/Fable5 のタイムアウト下限。1コールが重く既定8秒では足りないため
   API_MAX_RETRY:       1,            // retries on timeout (GG)
-  L1_MAX_RETRY:        1,            // L1 JSON invalid → retry count (II)
+  L1_MAX_RETRY:        1,            // L1 JSON invalid/truncated → retry count (II)
+  L1_MAX_TOKENS:       6000,         // L1解析の出力上限。長い/条件多め入力でJSONが途中で切れるのを防ぐ（切れ=通信エラー化）
+  L1_PARSE_MAX_RETRY:  3,            // L1が not_a_query/必須欠落を返した時の再試行回数（注記付き・手がかりがありそうな入力のみ）。デモでの取りこぼし対策
   CANDIDATE_LIMIT:     150,          // max candidates collected per query
   MAX_CONDITIONS:      3,            // conditionの最大数（0-5、設定画面で変更可・超過分は切り捨て）
   BBOX_MAX_HALF_M:     2000,         // max half-width of primary search bbox in meters (§6-3)
