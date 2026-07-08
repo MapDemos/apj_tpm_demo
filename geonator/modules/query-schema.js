@@ -152,6 +152,14 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
         c.distance.minutes  = c.distance.minutes  ?? null;
         c.distance.meters   = c.distance.meters   ?? null;
       }
+      // road/rail「沿い」: L1 が緩いレベル(nearby/somewhat_nearby/far)を付けても線路/道路沿いには
+      // 広すぎるので既定(建物100m/自然物150m)へ締める。明示距離(m/分)と より近い明示レベル
+      // (adjacent=すぐ隣 / very_close=すぐ近く)は尊重する。
+      if ((c.type === 'road' || c.type === 'rail')
+          && c.distance.meters == null && c.distance.minutes == null
+          && ['nearby', 'somewhat_nearby', 'far'].includes(c.distance.level)) {
+        c.distance.level = lineDefault;
+      }
       // QE queries only for poi conditions; others use [text]
       if (!Array.isArray(c.queries) || c.queries.length === 0) {
         c.queries = c.text ? [c.text] : [];
