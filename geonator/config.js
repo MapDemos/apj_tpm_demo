@@ -9,7 +9,7 @@
 const CONFIG = {
 
   // ビルド確認用バージョン（キャッシュで古いJSを読んでいないかの切り分けに使う）。変更ごとに更新。
-  APP_VERSION: '2026-07-08.1455',
+  APP_VERSION: '2026-07-08.1557',
 
   // ============================================
   // API KEYS
@@ -37,6 +37,11 @@ const CONFIG = {
   L2_1_MODEL:      'claude-sonnet-4-6',         // category validity（分野判断にニュアンスが要る→Sonnet既定。Haikuは飲食下位分類等を誤除外しがち）
   L2_2_MODEL:      'claude-sonnet-4-6',         // target relevance（名前ニュアンス→Sonnet既定）
   L3_MODEL:        'claude-haiku-4-5-20251001', // 絞り込み提案（近傍ランドマークから目印提案→Haiku既定）
+  // L1-3 = 広域proximityの絞り込み提案（例:「鎌倉市」→ 鎌倉駅/北鎌倉/材木座…を世界知識から列挙）。
+  // JSが各候補をSearch Boxで実在検証・空間で散らす・上限適用するので、実在する地名を精度良く挙げる
+  // 力が要る → Sonnet既定（Haiku/Sonnet5にも設定画面で変更可）。※1次検索の前段。L3(後段)とは別。
+  L1_3_MODEL:      'claude-sonnet-4-6',
+  CLARIFY_MAX_CHOICES: 5,  // 広域絞り込み/もしかしての提案ボタン上限（超過分は空間的に散らして間引き）
   // L2-1 strictness: カテゴリ情報が無い(null)候補を残すか。true=含める（既定）。
   // 旧false（null候補を一律ドロップ）は「○○公園駅前店」等のノイズ除去の粗い代用だったが、
   // 本物のジム等（Search Boxがcategory無しで返す）まで落とすため退役。relevance判定は名前を

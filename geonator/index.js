@@ -110,6 +110,7 @@ class LocationFinderApp {
       const saved = JSON.parse(localStorage.getItem('geonator_models') || '{}');
       if (saved.L1)   this.config.L1_MODEL   = saved.L1;   // L1-2（クエリ解析）
       if (saved.L1c)  this.config.L1_CONFIRM_MODEL = saved.L1c; // L1-1（確認文の先出し）
+      if (saved.L1_3) this.config.L1_3_MODEL = saved.L1_3; // L1-3（広域の絞り込み提案）
       if (saved.L2_1) this.config.L2_1_MODEL = saved.L2_1;
       if (saved.L2_2) this.config.L2_2_MODEL = saved.L2_2;
       else if (saved.L2) this.config.L2_2_MODEL = saved.L2; // legacy key
@@ -134,6 +135,7 @@ class LocationFinderApp {
 
     const l1Sel  = document.getElementById('l1ModelSelect');
     const l1cSel = document.getElementById('l1ConfirmModelSelect');
+    const l1_3Sel = document.getElementById('l1_3ModelSelect');
     const l21Sel = document.getElementById('l2_1ModelSelect');
     const l22Sel = document.getElementById('l2_2ModelSelect');
     const l3Sel  = document.getElementById('l3ModelSelect');
@@ -144,6 +146,7 @@ class LocationFinderApp {
     const modal  = document.getElementById('settingsModal');
     if (l1Sel)  l1Sel.value  = this.config.L1_MODEL;
     if (l1cSel) l1cSel.value = this.config.L1_CONFIRM_MODEL;
+    if (l1_3Sel) l1_3Sel.value = this.config.L1_3_MODEL;
     if (l21Sel) l21Sel.value = this.config.L2_1_MODEL;
     if (l22Sel) l22Sel.value = this.config.L2_2_MODEL;
     if (l3Sel)  l3Sel.value  = this.config.L3_MODEL;
@@ -156,7 +159,7 @@ class LocationFinderApp {
     const persist = () => {
       try {
         localStorage.setItem('geonator_models', JSON.stringify({
-          L1: this.config.L1_MODEL, L1c: this.config.L1_CONFIRM_MODEL,
+          L1: this.config.L1_MODEL, L1c: this.config.L1_CONFIRM_MODEL, L1_3: this.config.L1_3_MODEL,
           L2_1: this.config.L2_1_MODEL, L2_2: this.config.L2_2_MODEL, L3: this.config.L3_MODEL,
         }));
       } catch (_) {}
@@ -173,6 +176,7 @@ class LocationFinderApp {
     };
     l1Sel?.addEventListener('change',  e => { this.config.L1_MODEL   = e.target.value; persist(); });
     l1cSel?.addEventListener('change', e => { this.config.L1_CONFIRM_MODEL = e.target.value; persist(); });
+    l1_3Sel?.addEventListener('change', e => { this.config.L1_3_MODEL = e.target.value; persist(); });
     l21Sel?.addEventListener('change', e => { this.config.L2_1_MODEL = e.target.value; persist(); });
     l22Sel?.addEventListener('change', e => { this.config.L2_2_MODEL = e.target.value; persist(); });
     l3Sel?.addEventListener('change',  e => { this.config.L3_MODEL   = e.target.value; persist(); });
@@ -193,10 +197,11 @@ class LocationFinderApp {
     this._initScoringSettings();
 
     // Single "↺ すべてデフォルトに戻す" — models + scoring weights + decisiveness at once.
-    const MODEL_DEFAULTS = { L1: 'claude-sonnet-4-6', L1c: 'claude-haiku-4-5-20251001', L2_1: 'claude-sonnet-4-6', L2_2: 'claude-sonnet-4-6', L3: 'claude-haiku-4-5-20251001' };
+    const MODEL_DEFAULTS = { L1: 'claude-sonnet-4-6', L1c: 'claude-haiku-4-5-20251001', L1_3: 'claude-sonnet-4-6', L2_1: 'claude-sonnet-4-6', L2_2: 'claude-sonnet-4-6', L3: 'claude-haiku-4-5-20251001' };
     document.getElementById('settingsResetBtn')?.addEventListener('click', () => {
       this.config.L1_MODEL   = MODEL_DEFAULTS.L1;
       this.config.L1_CONFIRM_MODEL = MODEL_DEFAULTS.L1c;
+      this.config.L1_3_MODEL = MODEL_DEFAULTS.L1_3;
       this.config.L2_1_MODEL = MODEL_DEFAULTS.L2_1;
       this.config.L2_2_MODEL = MODEL_DEFAULTS.L2_2;
       this.config.L3_MODEL   = MODEL_DEFAULTS.L3;
@@ -206,6 +211,7 @@ class LocationFinderApp {
       this.config.FLOORS_MODE        = 'hard';     // default: hard filter
       if (l1Sel)  l1Sel.value  = MODEL_DEFAULTS.L1;
       if (l1cSel) l1cSel.value = MODEL_DEFAULTS.L1c;
+      if (l1_3Sel) l1_3Sel.value = MODEL_DEFAULTS.L1_3;
       if (l21Sel) l21Sel.value = MODEL_DEFAULTS.L2_1;
       if (l22Sel) l22Sel.value = MODEL_DEFAULTS.L2_2;
       if (l3Sel)  l3Sel.value  = MODEL_DEFAULTS.L3;
@@ -297,7 +303,7 @@ class LocationFinderApp {
     const el = document.getElementById('model-badge');
     if (!el) return;
     const s = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
-    el.textContent = `L1-1:${s(this.config.L1_CONFIRM_MODEL)} / L1-2:${s(this.config.L1_MODEL)} / L2-1:${s(this.config.L2_1_MODEL)} / L2-2:${s(this.config.L2_2_MODEL)} / L3:${s(this.config.L3_MODEL)}`;
+    el.textContent = `L1-1:${s(this.config.L1_CONFIRM_MODEL)} / L1-2:${s(this.config.L1_MODEL)} / L1-3:${s(this.config.L1_3_MODEL)} / L2-1:${s(this.config.L2_1_MODEL)} / L2-2:${s(this.config.L2_2_MODEL)} / L3:${s(this.config.L3_MODEL)}`;
   }
 
   /** 各役割の推奨モデル（＝既定）のオプションに「（推奨）」を付す。言語に追従。 */
@@ -307,6 +313,7 @@ class LocationFinderApp {
     const rec = {
       l1ConfirmModelSelect: 'claude-haiku-4-5-20251001', // L1-1 確認文=速さ優先
       l1ModelSelect:   'claude-sonnet-4-6',              // L1-2 解析=推論重視
+      l1_3ModelSelect: 'claude-sonnet-4-6',              // L1-3 広域絞り込み提案=実在地名の精度
       l2_1ModelSelect: 'claude-sonnet-4-6',
       l2_2ModelSelect: 'claude-sonnet-4-6',
       l3ModelSelect:   'claude-haiku-4-5-20251001',
@@ -550,7 +557,7 @@ class LocationFinderApp {
         const roleLines = [];
         let totIn = 0, totOut = 0;
         // 全ロールを表示（0回=そのクエリで未実行）。L1-1=確認文の先出し / L1-2=クエリ解析。
-        for (const [role, s] of [['L1-1', stats.llm?.L1c], ['L1-2', stats.llm?.L1], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
+        for (const [role, s] of [['L1-1', stats.llm?.L1c], ['L1-2', stats.llm?.L1], ['L1-3', stats.llm?.L1_3], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
           if (!s) continue;
           // プロンプトキャッシュ: 読み(💾r=約0.1倍)/書き(w=約1.25倍)があれば併記。
           const cache = (s.cacheRead || s.cacheWrite) ? ` 💾r${fmt(s.cacheRead)}/w${fmt(s.cacheWrite)}` : '';
@@ -2716,11 +2723,13 @@ class LocationFinderApp {
       setText('set-model-title', st.modelTitle);
       setText('set-l1c-label', st.l1confirm);
       setText('set-l1-label', st.l1);
+      setText('set-l1_3-label', st.l1_3);
       setText('set-l2_1-label', st.l2_1);
       setText('set-l2_2-label', st.l2_2);
       setText('set-l3-label', st.l3);
       setText('set-l1c-why', st.l1cWhy);
       setText('set-l1-why', st.l1Why);
+      setText('set-l1_3-why', st.l1_3Why);
       setText('set-l2_1-why', st.l2_1Why);
       setText('set-l2_2-why', st.l2_2Why);
       setText('set-l3-why', st.l3Why);
@@ -2997,11 +3006,13 @@ const LANG = {
       settingsBtn: '⚙️ 設定',
       l1confirm:   'L1-1（確認文の先出し）',
       l1:          'L1-2（クエリ解析）',
+      l1_3:        'L1-3（広域の絞り込み・地名の解釈）',
       l2_1:        'L2-1（通常クエリの関連性・カテゴリ）',
       l2_2:        'L2-2（Targetの関連性）',
       l3:          'L3（絞り込みの目印提案）',
       l1cWhy:      'ユーザーの依頼を一文で復唱して確認するだけの軽量処理。解析(L1-2)と並行して真っ先に出すので、速さ優先で Haiku 推奨。',
       l1Why:       '自然文→構造化スキーマの最重要工程。目印(proximity)と対象(target)の切り分け、「AとBの間」等の解釈に推論力が要る → Sonnet推奨。',
+      l1_3Why:     'proximityが広すぎる時（「鎌倉市」→駅/エリア列挙）や、口語的な地名の解釈（「青山」→南青山/北青山の「もしかして」）を世界知識で担う。実在検証はJSが行うので実在地名を精度良く挙げる力が要る → Sonnet推奨。',
       l2_1Why:     'カテゴリの分野判断（ラーメン屋＝「レストラン>和食」を残す等）にニュアンスが要る → Sonnet推奨。',
       l2_2Why:     '店名の機微から意図一致を4段階判定（definitely/probably/…） → Sonnet推奨。',
       l3Why:       '近傍の目印から区別しやすいものを選ぶ軽量・定型タスク → Haikuで十分・高速。',
@@ -3119,11 +3130,13 @@ const LANG = {
       settingsBtn: '⚙️ Settings',
       l1confirm:   'L1-1 (early confirmation)',
       l1:          'L1-2 (query parsing)',
+      l1_3:        'L1-3 (broad-area narrowing · place interpretation)',
       l2_1:        'L2-1 (general-query relevance · category)',
       l2_2:        'L2-2 (target relevance)',
       l3:          'L3 (refinement landmark suggestions)',
       l1cWhy:      'Just restates the user request in one line, in parallel with parsing (L1-2), shown first — so speed matters. Haiku recommended.',
       l1Why:       'The heaviest reasoning step: free text → structured schema (proximity vs target, "between A and B", etc.). Sonnet recommended.',
+      l1_3Why:     'Handles broad proximities (e.g. "Kamakura City" → list stations/areas) and colloquial place interpretation (e.g. "Aoyama" → "did you mean Minami-Aoyama/Kita-Aoyama") from world knowledge. JS grounds them via Search Box, so accurate real place names matter. Sonnet recommended.',
       l2_1Why:     'Judging category domains needs nuance (keep "restaurant>Japanese" for a ramen shop). Sonnet recommended.',
       l2_2Why:     'Rates intent match from subtle name cues (4 levels: definitely/probably/…). Sonnet recommended.',
       l3Why:       'Lightweight, templated: pick distinguishing nearby landmarks. Haiku is enough and fast.',

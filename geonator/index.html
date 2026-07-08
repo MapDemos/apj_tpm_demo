@@ -86,6 +86,15 @@
       </label>
       <div class="settings-modelwhy" id="set-l1-why">自然文→構造化スキーマの最重要工程。目印(proximity)と対象(target)の切り分け、「AとBの間」等の解釈に推論力が要る → Sonnet推奨。</div>
       <label class="settings-row">
+        <span id="set-l1_3-label">L1-3（広域の絞り込み・地名の解釈）</span>
+        <select id="l1_3ModelSelect">
+          <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+          <option value="claude-sonnet-5">Sonnet 5</option>
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+        </select>
+      </label>
+      <div class="settings-modelwhy" id="set-l1_3-why">proximityが広すぎる時（例:「鎌倉市」）に、その中の知名度が高い駅・エリアを世界知識から列挙して絞り込み候補を提案。実在検証はJSが行うので、実在する地名を精度良く挙げる力が要る → Sonnet推奨。</div>
+      <label class="settings-row">
         <span id="set-l2_1-label">L2-1（通常クエリの関連性・カテゴリ）</span>
         <select id="l2_1ModelSelect">
           <option value="claude-sonnet-4-6">Sonnet 4.6</option>

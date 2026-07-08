@@ -454,14 +454,15 @@ class QueryEngine {
     // Upper-limit check (EE/§6-3): the dense building grid is infeasible over a
     // huge area, so only building-category targets get pushed back. General POI
     // targets (e.g. 鎌倉のコメダ珈琲) tolerate a large area — Search Box handles it.
+    // [絶対前提] proximity は必ず有界サイズでなければならない。TQ実行可能性・anchor距離スコア・
+    // 「近く」という意味づけが全てサイズ有界に依存する。target種別に関係なく（旧: 建物ターゲット
+    // のみ弾いて一般POIは広域を許していた=前提違反）、広すぎる proximity は絞り込みへ回す。
+    // 例:「鎌倉市」→ L1-3が鎌倉駅/北鎌倉/材木座…を提案＋自由入力で有界anchorに絞らせる。
     if (this._bboxExceedsLimit(bbox)) {
-      const buildingTarget = ['category_mansion', 'category_apartment', 'category_building']
-        .includes(schema.target?.query_intent);
-      if (buildingTarget) {
-        this.ui.showMessage(this._m().bbox_too_large);
-        return null;
-      }
-      // else: allow — collectTarget will rely on Search Box (grid is skipped for big bbox)
+      const narrowed = await this._narrowBroadProximity(schema, bbox);
+      if (!narrowed) return null;            // 絞り込み待ち/スキップ → 次の入力で再実行
+      resolvedPoints = narrowed.resolvedPoints;
+      bbox = narrowed.bbox;
     }
 
     // [3-A3] bearing filter
@@ -565,10 +566,28 @@ class QueryEngine {
   }
 
   async _resolveLocality(anchor) {
-    const sbResult = await this.mcp.searchBox(anchor.text, { types: 'place,locality,neighborhood,district,address' });
-    if (!sbResult?.features?.length) return null;
+    // 並列: (a) Search Box前方一致  (b) LLM一般常識での地名解釈（青山→東京都港区南青山/北青山）。
+    // Search Box単独だと「青山」で南青山が結果に入らない（全国のマイナーな青山町ばかり）ため、
+    // 常識(LLM)を併走させて裏取りマージする。並列なので追加レイテンシはほぼ無い。
+    const [sbResult, guessNames] = await Promise.all([
+      this.mcp.searchBox(anchor.text, { types: 'place,locality,neighborhood,district,address' }),
+      this.llm.interpretPlaceName(anchor.text, this._langCode()),
+    ]);
+    const features = sbResult?.features || [];
 
-    const features = sbResult.features;
+    // [もしかして] データ(SB変種)＋常識(LLM)をマージした候補。2件以上あればボタンで確定させる
+    // （黙って片方を採らない）。既に具体的な地名(鎌倉市等)はLLM解釈が空＆SB完全一致で候補が立たず、
+    // 後段の広すぎゲート(_narrowBroadProximity)や homonym グルーピングへ流れる。
+    const dym = await this._buildDidYouMean(anchor.text, features, guessNames);
+    if (dym.length >= 2 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
+      this._clarifyCount++;
+      const choices = dym.map(d => d.text);
+      const chosen = await this.ui.showChoices(this._m().didYouMean(anchor.text), choices);
+      const idx = choices.indexOf(chosen);
+      return [dym[idx >= 0 ? idx : 0]._point];
+    }
+    // Search Boxが空でも、常識解釈が1件だけ実在解決できたならそれを採用（救済）。
+    if (!features.length) return dym.length ? [dym[0]._point] : null;
 
     // Group by MUNICIPALITY (都道府県+市区町村). A true homonym is the same name
     // in a different municipality — 台東区入谷 vs 足立区入谷 are BOTH 東京都, so
@@ -737,6 +756,154 @@ class QueryEngine {
     this._clarifyCount++;
     this.ui.showMessage(this._m().genericMulti(anchor.text));
     this._awaitingClarify = true; // next main-input answer merges with this query
+  }
+
+  // ─────────────────────────────────────────────
+  // [L1-3] Broad proximity → narrow to a bounded sub-anchor（1次検索の前段）
+  //   ゲート判定(広すぎ)はJS幾何(_bboxExceedsLimit)。列挙はLLM(世界知識)。裏取り・散らし・
+  //   フロー制御はJS。会話制御は完全にJS主導（LLMは列挙に答えるだけ）。
+  // ─────────────────────────────────────────────
+
+  /**
+   * proximity が広すぎる時、有界な下位anchorに絞らせる。LLM(L1-3)が知名度の高い下位エリアを
+   * 列挙 → JSがSearch Boxで実在検証(エリア内限定)＋空間的に散らす＋上限 → ボタン＋自由入力で提示。
+   * 選ばれた有界anchorの { bbox, resolvedPoints } を返す。待ち/スキップ時は null。
+   */
+  async _narrowBroadProximity(schema, areaBbox) {
+    const en = this._langCode() === 'en';
+    const areaText = schema.proximity?.anchors?.[0]?.text || (en ? 'this area' : 'この付近');
+    if (this._clarifyCount >= this.config.MAX_CLARIFY_TURNS) {
+      this.ui.showMessage(this._m().clarify_limit);
+      this._awaitingClarify = true;
+      return null;
+    }
+    this._clarifyCount++;
+
+    const names = await this.llm.suggestProximityAnchors(areaText, this._langCode());
+    const suggestions = await this._groundProximityAnchors(names, areaBbox);
+
+    const hint = await this.ui.showHintInput(this._m().proximityNarrow(areaText), suggestions);
+    if (!hint) { this._awaitingClarify = true; return null; } // スキップ → 次の入力を待つ
+
+    // ボタン選択（実在検証済みの点を保持）/ 自由入力（改めて解決）
+    let point = null;
+    if (typeof hint === 'object' && hint._point) {
+      point = hint._point;
+    } else {
+      const pts = await this._resolveClarifyAnchor(String(hint));
+      if (pts && pts.length) {
+        point = { lng: pts[0].longitude, lat: pts[0].latitude, radiusM: DISTANCE_TABLE.nearby.radius_m };
+      }
+    }
+    if (!point) { this._awaitingClarify = true; return null; }
+
+    const bbox = this.mcp.resolveBBox({ points: [point], marginM: 0 });
+    return { bbox, resolvedPoints: [point] };
+  }
+
+  /** LLM提案の下位anchor名をSearch Boxで裏取り：エリアbbox内に解決できたものだけ残し、
+   *  空間的に散らして上限適用。返り値 [{ text, _point, _coord }]（_point は showHintInput の
+   *  ボタン選択時にそのまま proximity 点として使う）。 */
+  async _groundProximityAnchors(names, areaBbox) {
+    return this._spreadAndCap(await this._groundNames(names, areaBbox), this.config.CLARIFY_MAX_CHOICES || 5);
+  }
+
+  /** 名前一覧を Search Box で実在解決 → [{ text, _point, _coord }]。areaBbox 指定時はその中に
+   *  解決できたものだけ（広域絞り込みのエリア内限定）。null 時は全国から先頭候補（地名解釈用）。 */
+  async _groundNames(names, areaBbox = null) {
+    const uniq = [...new Set((names || []).map(n => (n || '').trim()).filter(Boolean))];
+    const settled = await Promise.all(uniq.map(async nm => {
+      try {
+        const sb = await this.mcp.searchBox(nm, { types: 'poi,place,locality,neighborhood,district,address' });
+        const feats = sb?.features || [];
+        const f = areaBbox ? feats.find(ft => this._pointInBbox(ft.geometry?.coordinates, areaBbox)) : feats[0];
+        if (!f) return null; // 未解決/エリア外は捨てる（ハルシネ排除）
+        return { text: nm, _point: this._featureToBboxPoint(f), _coord: f.geometry.coordinates };
+      } catch { return null; }
+    }));
+    return settled.filter(Boolean);
+  }
+
+  /** [もしかして] データ(Search Box変種)＋常識(LLM地名解釈)を並列マージ。座標で重複排除し上限。
+   *  LLM推測を先頭優先（青山→南青山/北青山 が Search Box生結果に無くても常識で出せる）。 */
+  async _buildDidYouMean(text, features, guessNames) {
+    const guessGrounded = await this._groundNames(guessNames, null); // 全国から正式名を裏取り
+    const sbVariants = this._detectMoreSpecific(text, features).map(f => ({
+      text: `${f.properties.name}${f.properties.full_address ? '（' + f.properties.full_address + '）' : ''}`,
+      _point: this._featureToBboxPoint(f),
+      _coord: f.geometry.coordinates,
+    }));
+    const merged = this._dedupItemsByCoord([...guessGrounded, ...sbVariants]); // 常識を先頭優先
+    return merged.slice(0, this.config.CLARIFY_MAX_CHOICES || 5);
+  }
+
+  /** items を座標(~30m)で重複排除（先頭優先）。 */
+  _dedupItemsByCoord(items) {
+    const seen = new Set(), out = [];
+    for (const it of items) {
+      const c = it._coord; if (!c) continue;
+      const key = `${Math.round(c[0] * 3000)}|${Math.round(c[1] * 3000)}`;
+      if (!seen.has(key)) { seen.add(key); out.push(it); }
+    }
+    return out;
+  }
+
+  /** 地理的に散らばった候補を優先して cap 件まで採る（近すぎる候補は間引く）。エリアの別々の
+   *  場所を指す選択肢になるようにして、特定に使えるようにする。 */
+  _spreadAndCap(items, cap) {
+    const MIN_SEP_M = 800;
+    const picked = [];
+    for (const it of items) {
+      if (picked.length >= cap) break;
+      if (picked.some(p => this._coordDistM(p._coord, it._coord) < MIN_SEP_M)) continue;
+      picked.push(it);
+    }
+    if (picked.length < cap) { // 散らしで足りなければ間引いた近接候補で埋める
+      for (const it of items) {
+        if (picked.length >= cap) break;
+        if (!picked.includes(it)) picked.push(it);
+      }
+    }
+    return picked;
+  }
+
+  _coordDistM(a, b) {
+    if (!a || !b) return Infinity;
+    const dLat = (b[1] - a[1]) * 110540;
+    const dLng = (b[0] - a[0]) * 111320 * Math.cos(((a[1] + b[1]) / 2) * Math.PI / 180);
+    return Math.hypot(dLat, dLng);
+  }
+
+  /** [もしかして] 口語/部分的な地名 → Search Box が返したより具体的な同義エリア。
+   *  入力を含む別名（青山 ⊂ 南青山）だけを distinct で返す。入力と完全一致する候補が有れば
+   *  （その場所を意図している）空配列＝もしかしては出さない。同名別市区の homonym は別処理。 */
+  _detectMoreSpecific(text, features) {
+    const q = MapboxMCPClient._normalizeName(text);
+    if (!q) return [];
+    if (features.some(f => MapboxMCPClient._normalizeName(f.properties?.name) === q)) return [];
+    // 入力を含むより具体的な別名（青山 ⊂ 南青山）だけを候補に
+    const seen = new Set();
+    const cands = [];
+    for (const f of features) {
+      const nm = MapboxMCPClient._normalizeName(f.properties?.name);
+      if (!nm || nm === q || !nm.includes(q)) continue;
+      if (seen.has(nm)) continue;
+      seen.add(nm);
+      cands.push(f);
+    }
+    // 【重要】Search Box は全国に散った同名の別物（奈良/長崎/千葉…の「青山町」）を拾う。これらを
+    // 「もしかして」に出すのはノイズ。同一市区内の変種（南青山・北青山＝港区）だけに限定する。
+    // ※ 真に famous な候補を世界知識から出す（青山→南青山）のは L1-2(意味解釈)の役割で、この
+    //   データ駆動の関数ではやらない。Search Box に南青山が入っていなければ空を返す。
+    const byMuni = new Map();
+    for (const f of cands) {
+      const k = this._municipalityKey(f.properties?.full_address || f.properties?.name || '');
+      if (!byMuni.has(k)) byMuni.set(k, []);
+      byMuni.get(k).push(f);
+    }
+    let best = [];
+    for (const g of byMuni.values()) if (g.length > best.length) best = g;
+    return best.length >= 2 ? best : [];
   }
 
   // ─────────────────────────────────────────────
@@ -2130,6 +2297,8 @@ const MESSAGES = {
     anchorNotFound:  t => `${t}が見つかりませんでした。別の地名や駅名をお試しください。`,
     whichArea:       t => `「${t}」はどちらですか？`,
     whichPoi:        t => `「${t}」はどれですか？`,
+    didYouMean:      t => `もしかして「${t}」はこちらのことですか？`,
+    proximityNarrow: t => `「${t}」は範囲が広すぎます。もう少し狭いエリア（駅名・町名など）で絞ってください。下の候補から選ぶか、直接入力できます。`,
     genericMulti:    t => `「${t}」は複数あります。地名や駅名も一緒に教えてください。`,
     intersectionNotFound: t => `「${t}」という名前の交差点が見つかりませんでした。`,
     condNotFound:    k => `「${k}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`,
@@ -2167,6 +2336,8 @@ const MESSAGES = {
     anchorNotFound:  t => `Couldn't find "${t}". Please try another place or station name.`,
     whichArea:       t => `Which "${t}" do you mean?`,
     whichPoi:        t => `Which "${t}"?`,
+    didYouMean:      t => `Did you mean one of these for "${t}"?`,
+    proximityNarrow: t => `"${t}" covers too wide an area. Please narrow it to a smaller area (a station or town name). Pick one below or type it in.`,
     genericMulti:    t => `There are several "${t}". Please add a place or station name.`,
     intersectionNotFound: t => `No intersection named "${t}" was found.`,
     condNotFound:    k => `"${k}" wasn't found in this area (it may not be in the map data).`,

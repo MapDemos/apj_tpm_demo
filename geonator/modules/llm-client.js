@@ -16,6 +16,7 @@ class LLMClient {
     this.stats = {
       L1c:  { model: this.config.L1_CONFIRM_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L1:   { model: this.config.L1_MODEL,   inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
+      L1_3: { model: this.config.L1_3_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L2_1: { model: this.config.L2_1_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L2_2: { model: this.config.L2_2_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L3:   { model: this.config.L3_MODEL,   inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
@@ -70,6 +71,72 @@ class LLMClient {
       const json = this._extractJSON(result);
       const arr = json && Array.isArray(json.suggestions) ? json.suggestions : [];
       return arr.filter(s => typeof s === 'string' && s.trim()).slice(0, 4);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * L1-3 (broad-proximity narrowing): given a too-broad proximity area name
+   * (e.g. 「鎌倉市」), propose real, well-known, geographically SPREAD sub-anchors
+   * (major stations / districts / landmarks) a user would recognize, so JS can offer
+   * them as narrowing buttons. World-knowledge enumeration only — JS grounds each via
+   * Search Box (drops any that don't resolve / fall outside the area), so a stray name
+   * is harmless. Returns names (string[]). This is the FRONT half (before 1次検索);
+   * distinct from L3 which narrows AFTER candidates are found.
+   * @param {string} areaText - the broad area (e.g. 「鎌倉市」)
+   * @param {string} lang
+   */
+  async suggestProximityAnchors(areaText, lang = 'ja') {
+    if (!areaText) return [];
+    const en = lang === 'en';
+    const sys = en
+      ? 'You help pinpoint locations. Given a broad area that is too large to be a useful "nearby" reference, list 6-8 REAL, well-known, and geographically SPREAD sub-places within it (major train stations, well-known districts/neighborhoods, or landmark facilities) that a user would recognize and could use to narrow down. Prefer train stations. Avoid the area name itself, vague/duplicate/too-generic names. Output JSON only: {"suggestions": ["name", ...]}.'
+      : 'あなたは位置特定を助けるアシスタントです。「近く」の基準にするには広すぎるエリアが与えられます。その中にある、実在し・知名度が高く・地理的に散らばった下位の場所を6〜8個挙げてください（主要な鉄道駅、有名な地区・町名、目印になる施設）。駅を優先。エリア名そのもの・曖昧/重複/一般的すぎる名前は避ける。出力はJSONのみ: {"suggestions": ["名前", ...]}。';
+    try {
+      const result = await this._callClaude(
+        { system: sys, user: en
+          ? `Broad area: 「${areaText}」\n\nList 6-8 recognizable, spread-out sub-places. JSON only.`
+          : `広すぎるエリア: 「${areaText}」\n\n知名度が高く散らばった下位の場所を6〜8個。JSONのみ返してください。` },
+        400,
+        this.config.L1_3_MODEL,
+        'L1_3'
+      );
+      const json = this._extractJSON(result);
+      const arr = json && Array.isArray(json.suggestions) ? json.suggestions : [];
+      return arr.filter(s => typeof s === 'string' && s.trim()).slice(0, 8);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * L1-3 (colloquial place interpretation / 「もしかして」): a place name may be
+   * colloquial/partial/ambiguous (「青山」) while the user commonly means a specific
+   * well-known place (東京都港区南青山). Search Box forward-search alone can't surface it
+   * (南青山 isn't even in the "青山" results), so world knowledge is required. Return the
+   * canonical full name(s) (1-3); JS grounds each via Search Box. Return [] when the name
+   * is already specific enough (a city/ward/clear area) — those go to the broad-proximity
+   * gate instead of 「もしかして」. Runs in PARALLEL with Search Box (no added latency).
+   * @param {string} text - the place name as the user said it (「青山」)
+   * @param {string} lang
+   */
+  async interpretPlaceName(text, lang = 'ja') {
+    if (!text) return [];
+    const en = lang === 'en';
+    const sys = en
+      ? 'You interpret Japanese place names. If the given name is colloquial/partial/ambiguous but a well-known specific place is commonly meant, return its canonical full name(s) (1-3), e.g. "青山" → "東京都港区南青山", "東京都港区北青山". If it is already specific enough (a city/ward/clearly-defined area), return an empty list. Use real official names. Output JSON only: {"places": ["...", ...]}.'
+      : 'あなたは日本の地名解釈アシスタントです。与えられた地名が口語的・部分的・曖昧で、一般常識的に特定の有名な場所を指すと考えられる場合、その正式な地名を1〜3個返してください（例:「青山」→「東京都港区南青山」「東京都港区北青山」）。市区町村や明確に定まった地名など、既に十分具体的な場合は空配列。実在する正式名称で。出力はJSONのみ: {"places": ["...", ...]}。';
+    try {
+      const result = await this._callClaude(
+        { system: sys, user: en ? `Place name: 「${text}」\nJSON only.` : `地名: 「${text}」\nJSONのみ返してください。` },
+        300,
+        this.config.L1_3_MODEL,
+        'L1_3'
+      );
+      const json = this._extractJSON(result);
+      const arr = json && Array.isArray(json.places) ? json.places : [];
+      return arr.filter(s => typeof s === 'string' && s.trim()).slice(0, 3);
     } catch {
       return [];
     }
