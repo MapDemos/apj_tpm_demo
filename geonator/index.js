@@ -311,12 +311,15 @@ class LocationFinderApp {
       l2_2ModelSelect: 'claude-sonnet-4-6',
       l3ModelSelect:   'claude-haiku-4-5-20251001',
     };
+    const label = (v) =>
+      v === 'claude-sonnet-5'  ? 'Sonnet 5'
+      : v.includes('sonnet')   ? 'Sonnet 4.6'
+      :                          'Haiku 4.5';
     for (const [id, recVal] of Object.entries(rec)) {
       const sel = document.getElementById(id);
       if (!sel) continue;
       for (const opt of sel.options) {
-        const base = opt.value.includes('sonnet') ? 'Sonnet 4.6' : 'Haiku 4.5';
-        opt.textContent = base + (opt.value === recVal ? suffix : '');
+        opt.textContent = label(opt.value) + (opt.value === recVal ? suffix : '');
       }
     }
   }

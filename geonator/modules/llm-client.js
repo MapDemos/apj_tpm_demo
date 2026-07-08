@@ -259,6 +259,17 @@ class LLMClient {
   // Internal
   // ─────────────────────────────────────────────
 
+  /**
+   * temperature を受け付けるモデルか（allowlist）。
+   * 4.6世代以前（sonnet-4-6 / opus-4-6 / haiku-4-5系 / claude-3系）のみ true。
+   * Sonnet 5 等の5世代・Opus 4.7+・Fable 5 は temperature を廃止しており、送ると 400 になる。
+   * temperature を「送らない」のは全モデルで安全（＝既定サンプリング）なので、
+   * 対応が分かっているモデルにだけ送る安全側の方式にしている。
+   */
+  _supportsTemperature(model) {
+    return /sonnet-4-6|opus-4-6|haiku-4-5|claude-3/.test(String(model || ''));
+  }
+
   async _callClaude(prompt, maxTokens = 400, model = null, role = null, opts = {}) {
     const controller = new AbortController();
     // opts.timeoutMs: 呼び出し側でタイムアウトを上書き可能（L1は出力が大きく生成に時間がかかるため長め）。
@@ -275,17 +286,19 @@ class LLMClient {
       : prompt.system;
 
     try {
+      const reqBody = {
+        model:      useModel,
+        max_tokens: maxTokens,
+        system: systemField,
+        messages: [{ role: 'user', content: prompt.user }],
+      };
+      // temperature は対応モデルにだけ付与（5世代/Opus4.7+ は送ると400）。
+      if (this._supportsTemperature(useModel)) reqBody.temperature = 0;
       const resp = await fetch(this.config.CLAUDE_API_PROXY, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         signal:  controller.signal,
-        body: JSON.stringify({
-          model:      useModel,
-          max_tokens: maxTokens,
-          temperature: 0,
-          system: systemField,
-          messages: [{ role: 'user', content: prompt.user }],
-        }),
+        body: JSON.stringify(reqBody),
       });
       if (!resp.ok) throw new Error(`LLM HTTP ${resp.status}`);
       const data = await resp.json();
@@ -300,7 +313,13 @@ class LLMClient {
         s.ms     += (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
         s.calls  += 1;
       }
-      const text = data?.content?.[0]?.text ?? '';
+      // content 配列内の全 text ブロックを連結して取り出す。
+      // Sonnet 5 等（Claude 5系）は先頭ブロックが text とは限らず（reasoning等が先頭に来ると
+      // content[0].text が undefined になり空文字→JSONパース失敗）、content[0] 決め打ちだと
+      // 「unparseable JSON (end_turn), tail=空」になる。全 text ブロック連結で堅牢化。
+      const text = Array.isArray(data?.content)
+        ? data.content.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text).join('')
+        : (data?.content?.[0]?.text ?? '');
       // opts.returnMeta: 呼び出し側（L1）が stop_reason を見て打ち切り(max_tokens)を検知できるようにする。
       if (opts.returnMeta) return { text, stop_reason: data?.stop_reason ?? null, usage: data?.usage ?? null };
       return text;
