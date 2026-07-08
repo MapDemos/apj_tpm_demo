@@ -123,7 +123,7 @@ html, body {
 /* Hint request panel */
 .message.hint-request { align-self: flex-start; align-items: flex-start; max-width: 98%; }
 .hint-bubble {
-  background: rgba(59,130,246,.08);
+  background: linear-gradient(rgba(59,130,246,.08), rgba(59,130,246,.08)), var(--bg-card);
   border: 1px solid rgba(59,130,246,.35);
   border-radius: 10px;
   padding: 11px 13px;
@@ -268,7 +268,13 @@ html, body {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
-  background: var(--bg-panel);
+  /* LINE風の壁紙を対話パネル全体に敷く（入力欄は .input-area が不透明なので自然に除外される）。
+     元画像が暗いのでスクリムは重ねない。壁紙は固定・メッセージだけスクロール。 */
+  background-color: var(--bg-panel);
+  background-image: url('../images/normal_background.webp');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 /* Messages */
@@ -281,6 +287,7 @@ html, body {
   flex-direction: column;
   gap: 10px;
   scroll-behavior: smooth;
+  background: transparent; /* 壁紙は .chat-panel 側。メッセージ領域は透過して壁紙を見せる */
 }
 .chat-messages::-webkit-scrollbar { width: 4px; }
 .chat-messages::-webkit-scrollbar-track { background: transparent; }
@@ -326,7 +333,7 @@ html, body {
   font-style: italic;
 }
 .message.tool-status .message-bubble {
-  background: rgba(59,130,246,.06);
+  background: linear-gradient(rgba(59,130,246,.06), rgba(59,130,246,.06)), var(--bg-card);
   border: 1px dashed rgba(59,130,246,.3);
   color: #7aa9f7;
   font-size: 12px;
@@ -474,7 +481,9 @@ html, body {
 /* Candidate list + feedback panel (in dialogue) */
 .message.candidates { align-self: stretch; align-items: stretch; }
 .candidate-panel {
-  background: rgba(245,158,11,.06); border: 1px solid rgba(245,158,11,.3);
+  /* 壁紙の上でも読めるよう不透明化: アンバーの色味を残しつつ不透明ベース(--bg-card)に重ねる */
+  background: linear-gradient(rgba(245,158,11,.06), rgba(245,158,11,.06)), var(--bg-card);
+  border: 1px solid rgba(245,158,11,.3);
   border-radius: 10px; padding: 10px 12px; font-size: 13px;
 }
 .candidate-header {
@@ -1027,7 +1036,8 @@ html, body {
   gap: 8px;
 }
 .choice-btn {
-  background: rgba(99, 102, 241, 0.15);
+  /* 壁紙で透けないよう不透明ベースにインディゴの色味を重ねる */
+  background: linear-gradient(rgba(99,102,241,.15), rgba(99,102,241,.15)), var(--bg-card);
   border: 1px solid rgba(99, 102, 241, 0.5);
   border-radius: 6px;
   color: #c4b5fd;
@@ -1037,13 +1047,13 @@ html, body {
   transition: background 0.15s, border-color 0.15s;
 }
 .choice-btn:hover:not(:disabled) {
-  background: rgba(99, 102, 241, 0.3);
+  background: linear-gradient(rgba(99,102,241,.3), rgba(99,102,241,.3)), var(--bg-card);
   border-color: #818cf8;
   color: #e0e7ff;
 }
 .choice-btn:disabled { opacity: 0.5; cursor: default; }
 .choice-btn-selected {
-  background: rgba(99, 102, 241, 0.4) !important;
+  background: linear-gradient(rgba(99,102,241,.4), rgba(99,102,241,.4)), var(--bg-card) !important;
   border-color: #818cf8 !important;
   color: #e0e7ff !important;
   opacity: 1 !important;
