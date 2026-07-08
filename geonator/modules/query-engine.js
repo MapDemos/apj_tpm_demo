@@ -15,7 +15,7 @@ class QueryEngine {
    *   showChoices(question: string, choices: string[]): Promise<string>
    *   showHintInput(prompt: string): Promise<string>
    *   showSearching(text: string): void
-   *   showResults(full, partial, none, unsupported, conditionLabels): void
+   *   showResults(full, partial, none, summary, conditionLabels, droppedNote): void
    *   showFeedback(): Promise<'done'|'continue'|'restart'>
    *   clearResults(): void
    */
@@ -1776,7 +1776,11 @@ class QueryEngine {
     else                        summary = M.resultNone(hasCond);
 
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
-    this.ui.showResults(full, partial, displayNone, summary, conditionLabels);
+    // 上限超過で除外した条件を結果の場所でも透明化（冒頭の早出し吹き出しに加え、候補パネルにも併記）。
+    const dropped = schema.droppedConditionTexts || [];
+    const sep = this._langCode() === 'en' ? ', ' : '、';
+    const droppedNote = dropped.length ? this._m().droppedConditions(dropped.join(sep)) : '';
+    this.ui.showResults(full, partial, displayNone, summary, conditionLabels, droppedNote);
 
     // [大体の位置] area result: draw an approximate area (convex hull) around the
     // surfaced candidates when the query asked for a rough location, not a pinpoint.

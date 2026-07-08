@@ -441,13 +441,13 @@ class LocationFinderApp {
         if (!self._debugMode) return Promise.resolve();
         return new Promise(resolve => self._showStepPanel(stepId, label, lines, resolve));
       },
-      showResults(full, partial, none, summary, conditionLabels) {
+      showResults(full, partial, none, summary, conditionLabels, droppedNote) {
         // Tier-aware markers. QueryEngine set _tier + _matchInfo.score.
         self._renderTierMarkers([...full, ...partial, ...none]);
 
         // Candidate list in the dialogue panel (clickable + feedback for ground truth),
         // with the result summary as the header of the SAME bubble.
-        self._renderCandidatePanel(full, partial, none, summary);
+        self._renderCandidatePanel(full, partial, none, summary, droppedNote);
       },
       async showFeedback(proximityLabel) {
         self._hideCancelBtn(); // フィードバック待ち＝キャンセル不要
@@ -1166,7 +1166,7 @@ class LocationFinderApp {
    * truth (shared between operator and Claude via CSV export). Available in both
    * normal and debug mode.
    */
-  _renderCandidatePanel(full, partial, none, summary) {
+  _renderCandidatePanel(full, partial, none, summary, droppedNote) {
     this._hideTypingIndicator();
     this._hideCancelBtn(); // 候補が出たらキャンセルは不要（以降はフィードバック/絞り込み）
     const rows = [...(full || []), ...(partial || [])];
@@ -1185,6 +1185,14 @@ class LocationFinderApp {
       sum.className = 'candidate-summary';
       sum.textContent = summary;
       panel.appendChild(sum);
+    }
+
+    // 上限超過で除外した条件を結果の場所でも明示（透明化A）。冒頭の早出し吹き出しは別途残る。
+    if (droppedNote) {
+      const dn = document.createElement('div');
+      dn.className = 'candidate-dropped';
+      dn.textContent = droppedNote;
+      panel.appendChild(dn);
     }
 
     // 地図OFF時: 候補パネル先頭に静的地図（Static Images API）を差し込む。上位5件をピン表示。
