@@ -1204,16 +1204,39 @@ class LocationFinderApp {
     }
 
     // 地図OFF時: 候補パネル先頭に静的地図（Static Images API）を差し込む。上位5件をピン表示。
+    // 画像サイズは 320×180 固定なので、その比率の枠を先に確保（レイアウトシフト防止）し、
+    // 読み込み中はプレースホルダを表示。画像は非同期で読み込み、届いたら差し替える
+    // （候補パネル自体はここで即描画され、画像待ちでブロックしない）。
     if (this._mapOff) {
       const url = this._buildStaticMapUrl([...(full || []), ...(partial || []), ...(none || [])]);
       if (url) {
+        const L = LANG[this._lang];
         const fig = document.createElement('figure');
         fig.className = 'static-map';
+
+        const box = document.createElement('div');
+        box.className = 'static-map-box'; // aspect-ratio 320/180 で領域を先に確保
+
+        const loading = document.createElement('div');
+        loading.className = 'static-map-loading';
+        loading.textContent = L.staticMapLoading;
+
         const img = document.createElement('img');
-        img.src = url; img.alt = LANG[this._lang].staticMapAlt; img.loading = 'lazy';
+        img.alt = L.staticMapAlt;
+        img.decoding = 'async';
+        // ハンドラを src より先に設定（キャッシュ即時ロードの取りこぼし防止）
+        img.onload  = () => { box.classList.add('loaded'); };
+        img.onerror = () => { box.classList.add('error'); loading.textContent = L.staticMapError; };
+        img.src = url;
+
+        box.appendChild(loading);
+        box.appendChild(img);
+        fig.appendChild(box);
+
         const cap = document.createElement('figcaption');
-        cap.textContent = LANG[this._lang].staticMapCap;
-        fig.appendChild(img); fig.appendChild(cap);
+        cap.textContent = L.staticMapCap;
+        fig.appendChild(cap);
+
         panel.appendChild(fig);
       }
     }
@@ -3591,6 +3614,8 @@ const LANG = {
     mapShow:       '🗺 地図表示ON',
     staticMapCap:  '上位5件まで表示',
     staticMapAlt:  '検索結果の地図（上位5件）',
+    staticMapLoading: '地図を読み込み中…',
+    staticMapError:   '地図を読み込めませんでした',
     thinking:      '考えています',
     examplesLabel: '入力例',
     mapReady:      '地図の準備ができました',
@@ -3716,6 +3741,8 @@ const LANG = {
     mapShow:       '🗺 Map ON',
     staticMapCap:  'Showing up to top 5',
     staticMapAlt:  'Result map (top 5)',
+    staticMapLoading: 'Loading map…',
+    staticMapError:   'Could not load the map',
     thinking:      'Thinking',
     examplesLabel: 'Examples',
     mapReady:      'Map ready',
