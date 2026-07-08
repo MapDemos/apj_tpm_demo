@@ -9,7 +9,7 @@
 const CONFIG = {
 
   // ビルド確認用バージョン（キャッシュで古いJSを読んでいないかの切り分けに使う）。変更ごとに更新。
-  APP_VERSION: '2026-07-08.1557',
+  APP_VERSION: '2026-07-08.1725',
 
   // ============================================
   // API KEYS
@@ -42,6 +42,12 @@ const CONFIG = {
   // 力が要る → Sonnet既定（Haiku/Sonnet5にも設定画面で変更可）。※1次検索の前段。L3(後段)とは別。
   L1_3_MODEL:      'claude-sonnet-4-6',
   CLARIFY_MAX_CHOICES: 5,  // 広域絞り込み/もしかしての提案ボタン上限（超過分は空間的に散らして間引き）
+  // 曖昧な「近く」(within無指定)の探索半径を anchor種別で変える（収集extentの既定・decisionはJS）。
+  // conditionのマッチング距離(DISTANCE_TABLE)とは無関係。広め収集でも採点は実距離で並ぶので精度は保たれる。
+  NEAR_POI_M:            400,  // poi/address/intersection = 点ランドマーク（スカイツリー等）＝狭い
+  NEAR_STATION_M:        600,  // 駅（出口含め面がある＋徒歩圏）
+  NEAR_LOCALITY_M:       800,  // 地名エリアが点で解決した時のフォールバック半径
+  LOCALITY_NEAR_MARGIN_M: 300, // 地名エリアが bbox で解決した時に膨らませるマージン
   // L2-1 strictness: カテゴリ情報が無い(null)候補を残すか。true=含める（既定）。
   // 旧false（null候補を一律ドロップ）は「○○公園駅前店」等のノイズ除去の粗い代用だったが、
   // 本物のジム等（Search Boxがcategory無しで返す）まで落とすため退役。relevance判定は名前を

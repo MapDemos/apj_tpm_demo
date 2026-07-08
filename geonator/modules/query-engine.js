@@ -116,7 +116,7 @@ class QueryEngine {
         if (mx != null) return `  範囲=${prof} ${mx}分以内`;
         const met = w.maxMeters ?? w.meters ?? null;
         return met != null ? `  範囲=${met}m以内` : '';
-      })()}`,
+      })()}${schema.proximity?.scope?.text ? `  scope=${schema.proximity.scope.text}` : '  scope=(なし)'}`,
       `target: ${schema.target?.text}  intent=${schema.target?.query_intent}${schema.target?.floors ? '  階数=' + JSON.stringify(schema.target.floors) : ''}${qeStr(schema.target)}`,
       ...(schema.conditions || []).map(c => {
         const d = c.distance || {};
@@ -391,7 +391,7 @@ class QueryEngine {
         return null; // re-entry will happen from feedback loop
       }
 
-      const points = await this._resolveAnchor(anchor, scopeBbox, wantSinglePoint);
+      const points = await this._resolveAnchor(anchor, scopeBbox, wantSinglePoint, schema.proximity.scope?.text || null);
       if (points === null) return null; // clarification/disambiguation in progress or aborted
       if (points.length === 0) {
         this.ui.showMessage(this._m().anchorNotFound(anchor.text));
@@ -448,6 +448,18 @@ class QueryEngine {
       resolvedPoints.forEach(p => { p.radiusM = maxMet; }); this._withinReachM = maxMet;
     }
 
+    // [near-extent] 曖昧な「近く」(within無指定)は anchorの種別で探索半径を変える（決定論・JS）。
+    // 点ランドマーク(poi/address/intersection)=狭い / 駅=中 / 地名エリア=そのbbox＋広めマージン。
+    // これは「どこまで候補を集めるか(収集extent)」の話で、conditionのマッチング距離(DISTANCE_TABLE)
+    // とは別物。収集を広げても採点はアンカーからの実距離で並ぶので、遠いものが「近く」で上位に来ない。
+    if (!active) {
+      const nearR = this._nearExtentForType(schema.proximity.anchors?.[0]?.type);
+      resolvedPoints = resolvedPoints.map(p =>
+        p.bbox
+          ? { bbox: this.mcp.expandBBox(p.bbox, this.config.LOCALITY_NEAR_MARGIN_M ?? 300) }
+          : { ...p, radiusM: nearR });
+    }
+
     // [AA] compute base bbox from all resolved points (unless within already set it)
     if (!bbox) bbox = this.mcp.resolveBBox({ points: resolvedPoints, marginM: 0 });
 
@@ -473,7 +485,7 @@ class QueryEngine {
     return { bbox, resolvedPoints };
   }
 
-  async _resolveAnchor(anchor, scopeBbox = null, singlePoint = false) {
+  async _resolveAnchor(anchor, scopeBbox = null, singlePoint = false, scopeText = null) {
     switch (anchor.type) {
       case 'station':
         return await this._resolveStation(anchor, singlePoint);
@@ -481,7 +493,8 @@ class QueryEngine {
       case 'address':
         // Area anchors (地名・丁目) — homonym disambiguation by municipality
         // (台東区入谷 vs 足立区入谷 are both 東京都 → must compare at 区/市 level).
-        return await this._resolveLocality(anchor);
+        // scope(県/市区)があれば範囲内に限定（岩手県の青山→東京南青山を弾く）。
+        return await this._resolveLocality(anchor, scopeBbox, scopeText);
       case 'intersection':
         // Named intersection as reference (「入谷二丁目の交差点」= the intersection
         // NAMED 入谷二丁目). Resolve its area, then find that named intersection.
@@ -565,20 +578,28 @@ class QueryEngine {
     return [{ lng: stationCoord[0], lat: stationCoord[1], radiusM: STATION_RADIUS_M }];
   }
 
-  async _resolveLocality(anchor) {
+  async _resolveLocality(anchor, scopeBbox = null, scopeText = null) {
     // 並列: (a) Search Box前方一致  (b) LLM一般常識での地名解釈（青山→東京都港区南青山/北青山）。
     // Search Box単独だと「青山」で南青山が結果に入らない（全国のマイナーな青山町ばかり）ため、
     // 常識(LLM)を併走させて裏取りマージする。並列なので追加レイテンシはほぼ無い。
+    // scopeText(県/市区が明示された場合)はLLMに渡し「その中で解釈」させる（岩手県の青山→盛岡市青山）。
     const [sbResult, guessNames] = await Promise.all([
       this.mcp.searchBox(anchor.text, { types: 'place,locality,neighborhood,district,address' }),
-      this.llm.interpretPlaceName(anchor.text, this._langCode()),
+      this.llm.interpretPlaceName(anchor.text, this._langCode(), scopeText),
     ]);
-    const features = sbResult?.features || [];
+    let features = sbResult?.features || [];
+
+    // scope(県/市区)が指定されていれば、その範囲内の候補に限定（岩手県の青山→東京南青山を弾く）。
+    // scope内が0件なら生のまま残す（常識解釈(guess)がscope内で裏取りして救済する）。
+    if (scopeBbox) {
+      const inScope = features.filter(f => this._pointInBbox(f.geometry?.coordinates, scopeBbox));
+      if (inScope.length) features = inScope;
+    }
 
     // [もしかして] データ(SB変種)＋常識(LLM)をマージした候補。2件以上あればボタンで確定させる
     // （黙って片方を採らない）。既に具体的な地名(鎌倉市等)はLLM解釈が空＆SB完全一致で候補が立たず、
     // 後段の広すぎゲート(_narrowBroadProximity)や homonym グルーピングへ流れる。
-    const dym = await this._buildDidYouMean(anchor.text, features, guessNames);
+    const dym = await this._buildDidYouMean(anchor.text, features, guessNames, scopeBbox);
     if (dym.length >= 2 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
       this._clarifyCount++;
       const choices = dym.map(d => d.text);
@@ -826,8 +847,8 @@ class QueryEngine {
 
   /** [もしかして] データ(Search Box変種)＋常識(LLM地名解釈)を並列マージ。座標で重複排除し上限。
    *  LLM推測を先頭優先（青山→南青山/北青山 が Search Box生結果に無くても常識で出せる）。 */
-  async _buildDidYouMean(text, features, guessNames) {
-    const guessGrounded = await this._groundNames(guessNames, null); // 全国から正式名を裏取り
+  async _buildDidYouMean(text, features, guessNames, scopeBbox = null) {
+    const guessGrounded = await this._groundNames(guessNames, scopeBbox); // scope内(あれば)で正式名を裏取り
     const sbVariants = this._detectMoreSpecific(text, features).map(f => ({
       text: `${f.properties.name}${f.properties.full_address ? '（' + f.properties.full_address + '）' : ''}`,
       _point: this._featureToBboxPoint(f),
@@ -872,6 +893,17 @@ class QueryEngine {
     const dLat = (b[1] - a[1]) * 110540;
     const dLng = (b[0] - a[0]) * 111320 * Math.cos(((a[1] + b[1]) / 2) * Math.PI / 180);
     return Math.hypot(dLat, dLng);
+  }
+
+  /** 曖昧な「近く」の探索半径を anchor種別で返す（点ランドマーク=狭い / 駅=中 / 地名=広め）。
+   *  収集extentの既定であって、conditionのマッチング距離(DISTANCE_TABLE)とは無関係。
+   *  locality が bbox で解決した場合は半径でなく LOCALITY_NEAR_MARGIN_M でbboxを膨らませる（呼び出し側）。 */
+  _nearExtentForType(type) {
+    switch (type) {
+      case 'station':  return this.config.NEAR_STATION_M  ?? 600;
+      case 'locality': return this.config.NEAR_LOCALITY_M ?? 800; // 点解決時のフォールバック
+      default:         return this.config.NEAR_POI_M      ?? 400; // poi/address/intersection = 点ランドマーク
+    }
   }
 
   /** [もしかして] 口語/部分的な地名 → Search Box が返したより具体的な同義エリア。

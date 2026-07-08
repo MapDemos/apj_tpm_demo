@@ -121,15 +121,20 @@ class LLMClient {
    * @param {string} text - the place name as the user said it (「青山」)
    * @param {string} lang
    */
-  async interpretPlaceName(text, lang = 'ja') {
+  async interpretPlaceName(text, lang = 'ja', regionHint = null) {
     if (!text) return [];
     const en = lang === 'en';
     const sys = en
       ? 'You interpret Japanese place names. If the given name is colloquial/partial/ambiguous but a well-known specific place is commonly meant, return its canonical full name(s) (1-3), e.g. "青山" → "東京都港区南青山", "東京都港区北青山". If it is already specific enough (a city/ward/clearly-defined area), return an empty list. Use real official names. Output JSON only: {"places": ["...", ...]}.'
       : 'あなたは日本の地名解釈アシスタントです。与えられた地名が口語的・部分的・曖昧で、一般常識的に特定の有名な場所を指すと考えられる場合、その正式な地名を1〜3個返してください（例:「青山」→「東京都港区南青山」「東京都港区北青山」）。市区町村や明確に定まった地名など、既に十分具体的な場合は空配列。実在する正式名称で。出力はJSONのみ: {"places": ["...", ...]}。';
+    // regionHint（県/市区が明示されている）: 解釈をその中に限定させる（岩手県の青山→盛岡市青山）。
+    const regionNote = regionHint
+      ? (en ? ` The place is within ${regionHint} — interpret it there (e.g. within that prefecture/city), not elsewhere.`
+            : ` この地名は「${regionHint}」の中にあります。その中（都道府県/市区内）で解釈してください（他地域の同名を出さない）。`)
+      : '';
     try {
       const result = await this._callClaude(
-        { system: sys, user: en ? `Place name: 「${text}」\nJSON only.` : `地名: 「${text}」\nJSONのみ返してください。` },
+        { system: sys + regionNote, user: en ? `Place name: 「${text}」${regionHint ? ` (in ${regionHint})` : ''}\nJSON only.` : `地名: 「${text}」${regionHint ? `（${regionHint}内）` : ''}\nJSONのみ返してください。` },
         300,
         this.config.L1_3_MODEL,
         'L1_3'

@@ -95,6 +95,8 @@ scopeは**proximityアンカー（施設）が、どの行政区域/エリアの
   - ✗「沖縄県庁近く」をscopeにする（沖縄県庁は施設＝proximityアンカー、「近く」は近接語）
   - ✓ scopeは省略（null）し、沖縄県庁をproximity.anchorにする
 - 例: 「鎌倉市のコメダの前のスーパー」→ target=スーパー, proximity.anchors=[{type:poi,text:"コメダ珈琲"}], scope={type:"locality",text:"鎌倉市"}
+- **地名/エリアのアンカーに都道府県・市区町村が前置された場合も scope に入れる**（アンカー側は前置を外した地名だけにする）。同名地の取り違え防止に必須。
+  例: 「岩手県の青山のカフェ」→ target=カフェ, proximity.anchors=[{type:locality,text:"青山"}], scope={type:"locality",text:"岩手県"}
 - scope の形式: { "type": "locality|place", "text": "..." }。無ければ null。
 
 **最重要ルール（target・proximityは常に各1つ）**:
