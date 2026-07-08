@@ -85,6 +85,14 @@ class QueryEngine {
     // 高速確認がまだ出ていなければ（Haiku失敗/解析の方が速かった等）L1の confirmation を表示。
     if (!confirmShown && schema.confirmation) { confirmShown = true; this.ui.showMessage(schema.confirmation); }
 
+    // 上限超過で切り捨てた条件は、表示された確認文(Haiku/Sonnet いずれか)に載らないことがあるため
+    // JS側で決定的に注記する（発見: 高速確認は除外に触れない）。透明化: A=落とした条件のみ。
+    const dropped = schema.droppedConditionTexts || [];
+    if (dropped.length) {
+      const sep = this.ui.getLang?.() === 'en' ? ', ' : '、';
+      this.ui.showMessage(this._m().droppedConditions(dropped.join(sep)));
+    }
+
     // [STEP] QuerySchema — show the parsed intent early so the operator can sanity-check
     // L1's interpretation (target / conditions / distances) before any search runs.
     const anchors = (schema.proximity?.anchors || []).map(a => `${a.text}[${a.type}/${a.specificity}]`).join(', ');
@@ -2001,6 +2009,7 @@ const MESSAGES = {
     thinkingCollect: '候補を集めています',
     thinkingEval:    '条件との距離を評価しています',
     thinkingNarrow:  '絞り込んでいます',
+    droppedConditions: list => `なお、条件が多いため「${list}」は今回の検索には含めていません。`,
   },
   en: {
     searching:            'Searching for candidates…',
@@ -2034,5 +2043,6 @@ const MESSAGES = {
     thinkingCollect: 'Gathering candidates',
     thinkingEval:    'Evaluating distances & conditions',
     thinkingNarrow:  'Narrowing down',
+    droppedConditions: list => `Note: to keep the search focused, "${list}" ${/,/.test(list) ? 'are' : 'is'} not included in this search.`,
   },
 };

@@ -117,7 +117,11 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
   // Keeps scoring quality and LLM cost bounded; extras are dropped here.
   const cap = Number.isFinite(maxConditions) ? Math.max(0, Math.min(5, maxConditions)) : 3;
   if (Array.isArray(schema.conditions) && schema.conditions.length > cap) {
+    // 上限超過で切り捨てた条件は捨てずに記録 → ユーザーに「今回の検索に含めていない」旨を通知する。
+    schema.droppedConditionTexts = schema.conditions.slice(cap).map(c => c.text ?? c.type).filter(Boolean);
     schema.conditions = schema.conditions.slice(0, cap);
+  } else {
+    schema.droppedConditionTexts = [];
   }
 
   // condition distance + queries defaults
