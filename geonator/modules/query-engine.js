@@ -55,6 +55,10 @@ class QueryEngine {
     return M.error_communication; // 穏当な既定（文言から「通信エラー」は撤去済み）
   }
 
+  /** 処理時間プロファイラ（debug表示用）。_pf(ラベル, 開始時刻) で1区間を記録。 */
+  _pnow(){ return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
+  _pf(label, t0){ (this._prof || (this._prof = [])).push({ l: label, ms: this._pnow() - t0 }); }
+
   /** Debug-mode step gate: pause until the operator clicks "next" (no-op otherwise). */
   async _step(stepId, label, lines) {
     if (this.ui.isDebug?.()) await this.ui.debugStep?.(stepId, label, lines || []);
@@ -82,6 +86,7 @@ class QueryEngine {
     this.llm.resetStats?.();
     this.mcp.resetRequestCounts?.(); // per-query API caps
     this._runStart = Date.now();
+    this._prof = []; // 処理時間内訳（フェーズ別・debug表示用）
     const gen = (this._runGen = (this._runGen || 0) + 1); // 実行世代（新クエリ/キャンセルで無効化）
     this.ui.clearResults();
 
@@ -94,7 +99,9 @@ class QueryEngine {
       })
       ?.catch(() => {});
 
+    const _tp = this._pnow();
     const schema = await this._parseAndValidate(merged, null);
+    this._pf('⓪ L1解析（検証・再試行・意図確認込）', _tp);
     if (!schema) return; // clarification was handled inside
     if (this._aborted(gen)) return; // キャンセル/新クエリなら以降の描画をしない
 
@@ -303,7 +310,9 @@ class QueryEngine {
     // [3-A] resolve proximity → bbox (unless cached)
     if (cacheInvalid.bbox) {
       this.ui.showSearching(this._m().searching);
+      const _t1 = this._pnow();
       const bboxResult = await this._resolveProximity(schema);
+      this._pf('① 一次検索：proximity解決', _t1);
       if (!bboxResult) return;
       this._cache.bbox = bboxResult;
       // Visualize resolved anchor points
@@ -346,7 +355,9 @@ class QueryEngine {
 
     // [3-B] collect candidates (unless cached)
     if (cacheInvalid.candidates) {
+      const _t2 = this._pnow();
       let collected = await this._collectCandidates(schema, bboxes);
+      this._pf('② Step1：候補収集（合計）', _t2);
       if (!collected) return;
 
       // [3-B-overflow] target overflowed the cap (too dense for the proximity bbox) →
@@ -379,7 +390,9 @@ class QueryEngine {
     if (this._aborted(gen)) return; // 収集後キャンセル/新クエリ→評価/描画しない
     // [3-C] evaluate (collect reach polygons for visualization)
     this.mcp._evalPolygons = [];
+    const _t3 = this._pnow();
     const results = await this._evaluate(schema, this._cache.mainCandidates, this._cache.condCandidates);
+    this._pf('③ Step2：距離評価・採点・ティア', _t3);
     this.ui.drawPolygons?.(this.mcp._evalPolygons);
 
     // Debug: evaluation breakdown (with score + tier)
@@ -397,10 +410,12 @@ class QueryEngine {
 
     if (this._aborted(gen)) return; // 評価後キャンセル/新クエリ→結果を描画しない
     // [4] show results
+    const _t4 = this._pnow();
     this._showResults(results, schema);
+    this._pf('④ 結果描画', _t4);
     this.ui.refreshCounts?.();
     // Token/time telemetry for this search cycle
-    this.ui.showRunStats?.({ ms: Date.now() - (this._runStart || Date.now()), llm: this.llm.stats });
+    this.ui.showRunStats?.({ ms: Date.now() - (this._runStart || Date.now()), llm: this.llm.stats, phases: this._prof });
     this.ui.showDebugReport?.(this._dbgReport);
 
     // [5] feedback
@@ -1503,10 +1518,14 @@ class QueryEngine {
       .includes(target?.query_intent);
     const useGrid = targetIsBuilding || this.mcp._bboxToRadius(condBbox) <= 1500;
     // proximity.within の穴（内側isochrone内）はグリッド点をskip（「n分以上」ドーナツのTQ削減）
+    const _tg = this._pnow();
     const sharedGrid = useGrid ? await this.mcp.buildPoiLabelGrid(condBbox, 65, this._reachHole || null) : null;
+    this._pf('　└ グリッド構築（Tilequery）', _tg);
 
     // Target collection (partition shared grid to the tight target bbox)
+    const _tt = this._pnow();
     let mainRaw = await this.mcp.collectTarget(target, targetBbox, sharedGrid);
+    this._pf('　└ target収集（Search Box＋TQ）', _tt);
     mainRaw = this._applyBuildingNameRules(target, mainRaw);
     mainRaw = this._dedupTargets(mainRaw); // [pre-scoring] drop duplicate candidates (see method)
 
@@ -1526,6 +1545,7 @@ class QueryEngine {
     // Conditions collection (partition shared grid to the wide condition bbox) — parallel
     const condResults = {};
     const condDebug   = [];
+    const _tc = this._pnow();
     if (conditions?.length) {
       await Promise.all(conditions.map(async (c) => {
         const key = c.text ?? c.type;
@@ -1544,19 +1564,25 @@ class QueryEngine {
         }
       }));
     }
+    this._pf('　└ condition収集', _tc);
 
     // [3-B0] L2-1 category validity filter (通常クエリ collections only): drop candidates
     // whose poi_category/class is clearly different from the intent. Runs BEFORE the
     // reach-polygon build (conditions) and BEFORE L2-2 (target) so noise (e.g. コンビニ
     // named "セブンイレブン天神中央公園") never pollutes downstream geometry/scoring.
+    const _t21 = this._pnow();
     mainRaw = await this._applyCategoryFilter(schema, mainRaw, condResults);
+    this._pf('　└ L2-1 カテゴリ妥当性（LLM）', _t21);
 
     // [3-B1] L2-2 relevance rating: remove 'no', tag kept as definitely/probably/unknown
+    const _t22 = this._pnow();
     const { kept, excludedNames } = await this._rateMain(target, mainRaw);
+    this._pf('　└ L2-2 名前関連性・target（LLM）', _t22);
 
     // [3-B1'] poi条件にも同じ名前ベース関連性(L2-2)を適用し「no」を除外。
     // L2-1（カテゴリ）は同分野を残す方針のため、スーパー条件に八百屋が残る等が起きる。
     // 通常クエリの一部（target/condition）として挙動を揃えるため、条件も名前で弾く。
+    const _t22c = this._pnow();
     await Promise.all((schema.conditions || []).filter(c => c.type === 'poi').map(async c => {
       const key = c.text ?? c.type;
       const items = condResults[key];
@@ -1564,6 +1590,7 @@ class QueryEngine {
       const { kept: keptCond } = await this._rateMain({ text: c.text, query_intent: c.query_intent || 'specific' }, items);
       condResults[key] = keptCond;
     }));
+    if ((schema.conditions || []).some(c => c.type === 'poi')) this._pf('　└ L2-2 名前関連性・条件（LLM）', _t22c);
 
     // Debug: target + condition collection breakdown
     const tdbg = this.mcp._lastTargetDebug || null;

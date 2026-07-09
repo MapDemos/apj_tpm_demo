@@ -564,9 +564,14 @@ class LocationFinderApp {
           roleLines.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)}${cache} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
           totIn += s.inTok; totOut += s.outTok;
         }
+        // 処理時間の内訳（フェーズ別・同ラベルは合算＝再収集等を吸収）。performance.now基準。
+        const phaseAgg = new Map();
+        for (const p of (stats.phases || [])) phaseAgg.set(p.l, (phaseAgg.get(p.l) || 0) + p.ms);
+        const phaseLines = [...phaseAgg.entries()].map(([l, ms]) => `${l}: ${(ms / 1000).toFixed(2)}s`);
         const parts = [
-          self._lang === 'en' ? `⏱ ${secs}s` : `⏱ 処理時間 ${secs}s`,
-          ...roleLines,
+          self._lang === 'en' ? `⏱ total ${secs}s` : `⏱ 処理時間 合計 ${secs}s`,
+          ...(phaseLines.length ? ['── 処理内訳 ──', ...phaseLines] : []),
+          ...(roleLines.length ? ['── LLM ロール別 ──', ...roleLines] : []),
           `API: SB ${self.mapboxMCP?._sbRequests ?? 0} / TQ ${self.mapboxMCP?._tqRequests ?? 0} / ISO ${self.mapboxMCP?._isoRequests ?? 0}`,
         ];
         self.addMessage('tool-status', parts.join('\n'));
