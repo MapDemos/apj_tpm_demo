@@ -1349,11 +1349,21 @@ class QueryEngine {
     if (!inferred) return;
     const isMin = inferred.maxMinutes != null;
     const val = isMin ? inferred.maxMinutes : inferred.maxMeters;
+    // proximityアンカーと同じ場所を指す condition は、walk-time が「アンカーからの到達範囲」を
+    // 縛るもの＝proximity.within のはず（例:「入谷二丁目の交差点から徒歩1分」でL1が入谷二丁目を
+    // condition にも複製し、徒歩1分をそのcondition距離に付けてしまうケース）。この場合は within を
+    // 落とすと収集bboxが既定NEAR幅(~800m)に膨らみTQが激増するため、dupとみなさず within 化する。
+    const anchorTexts = new Set(
+      (schema.proximity.anchors || []).map(a => (a.text || '').trim()).filter(Boolean)
+    );
     const dupCond = (schema.conditions || []).some(c => {
       const d = c.distance || {};
-      return isMin ? d.minutes === val : d.meters === val;
+      const matches = isMin ? d.minutes === val : d.meters === val;
+      if (!matches) return false;
+      if (anchorTexts.has((c.text || '').trim())) return false; // アンカー複製condition → withinを縛る
+      return true;
     });
-    if (dupCond) return; // その距離は condition のもの → within にしない
+    if (dupCond) return; // その距離は（アンカーとは別の）condition のもの → within にしない
     schema.proximity.within = inferred;
   }
 
