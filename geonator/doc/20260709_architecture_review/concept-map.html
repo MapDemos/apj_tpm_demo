@@ -263,22 +263,29 @@
 
   <script>
   (function(){
-    var CX=230, y0=42, RH=80, W=880, DHW=142, DHH=33, PW=270, PH=46, TW=160, TH=42;
+    var CX=232, y0=42, RH=80, W=930, DHW=150, DHH=33, PW=300, PH=46, TW=180, TH=42;
     var N=[
-      {t:'term',l:'ユーザー入力'},
-      {t:'proc',l:'L1-2 解析 → QuerySchema',ph:'⓪'},
-      {t:'dec', l:'場所依頼として読めた？', down:'はい', fork:'いいえ', br:{l:'not_a_query（再試行3回のち）',k:'exit'}},
-      {t:'dec', l:'解釈が割れる？', down:'いいえ', fork:'はい', br:{l:'意図ピッカー（どの意図？）',k:'loop',to:1}},
+      {t:'term',l:'ユーザー入力（多重発火ロック）'},
+      {t:'proc',l:'L1-1 確認文（並行・Haiku）',ph:'⓪'},
+      {t:'proc',l:'L1-2 解析 → QuerySchema（+再試行）'},
+      {t:'dec', l:'場所依頼として読めた？', down:'はい', fork:'いいえ', br:{l:'not_a_query（再試行3回のち・ガイド）',k:'exit'}},
+      {t:'dec', l:'解釈が割れる？', down:'いいえ', fork:'はい', br:{l:'意図ピッカー（L1-2・どの意図？）',k:'loop',to:2}},
       {t:'proc',l:'anchor 解決（Search Box）',ph:'①'},
-      {t:'dec', l:'場所が曖昧？', down:'いいえ', fork:'はい', br:{l:'もしかして／どちら（L1-3）',k:'loop',to:4}},
-      {t:'dec', l:'範囲が広すぎ？', down:'いいえ', fork:'はい', br:{l:'広域絞り込み（L1-3）',k:'loop',to:4}},
-      {t:'proc',l:'near-extent・scope → bbox 確定'},
-      {t:'proc',l:'収集（SB＋TQ）→ L2 除外',ph:'②'},
-      {t:'dec', l:'過密？（150超）', down:'いいえ', fork:'はい', br:{l:'タイト条件に昇格 → 再収集',k:'go',to:8}},
-      {t:'dec', l:'0 件？', down:'いいえ', fork:'はい', br:{l:'バス停／追加情報を要求',k:'exit'}},
-      {t:'proc',l:'ハード除外 → スコア → ティア',ph:'③'},
-      {t:'proc',l:'結果表示',ph:'④'},
-      {t:'dec', l:'フィードバック？', down:'完了', fork:'絞り込む', br:{l:'探し直す／絞り込む（L3）',k:'loop',to:1}},
+      {t:'dec', l:'場所が曖昧？（同名/口語/generic）', down:'いいえ', fork:'はい', br:{l:'もしかして／どちら（L1-3）',k:'loop',to:5}},
+      {t:'dec', l:'範囲が広すぎ？', down:'いいえ', fork:'はい', br:{l:'広域絞り込み（L1-3）',k:'loop',to:5}},
+      {t:'proc',l:'探索bbox確定（near-extent/scope/within）'},
+      {t:'proc',l:'poi_label グリッド構築（Tilequery）',ph:'②'},
+      {t:'proc',l:'target 収集（Search Box ＋ TQ）'},
+      {t:'proc',l:'condition 収集（点：poi/バス停/交差点…）'},
+      {t:'proc',l:'L2-1 カテゴリ ／ L2-2 名前 → 除外'},
+      {t:'dec', l:'target が過密？（150超）', down:'いいえ', fork:'はい', br:{l:'タイト条件に昇格 → 再収集',k:'go',to:10}},
+      {t:'dec', l:'0 件？', down:'いいえ', fork:'はい', br:{l:'バス停 tileset／追加情報を要求',k:'exit'}},
+      {t:'proc',l:'ハード除外：same_building（建物ID）',ph:'③'},
+      {t:'proc',l:'ハード除外：floors（高さ→階数）'},
+      {t:'proc',l:'スコア算出（関連性/条件距離/アンカー距離）'},
+      {t:'proc',l:'ティア決定（gold ＋ margin）'},
+      {t:'proc',l:'結果表示（ピン/面）＋ 申し送りノート',ph:'④'},
+      {t:'dec', l:'フィードバック？', down:'完了', fork:'絞り込む', br:{l:'探し直す／更に絞り込む（L3）',k:'loop',to:2}},
       {t:'term',l:'終了'}
     ];
     N.forEach(function(n,i){n.cy=y0+i*RH;});
@@ -291,10 +298,10 @@
       ED+='<line x1="'+CX+'" y1="'+y1+'" x2="'+CX+'" y2="'+y2+'" class="ed" '+ar+'/>';
       if(a.down)LB+='<text x="'+(CX+9)+'" y="'+((y1+y2)/2+4)+'" class="el">'+esc(a.down)+'</text>';
     }
-    var rail=772;
+    var rail=800;
     N.forEach(function(n){
       if(!n.br)return;
-      var by=n.cy,bx=404,bw=340;
+      var by=n.cy,bx=452,bw=336;
       ED+='<line x1="'+(CX+DHW)+'" y1="'+by+'" x2="'+bx+'" y2="'+by+'" class="ed" '+ar+'/>';
       LB+='<text x="'+((CX+DHW+bx)/2)+'" y="'+(by-7)+'" class="el" text-anchor="middle">'+esc(n.fork)+'</text>';
       SH+='<rect x="'+bx+'" y="'+(by-20)+'" width="'+bw+'" height="40" rx="8" class="br '+n.br.k+'"/>';
@@ -337,6 +344,56 @@
         <tr><td class="mono">unsupportedFeatures</td><td><code>unsupported_features[]</code> 有り（築浅・壁が赤い等・地図化不可）</td><td class="ref">:1122</td></tr>
         <tr><td class="mono">reachTooLarge</td><td>「n分以上」の到達圏が広すぎ → 周辺で探索に切替えた時</td><td class="ref">:489</td></tr>
         <tr><td class="mono">no_condition_match</td><td>条件に完全一致0件 → 参考として候補を表示する時</td><td class="ref">結果段</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ROLES & TOOLS -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-tag">役割と道具</span>
+      <h2>誰が何をするか（LLM ・ JS ・ 外部ツール）</h2>
+      <span class="verdict v-ok">網羅リファレンス</span>
+    </div>
+    <p class="sec-note">上のフローの各ステップを「誰が担うか」で総覧。<b>LLM＝意味判断 / JS＝制御・幾何・裏取り / 外部＝Mapbox・Turf</b>。</p>
+
+    <h3 style="font-size:14px;margin:18px 0 8px;">LLM の6役割</h3>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>役割</th><th>モデル</th><th>仕事</th><th>関数 ／ プロンプト</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">L1-1</td><td>Haiku</td><td>発話→確認文を一文で先出し（場所依頼でなければ空文字）</td><td class="mono">confirmInput ／ PROMPT_CONFIRM</td></tr>
+        <tr><td class="mono">L1-2</td><td>Sonnet</td><td>自然文→QuerySchema。割れれば interpretations。追加絞り込みは差分解析</td><td class="mono">parseQuery, parseRefinement ／ PROMPT_L1</td></tr>
+        <tr><td class="mono">L1-3</td><td>Sonnet</td><td>地名解釈（青山→南青山）／ 広域の下位anchor列挙（鎌倉市→駅・エリア）</td><td class="mono">interpretPlaceName, suggestProximityAnchors</td></tr>
+        <tr><td class="mono">L2-1</td><td>Sonnet</td><td>poi_category / class の分野妥当性（名前は見ない・明確に違う分野を除外）</td><td class="mono">filterCategories ／ PROMPT_L2_1</td></tr>
+        <tr><td class="mono">L2-2</td><td>Sonnet</td><td>候補名の意図一致を4段階判定（no を除外・target＋poi条件に適用）</td><td class="mono">rateCandidates ／ PROMPT_L2_2</td></tr>
+        <tr><td class="mono">L3</td><td>Haiku</td><td>絞り込み目印の提案（近傍ランドマークから区別しやすいものを選抜）</td><td class="mono">suggestLandmarks, suggestProminentLandmarks</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3 style="font-size:14px;margin:22px 0 8px;">外部ツール（Mapbox ・ Turf）</h3>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>API / レイヤー</th><th>用途</th><th>主な関数</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">Search Box API</td><td>anchor 解決・target/condition 収集・scope 解決・地名前方一致</td><td class="mono">searchBox, _searchNearbyPOI, collectCondition, _resolveScopeBbox</td></tr>
+        <tr><td class="mono">Tilequery: poi_label</td><td>POI/建物名のグリッド収集（target・poi条件・L3目印）</td><td class="mono">buildPoiLabelGrid, _gridTilequeryPOI</td></tr>
+        <tr><td class="mono">Tilequery: transit_entrance</td><td>駅の出入口（○番出口）</td><td class="mono">tilequeryTransitEntrances</td></tr>
+        <tr><td class="mono">Tilequery: building</td><td>建物ID/高さ → same_building・floors 判定</td><td class="mono">_getBuildingId, _getBuildingFloors, filterSameBuilding</td></tr>
+        <tr><td class="mono">Tilequery: road/rail/water/交差点/信号</td><td>線・自然物・交差点・信号の近接評価</td><td class="mono">_scanStreetFeatures, roadNear, _findIntersections, _findTrafficSignals</td></tr>
+        <tr><td class="mono">Tilequery: バス停 tileset</td><td>バス停条件・0件フォールバック</td><td class="mono">_busStopFallback, _busStopLocationSearch</td></tr>
+        <tr><td class="mono">Isochrone API</td><td>徒歩/自転車/車 n分の到達圏</td><td class="mono">isochroneReach, computeWithinReach, _filterByIsochrone</td></tr>
+        <tr><td class="mono">Turf.js（ブラウザ幾何）</td><td>距離・point-in-polygon・bbox 計算</td><td class="mono">resolveBBox, filterInsidePolygons, _computeBboxFromPoints</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3 style="font-size:14px;margin:22px 0 8px;">JS オーケストレーション（query-engine）フェーズ別</h3>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>フェーズ</th><th>JS の役割</th><th>主な関数</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">⓪ 解釈</td><td>L1 呼び出し・検証・再試行・interpretations 確認</td><td class="mono">run, _parseAndValidate</td></tr>
+        <tr><td class="mono">① 一次検索</td><td>proximity 解決・種別分岐・曖昧/広すぎクラリファイ・near-extent・scope・within・bbox 確定</td><td class="mono">_resolveProximity, _resolveAnchor, _resolveStation/Locality/PoiOrAddress, _narrowBroadProximity, _buildDidYouMean, _nearExtentForType, _bboxExceedsLimit</td></tr>
+        <tr><td class="mono">② Step1 収集</td><td>グリッド構築・target/condition 収集・L2 フィルタ・過密昇格</td><td class="mono">_collectCandidates, _applyCategoryFilter, _rateMain, _resolveOverflow, _findPromotableAnchor</td></tr>
+        <tr><td class="mono">③ Step2 評価</td><td>ハード除外（same_building/floors）・スコア・ティア</td><td class="mono">_evaluate, _assignTiers</td></tr>
+        <tr><td class="mono">④ 結果</td><td>表示・申し送りノート・フィードバック・追加絞り込み</td><td class="mono">_showResults, _exclusionNote, _handleFeedback, _narrowWithin, _narrowByFloors</td></tr>
       </tbody>
     </table></div>
   </section>
