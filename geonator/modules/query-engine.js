@@ -1354,21 +1354,26 @@ class QueryEngine {
     if (!inferred) return;
     const isMin = inferred.maxMinutes != null;
     const val = isMin ? inferred.maxMinutes : inferred.maxMeters;
-    // proximityアンカーと同じ場所を指す condition は、walk-time が「アンカーからの到達範囲」を
-    // 縛るもの＝proximity.within のはず（例:「入谷二丁目の交差点から徒歩1分」でL1が入谷二丁目を
-    // condition にも複製し、徒歩1分をそのcondition距離に付けてしまうケース）。この場合は within を
-    // 落とすと収集bboxが既定NEAR幅(~800m)に膨らみTQが激増するため、dupとみなさず within 化する。
-    const anchorTexts = new Set(
-      (schema.proximity.anchors || []).map(a => (a.text || '').trim()).filter(Boolean)
+    // 「徒歩1分」は本来 anchor→target の到達範囲＝proximity.within。だがL1は anchor や target を
+    // condition にも複製し、その walk-time を condition 距離に付けてしまうことがある（例:「入谷駅から
+    // 徒歩1分のスターバックス」→ スターバックスが target かつ condition[very_close/1min]）。その場合
+    // dupCond ガードが within を落とし、収集bboxが既定NEAR幅（駅なら出口×600m=~1750m）に膨らみ
+    // isochroneも使われない。→ 複製元が anchor か target のどちらかなら「walk-timeは within」とみなす。
+    // 別物（ローソンから徒歩5分 等）の condition だけが本物の condition 距離として within を抑える。
+    const mirrorTexts = new Set(
+      [
+        ...(schema.proximity.anchors || []).map(a => a.text || ''),
+        schema.target?.text || '',
+      ].map(t => t.trim()).filter(Boolean)
     );
     const dupCond = (schema.conditions || []).some(c => {
       const d = c.distance || {};
       const matches = isMin ? d.minutes === val : d.meters === val;
       if (!matches) return false;
-      if (anchorTexts.has((c.text || '').trim())) return false; // アンカー複製condition → withinを縛る
+      if (mirrorTexts.has((c.text || '').trim())) return false; // anchor/target 複製 → within を縛る
       return true;
     });
-    if (dupCond) return; // その距離は（アンカーとは別の）condition のもの → within にしない
+    if (dupCond) return; // その距離は（anchor/targetとは別の）condition のもの → within にしない
     schema.proximity.within = inferred;
   }
 
