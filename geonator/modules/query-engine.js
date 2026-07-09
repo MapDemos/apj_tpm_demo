@@ -404,6 +404,14 @@ class QueryEngine {
     this._pf('③ Step2：距離評価・採点・ティア', _t3);
     this.ui.drawPolygons?.(this.mcp._evalPolygons);
 
+    // [debug] TQ実行数の用途別内訳（出口取得/建物収集/条件…）。実発行数と、括弧内は cacheヒット数。
+    if (this.ui.isDebug?.()) {
+      const by = this.mcp._tqByPurpose || {}, hit = this.mcp._tqHitsByPurpose || {};
+      const keys = [...new Set([...Object.keys(by), ...Object.keys(hit)])].sort((a, b) => (by[b] || 0) - (by[a] || 0));
+      const rows = keys.map(k => `  ${k}: ${by[k] || 0} 回発行 (+${hit[k] || 0} cache)`);
+      console.log(`[TQ内訳] 合計 実発行 ${this.mcp._tqRequests} 回 / cache ${this.mcp._tqCacheHits} 回\n${rows.join('\n')}`);
+    }
+
     // Debug: evaluation breakdown (with score + tier)
     const dbgRow = c => ({ name: c.name || '(名前なし)', score: c._matchInfo?.score ?? 0, tier: c._tier, rel: c._relevance, hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [], floors: c._matchInfo?.floors ?? null });
     this._dbgReport.evaluation = {

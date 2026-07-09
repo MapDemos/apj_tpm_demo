@@ -28,6 +28,8 @@ class MapboxMCPClient {
     this._sbRequests     = 0;   // Search Box API request count (reset by index.js on chat clear)
     this._tqRequests     = 0;   // Tilequery API request count (actual fetches only)
     this._tqCacheHits    = 0;   // Tilequery cache hits
+    this._tqByPurpose    = {};  // 用途別 TQ実行数（デバッグ内訳）
+    this._tqHitsByPurpose = {}; // 用途別 TQキャッシュヒット数（デバッグ内訳）
     this._isoRequests    = 0;   // Isochrone API request count (actual fetches only)
     this._isoCacheHits   = 0;   // Isochrone cache hits (within-run isoCache)
     this._siRequests     = 0;   // Static Images API request count（地図OFF時の静的地図。index.js が加算）
@@ -50,6 +52,8 @@ class MapboxMCPClient {
     this._sbRequests = 0;
     this._tqRequests = 0;
     this._tqCacheHits = 0;
+    this._tqByPurpose = {};
+    this._tqHitsByPurpose = {};
     this._isoRequests = 0;
     this._isoCacheHits = 0;
     this._siRequests = 0;
@@ -437,13 +441,15 @@ class MapboxMCPClient {
    * Coordinates are snapped to a grid before caching so nearby calls share results.
    * _tqRequests counts only real API calls; _tqCacheHits counts saved calls.
    */
-  async _fetchTilequeryWithCache(url) {
+  async _fetchTilequeryWithCache(url, purpose = null) {
+    // 用途ラベル：呼び出し元が明示 purpose を渡せばそれ、無ければ URL の layers/tileset から推定。
+    // デバッグ時に「出口取得/建物(マンション)収集/条件…」ごとのTQ実行数内訳をログするため。
+    const p = purpose || this._tqPurposeFromUrl(url);
     const snappedUrl = this._snapTilequeryUrl(url);
     const cached = this._tqCache.get(snappedUrl);
     if (cached) {
       this._tqCacheHits++;
-      if (this.config.DEBUG)
-        console.log(`[TQ cache HIT #${this._tqCacheHits}] saves=${this._tqCacheHits} actual=${this._tqRequests}`);
+      (this._tqHitsByPurpose ||= {})[p] = (this._tqHitsByPurpose[p] || 0) + 1;
       return { ok: true, json: async () => cached };
     }
     if (this.app?._cancelled) return { ok: true, json: async () => ({ features: [] }) }; // キャンセル中は新規発行しない
@@ -454,11 +460,26 @@ class MapboxMCPClient {
       return { ok: true, json: async () => ({ features: [] }) };
     }
     this._tqRequests++;
+    (this._tqByPurpose ||= {})[p] = (this._tqByPurpose[p] || 0) + 1; // 用途別 実行数（実発行のみ）
     const res = await this._fetchWithRetry(snappedUrl);
     if (!res.ok) return res;
     const data = await res.json();
     this._tqCache.set(snappedUrl, data);
     return { ok: true, json: async () => data };
+  }
+
+  /** Tilequery URL から用途ラベルを推定（layers / tileset ベース）。デバッグ内訳ログ用。 */
+  _tqPurposeFromUrl(url) {
+    if (/busstop_gov/.test(url)) return 'バス停(tileset)';
+    const m = url.match(/[?&]layers=([^&]+)/);
+    const layers = m ? decodeURIComponent(m[1]) : '';
+    if (/transit_stop_label/.test(layers)) return '駅transit(出口/バス停)'; // 呼び出し元で明示上書き推奨
+    if (/poi_label/.test(layers))          return '建物/POIグリッド収集';
+    if (/building/.test(layers))           return '建物属性(階数/同ビルID)';
+    if (/\broad\b/.test(layers))           return '道路系(交差点/信号/道路/線路)';
+    if (/water/.test(layers))              return '水域(川/湖/海)';
+    if (/natural|landuse/.test(layers))    return '自然物(公園/緑地等)';
+    return `other(${layers || '?'})`;
   }
 
   // Search expansion helpers
@@ -1413,7 +1434,7 @@ class MapboxMCPClient {
         const url =
           `${this.config.TILEQUERY_API}/${gLng},${gLat}.json` +
           `?access_token=${this.token}&radius=${GRID_RADIUS}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=transit_stop_label&geometry=point`;
-        const res = await this._fetchTilequeryWithCache(url);
+        const res = await this._fetchTilequeryWithCache(url, 'バス停(位置・条件)');
         if (!res.ok) return [];
         const data = await res.json();
         return (data.features || [])
@@ -2588,7 +2609,7 @@ class MapboxMCPClient {
       `&dedupe=true&layers=transit_stop_label`;
 
     try {
-      const res = await this._fetchTilequeryWithCache(url);
+      const res = await this._fetchTilequeryWithCache(url, '出口(駅出入口)');
       if (!res.ok) return [];
       const data = await res.json();
       // 出入口だけ拾う（maki または stop_type のどちらで entrance と付いていてもOK）。
