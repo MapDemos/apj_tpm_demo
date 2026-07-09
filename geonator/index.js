@@ -530,6 +530,11 @@ class LocationFinderApp {
         (self._condLegend ||= []).push({ label: label || `条件${ci + 1}`, color: P[ci % P.length] });
         self._rebuildLegend();
       },
+      // Tilequeryグリッド（各収集点の半径円）をデバッグ地図に描画。デバッグモード時のみ。
+      drawGrid(circles) {
+        if (!self._debugMode || !self._mapActive() || !self._dbg || !circles?.length) return;
+        self._drawGridCircles(circles);
+      },
       drawPolygons(features) {
         if (!self._mapActive() || !self._dbg || !features?.length) return;
         // Cap to keep the map readable / performant
@@ -886,7 +891,7 @@ class LocationFinderApp {
   _isolateStep(stepId) {
     const GROUPS = {
       'step-proximity': ['dbg-proximity-c', 'dbg-bboxes-l', 'dbg-bbox-labels-sym'],
-      'step-collect':   ['dbg-search-hits-c', 'dbg-search-hits-l', 'dbg-tq-hits-c', 'dbg-tq-hits-l', 'dbg-clusters-ring', 'dbg-clusters-label'],
+      'step-collect':   ['dbg-grid-fill', 'dbg-grid-line', 'dbg-grid-pts-c', 'dbg-search-hits-c', 'dbg-search-hits-l', 'dbg-tq-hits-c', 'dbg-tq-hits-l', 'dbg-clusters-ring', 'dbg-clusters-label'],
       'step-eval':      ['dbg-eval-polys-fill', 'dbg-eval-polys-line', 'dbg-route-buf-f', 'dbg-route-line-l', 'dbg-route-labels-sym'],
     };
     const ALL = Object.values(GROUPS).flat();
@@ -913,6 +918,9 @@ class LocationFinderApp {
       `<div class="legend-row"><span class="legend-dot" style="background:${color};${extra}"></span>${_esc(text)}</div>`;
     const rows = [
       row('#f97316', en ? 'proximity / search area' : 'proximity / 検索範囲'),
+      ...(this._debugMode ? [
+        `<div class="legend-row"><span class="legend-dot legend-circle-only" style="border-color:#34d399"></span>${_esc(en ? 'Tilequery grid' : 'Tilequeryグリッド')}</div>`,
+      ] : []),
       row('#06b6d4', en ? 'target candidates' : 'target候補'),
       ...(this._condLegend || []).map(c => row(c.color, `${en ? 'condition' : '条件'}: ${c.label}`)),
       row('#8b5cf6', en ? 'reach area (eval)' : '評価範囲(到達圏)'),
@@ -1792,6 +1800,8 @@ class LocationFinderApp {
       bboxes:      { type: 'FeatureCollection', features: [] },
       bboxLabels:  { type: 'FeatureCollection', features: [] },
       evalPolys:   { type: 'FeatureCollection', features: [] },  // Step2 isochrone/radius reach polygons
+      grid:        { type: 'FeatureCollection', features: [] },  // Tilequery collection grid (per-point radius circles)
+      gridPts:     { type: 'FeatureCollection', features: [] },  // Tilequery grid center points
       clusters:    { type: 'FeatureCollection', features: [] },  // DBSCAN cluster centers
       routeBuf:    { type: 'FeatureCollection', features: [] },
       routeLine:   { type: 'FeatureCollection', features: [] },
@@ -1825,6 +1835,19 @@ class LocationFinderApp {
         paint: { 'line-color': '#a78bfa', 'line-width': 1, 'line-opacity': 0.5,
                  'line-dasharray': ['literal', [2, 2]] } },
     ]);
+
+    // Emerald: Tilequery collection grid — per-point radius circles + center dots.
+    // Drawn under the hit points so hits stay readable. Debug-mode only.
+    add('dbg-grid', this._dbg.grid, [
+      { id: 'dbg-grid-fill', type: 'fill',
+        paint: { 'fill-color': '#10b981', 'fill-opacity': 0.05 } },
+      { id: 'dbg-grid-line', type: 'line',
+        paint: { 'line-color': '#34d399', 'line-width': 0.8, 'line-opacity': 0.5 } },
+    ]);
+    add('dbg-grid-pts', this._dbg.gridPts, [{
+      id: 'dbg-grid-pts-c', type: 'circle',
+      paint: { 'circle-radius': 2, 'circle-color': '#34d399', 'circle-opacity': 0.85 },
+    }]);
 
     // Teal: Search Box hit points + labels
     add('dbg-search-hits', this._dbg.searchHits, [
@@ -1975,6 +1998,7 @@ class LocationFinderApp {
       { layer: 'dbg-proximity-c',    step: 'step-proximity', label: () => 'proximityアンカー（基準点）' },
       { layer: 'dbg-bboxes-l',       step: 'step-proximity', label: f => `検索範囲 bbox（${f?.properties?.label || ''}）` },
       { layer: 'dbg-eval-polys-fill',step: 'step-eval',      label: () => '評価範囲（isochrone/半径）' },
+      { layer: 'dbg-grid-pts-c',     step: 'step-collect',   label: () => 'Tilequery収集グリッド（各点から半径ぶんを問い合わせ）' },
       { layer: 'dbg-search-hits-c',  step: 'step-collect',   label: f => `target候補: ${f?.properties?.name || ''}` },
       { layer: 'dbg-tq-hits-c',      step: 'step-collect',   label: f => `条件候補: ${f?.properties?.name || ''}` },
     ];
@@ -1995,12 +2019,12 @@ class LocationFinderApp {
   _clearDebugLayers() {
     if (!this._dbg) return;
     Object.keys(this._dbg).forEach(k => { this._dbg[k].features = []; });
-    ['dbg-proximity','dbg-bboxes','dbg-bbox-labels','dbg-eval-polys','dbg-search-hits','dbg-clusters','dbg-tq-hits','dbg-route-buf','dbg-route-line','dbg-route-labels'].forEach(id => {
+    ['dbg-proximity','dbg-bboxes','dbg-bbox-labels','dbg-eval-polys','dbg-grid','dbg-grid-pts','dbg-search-hits','dbg-clusters','dbg-tq-hits','dbg-route-buf','dbg-route-line','dbg-route-labels'].forEach(id => {
       try { this.map.getSource(id)?.setData({ type: 'FeatureCollection', features: [] }); } catch(_){}
     });
     // Reset any step isolation: make all debug layers visible again for the next run.
     this._isolatedStep = null;
-    ['dbg-proximity-c','dbg-bboxes-l','dbg-bbox-labels-sym','dbg-search-hits-c','dbg-search-hits-l','dbg-tq-hits-c','dbg-tq-hits-l','dbg-clusters-ring','dbg-clusters-label','dbg-eval-polys-fill','dbg-eval-polys-line','dbg-route-buf-f','dbg-route-line-l','dbg-route-labels-sym'].forEach(lid => {
+    ['dbg-proximity-c','dbg-bboxes-l','dbg-bbox-labels-sym','dbg-grid-fill','dbg-grid-line','dbg-grid-pts-c','dbg-search-hits-c','dbg-search-hits-l','dbg-tq-hits-c','dbg-tq-hits-l','dbg-clusters-ring','dbg-clusters-label','dbg-eval-polys-fill','dbg-eval-polys-line','dbg-route-buf-f','dbg-route-line-l','dbg-route-labels-sym'].forEach(lid => {
       try { if (this.map.getLayer(lid)) this.map.setLayoutProperty(lid, 'visibility', 'visible'); } catch(_){}
     });
     document.getElementById('mapLegend').style.display = 'none';
@@ -2036,6 +2060,41 @@ class LocationFinderApp {
       properties: { label },
     });
     try { this.map.getSource('dbg-bbox-labels')?.setData(this._dbg.bboxLabels); } catch(_){}
+    document.getElementById('mapLegend').style.display = 'block';
+  }
+
+  /**
+   * Draw the Tilequery collection grid: one radius circle per grid point + a center dot.
+   * `circles` = [{lng, lat, radius}]. Deduped by rounded coord (shared grids repeat points),
+   * capped for performance/readability.
+   */
+  _drawGridCircles(circles) {
+    if (!this._dbg || !circles?.length) return;
+    const GRID_CAP = 800;
+    const seen = new Set();
+    const uniq = [];
+    for (const c of circles) {
+      if (c?.lng == null || c?.lat == null) continue;
+      const key = `${c.lng.toFixed(5)},${c.lat.toFixed(5)},${c.radius}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniq.push(c);
+      if (uniq.length >= GRID_CAP) break;
+    }
+    const circleFeatures = [];
+    const ptFeatures = [];
+    for (const { lng, lat, radius } of uniq) {
+      try {
+        circleFeatures.push(turf.circle([lng, lat], radius, { steps: 24, units: 'meters' }));
+      } catch (_) {}
+      ptFeatures.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: {} });
+    }
+    this._dbg.grid.features    = circleFeatures;
+    this._dbg.gridPts.features = ptFeatures;
+    try {
+      this.map.getSource('dbg-grid')?.setData(this._dbg.grid);
+      this.map.getSource('dbg-grid-pts')?.setData(this._dbg.gridPts);
+    } catch (_) {}
     document.getElementById('mapLegend').style.display = 'block';
   }
 

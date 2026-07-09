@@ -40,6 +40,8 @@ class MapboxMCPClient {
     this._primarySearchIds     = new Set(); // IDs from primary_search (cleared at step1_main)
     this._lastIsochroneData = null; // visualization用
     this._evalPolygons      = []; // Step2 evaluation reach polygons (circle/isochrone) for map drawing
+    this._gridCircles       = []; // Tilequery grid points {lng,lat,radius} for debug map drawing
+    this._gridPointsCache   = new Map(); // gridKey → {points,radius}（cache HIT時もグリッド可視化するため）
   }
 
   /** Reset per-query API request counters (called at each new query; caps are per-query). */
@@ -1118,6 +1120,8 @@ class MapboxMCPClient {
     const gridKey  = `${Math.round(centerLat * 10000)},${Math.round(centerLng * 10000)},r${radius},${bboxKey}`;
     if (this._poiGridCache.has(gridKey)) {
       if (this.config.DEBUG) console.log(`[POI grid cache HIT] ${gridKey}`);
+      const cp = this._gridPointsCache.get(gridKey);
+      if (cp) this._recordGridCircles(cp.points, cp.radius); // cache HIT でもグリッドを可視化
       return this._poiGridCache.get(gridKey);
     }
     const DEG_LNG = 1 / (111320 * Math.cos(centerLat * Math.PI / 180));
@@ -1197,6 +1201,10 @@ class MapboxMCPClient {
     if (this.config.DEBUG)
       console.log(`[MapboxMCP] グリッドTilequery: ${gridPoints.length}点 × r=${radius}m`);
 
+    // グリッド点＋半径を記録（デバッグ地図で可視化・cache用にも保存）
+    this._gridPointsCache.set(gridKey, { points: gridPoints, radius });
+    this._recordGridCircles(gridPoints, radius);
+
     const results = await Promise.all(
       gridPoints.map(([gLng, gLat]) => this._tilequeryBuildingSearch(gLat, gLng, radius))
     );
@@ -1221,6 +1229,11 @@ class MapboxMCPClient {
 
     this._poiGridCache.set(gridKey, gridResult);
     return gridResult;
+  }
+
+  /** Record grid points (with per-point radius) for debug map visualization. */
+  _recordGridCircles(points, radius) {
+    (this._gridCircles ||= []).push(...points.map(([lng, lat]) => ({ lng, lat, radius })));
   }
 
   /**
