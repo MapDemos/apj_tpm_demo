@@ -2017,6 +2017,7 @@ class QueryEngine {
       // road / water / rail: per-candidate layer check (streets-v8 road/water layers).
       // 候補ごとに独立なので並列化（結果は候補順に同期適用するので挙動は同一）。
       if (isLineCond(cond.type)) {
+        const _tLine = this._pnow();
         const roadOpts = cond.type === 'road' ? this._roadOpts(cond.text) : null;
         const results = await Promise.all(mainCandidates.map(main => {
           const lat = main.latitude ?? main.lat, lng = main.longitude ?? main.lng;
@@ -2024,6 +2025,7 @@ class QueryEngine {
           if (cond.type === 'rail') return this.mcp.railNear(lat, lng, refM);
           return this.mcp.waterNear(lat, lng, refM);
         }));
+        this._pf(`　└ Step2 line条件[${label}/${cond.type}]候補${mainCandidates.length}件`, _tLine);
         mainCandidates.forEach((main, i) => {
           const res = results[i];
           const near = res.matched && res.nearestM != null && res.nearestM <= refM;
@@ -2045,7 +2047,9 @@ class QueryEngine {
       const dir = cond.direction || null; // 「南側にアパホテル」→ item must be south of candidate
       // Build reach polygons on the fewer-cardinality side (fewer isochrone calls,
       // and centers the reach on the fixed reference — correct for "X分以内 from anchor").
+      const _tPoi = this._pnow();
       const matches = await this.mcp.evaluateDistanceBatch(mainCandidates, condItems, distParams, isoCache, dir);
+      this._pf(`　└ Step2 poi条件[${label}]候補${mainCandidates.length}×items${condItems.length}`, _tPoi);
       if (cond.negate) {
         // negate: 近くに該当POIがある候補を除外し、無い候補が満たす。
         for (const main of mainCandidates) {
