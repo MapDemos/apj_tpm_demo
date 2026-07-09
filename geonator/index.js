@@ -687,7 +687,12 @@ class LocationFinderApp {
       const anchors = (s.proximity?.anchors || []).map(a => `${a.text}[${a.type}/${a.specificity}]`).join(', ');
       L.push('');
       L.push('【QuerySchema】');
-      L.push(`・proximity: ${anchors}${s.proximity?.bearing_filter ? ' 方角=' + s.proximity.bearing_filter : ''}`);
+      const _w = s.proximity?.within;
+      const _within = _w
+        ? (_w.level ?? ((_w.maxMinutes ?? _w.minutes) != null ? `${_w.maxMinutes ?? _w.minutes}分(${_w.profile || 'walking'})` : ((_w.maxMeters ?? _w.meters) != null ? `${_w.maxMeters ?? _w.meters}m` : '?')))
+        : '(なし)';
+      const _scope = s.proximity?.scope ? (s.proximity.scope.text || JSON.stringify(s.proximity.scope)) : '(なし)';
+      L.push(`・proximity: ${anchors}  within=${_within}  scope=${_scope}${s.proximity?.bearing_filter ? ' 方角=' + s.proximity.bearing_filter : ''}`);
       L.push(`・target: ${s.target?.text}  intent=${s.target?.query_intent}`);
       (s.conditions || []).forEach(c => {
         const d = c.distance || {};

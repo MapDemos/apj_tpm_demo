@@ -231,6 +231,9 @@ class QueryEngine {
     // Fallback: L1 sometimes drops the structured target.floors, or mis-classifies a
     // building-height container ("タワマンの中の…") as a literal POI condition. Recover both.
     this._applyFloorsInference(schema, userText);
+    // Fallback: L1（特にSonnet）は「徒歩1分以内」等の within を間欠的に落とす（→到達圏未構築で
+    // 広域化し「候補が多すぎ」）。テキストから決定的に復元してモデルのブレを吸収する。
+    this._applyWithinInference(schema, userText);
 
     // [A] structural checks
     const issues = structuralChecks(schema);
@@ -288,6 +291,7 @@ class QueryEngine {
       fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
       // Same floors recovery as _parseAndValidate across clarify/refine re-parses.
       this._applyFloorsInference(schema, combined);
+      this._applyWithinInference(schema, combined);
       return schema;
     } catch (e) {
       this.ui.showMessage(this._friendlyError(e));
@@ -1310,6 +1314,41 @@ class QueryEngine {
     if (/(背の高い|(高い|でかい)(建物|ビル|マンション))/.test(text))                    return { min: 10 };
     if (/(低層|背の低い|平屋)/.test(text))                                              return { max: 3 };
     return null;
+  }
+
+  /** テキストから proximity.within（基準点からの到達範囲）を推定する保険。
+   *  L1（特にSonnet）が「徒歩1分以内」等の within を間欠的に落とす対策。落ちると到達圏が
+   *  作られず広域化して「候補が多すぎます」になるため、テキストから決定的に復元する。 */
+  _inferWithin(text) {
+    if (!text) return null;
+    let m;
+    if ((m = text.match(/(?:徒歩|歩いて)\s*(\d{1,3})\s*分/)))          return { profile: 'walking', maxMinutes: parseInt(m[1], 10), profile_inferred: false };
+    if ((m = text.match(/(?:自転車|チャリ)(?:で)?\s*(\d{1,3})\s*分/))) return { profile: 'cycling', maxMinutes: parseInt(m[1], 10), profile_inferred: false };
+    if ((m = text.match(/(?:車|クルマ)(?:で)?\s*(\d{1,3})\s*分/)))     return { profile: 'driving', maxMinutes: parseInt(m[1], 10), profile_inferred: false };
+    // 手段なしの「N分以内」→ 徒歩を仮定（profile_inferred=true・JSが後段で通知）
+    if ((m = text.match(/(\d{1,3})\s*分以内/)))                        return { profile: 'walking', maxMinutes: parseInt(m[1], 10), profile_inferred: true };
+    if ((m = text.match(/(\d+(?:\.\d+)?)\s*(?:km|ｋｍ|キロ(?:メートル)?)\s*以内/))) return { maxMeters: Math.round(parseFloat(m[1]) * 1000) };
+    if ((m = text.match(/(\d+(?:\.\d+)?)\s*(?:m|ｍ|メートル)\s*以内/)))            return { maxMeters: Math.round(parseFloat(m[1])) };
+    return null;
+  }
+
+  /** L1が within を落とした/壊した時、テキストから復元する（floors の _applyFloorsInference と同じ思想）。
+   *  取り違え防止：同じ時間/距離を明示的に持つ condition があれば、その距離は condition 用とみなし within化しない。 */
+  _applyWithinInference(schema, text) {
+    if (!schema?.proximity) return;
+    const w = schema.proximity.within;
+    const active = !!(w && (w.level || w.minMinutes != null || w.maxMinutes != null || w.minutes != null || w.maxMeters != null || w.meters != null));
+    if (active) return; // L1が有効な within を出せている → 触らない
+    const inferred = this._inferWithin(text);
+    if (!inferred) return;
+    const isMin = inferred.maxMinutes != null;
+    const val = isMin ? inferred.maxMinutes : inferred.maxMeters;
+    const dupCond = (schema.conditions || []).some(c => {
+      const d = c.distance || {};
+      return isMin ? d.minutes === val : d.meters === val;
+    });
+    if (dupCond) return; // その距離は condition のもの → within にしない
+    schema.proximity.within = inferred;
   }
 
   /** floorsハード判定: 実階数 f が spec を満たすか（value は丸め誤差を FLOORS_HARD_TOL で許容）。 */
