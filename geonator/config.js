@@ -9,7 +9,7 @@
 const CONFIG = {
 
   // ビルド確認用バージョン（キャッシュで古いJSを読んでいないかの切り分けに使う）。変更ごとに更新。
-  APP_VERSION: '2026-07-09.1311',
+  APP_VERSION: '2026-07-09.1320',
 
   // ============================================
   // API KEYS
@@ -23,24 +23,23 @@ const CONFIG = {
   // CLAUDE SETTINGS
   // ============================================
 
-  CLAUDE_MODEL:    'claude-sonnet-4-6',
+  CLAUDE_MODEL:    'claude-haiku-4-5-20251001',
   MAX_TOKENS:      16000,
   TEMPERATURE:     0,
   MAX_TOOL_TURNS:  20,   // max agentic loop iterations
 
   // Per-role models (JS-driven arch). Changeable from the ⚙️ settings modal.
-  L1_MODEL:        'claude-sonnet-4-6',         // query parsing（最も推論が重い工程。proximity/target切り分け・「AとBの間」・intent等の判断精度が全体を左右→Sonnet既定）
-  L1_CONFIRM_MODEL:'claude-haiku-4-5-20251001', // 高速確認文（L1と並行実行。真っ先に「〜を探しますね」を出すためHaikuで軽量に）
-  // L2 is split into two independent checks (both changeable in settings):
-  //   L2-1 = 通常クエリのcategory妥当性チェック（poi_category/class を見る・軽量→Haiku既定）
-  //   L2-2 = Targetの関連性チェック（名前ベースのニュアンス判定→Sonnet既定）
-  L2_1_MODEL:      'claude-sonnet-4-6',         // category validity（分野判断にニュアンスが要る→Sonnet既定。Haikuは飲食下位分類等を誤除外しがち）
-  L2_2_MODEL:      'claude-sonnet-4-6',         // target relevance（名前ニュアンス→Sonnet既定）
-  L3_MODEL:        'claude-haiku-4-5-20251001', // 絞り込み提案（近傍ランドマークから目印提案→Haiku既定）
+  // 全ロール Haiku 既定（速さ優先）。load-bearing フィールド(within/floors)はJS保険で復元、
+  // relevance/解析もHaikuで実用十分と確認済み。精度を上げたい役割だけ設定画面で Sonnet 等へ。
+  L1_MODEL:        'claude-haiku-4-5-20251001', // query parsing（proximity/target切り分け・intent等）
+  L1_CONFIRM_MODEL:'claude-haiku-4-5-20251001', // 高速確認文（L1と並行・真っ先に「〜を探しますね」）
+  // L2-1 = category妥当性チェック（poi_category/class）／L2-2 = Target関連性（名前ベース4段階）
+  L2_1_MODEL:      'claude-haiku-4-5-20251001', // category validity
+  L2_2_MODEL:      'claude-haiku-4-5-20251001', // target relevance
+  L3_MODEL:        'claude-haiku-4-5-20251001', // 絞り込み提案（近傍ランドマークから目印提案）
   // L1-3 = 広域proximityの絞り込み提案（例:「鎌倉市」→ 鎌倉駅/北鎌倉/材木座…を世界知識から列挙）。
-  // JSが各候補をSearch Boxで実在検証・空間で散らす・上限適用するので、実在する地名を精度良く挙げる
-  // 力が要る → Sonnet既定（Haiku/Sonnet5にも設定画面で変更可）。※1次検索の前段。L3(後段)とは別。
-  L1_3_MODEL:      'claude-sonnet-4-6',
+  // JSが各候補をSearch Boxで実在検証・空間で散らす・上限適用する。※1次検索の前段。L3(後段)とは別。
+  L1_3_MODEL:      'claude-haiku-4-5-20251001',
   CLARIFY_MAX_CHOICES: 5,  // 広域絞り込み/もしかしての提案ボタン上限（超過分は空間的に散らして間引き）
   // 曖昧な「近く」(within無指定)の探索半径を anchor種別で変える（収集extentの既定・decisionはJS）。
   // conditionのマッチング距離(DISTANCE_TABLE)とは無関係。広め収集でも採点は実距離で並ぶので精度は保たれる。
