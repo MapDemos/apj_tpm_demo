@@ -2591,8 +2591,15 @@ class MapboxMCPClient {
       const res = await this._fetchTilequeryWithCache(url);
       if (!res.ok) return [];
       const data = await res.json();
+      // 出入口だけ拾う（maki または stop_type のどちらで entrance と付いていてもOK）。
+      // mode は見ない：出入口は鉄道/地下鉄(mode=rail/metro_rail)専用でバス停は entrance 型を
+      // 持たないため、entrance 判定だけでバス停は自然に除外される（mode絞りは metro_rail を
+      // 巻き込み事故で落とすので入れない）。
       return (data.features || [])
-        .filter(f => f.properties?.stop_type === 'entrance')
+        .filter(f => {
+          const p = f.properties || {};
+          return p.maki === 'entrance' || p.stop_type === 'entrance';
+        })
         .map(f => ({
           name: f.properties?.name || null,
           lat:  f.geometry.coordinates[1],
