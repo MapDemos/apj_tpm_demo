@@ -629,11 +629,19 @@ class LocationFinderApp {
               lines.push(`${r.role}(${shortModel(r.model)}): ↑${fmt(r.inTok)} ↓${fmt(r.outTok)}${cache} ・${r.calls}${en ? ' calls' : '回'}・${(r.ms / 1000).toFixed(1)}s`);
             }
           }
-          const phaseAgg = new Map();
-          for (const p of (stats.phases || [])) phaseAgg.set(p.l, (phaseAgg.get(p.l) || 0) + p.ms);
+          // 区間ごとの時間＋発行TQ数（p.tq は累積なので前区間との差を取る＝その区間で叩いたTQ）。
+          const phaseAgg = new Map(); // label → { ms, tq }
+          let prevTq = 0;
+          for (const p of (stats.phases || [])) {
+            const dTq = Math.max(0, (p.tq ?? prevTq) - prevTq);
+            prevTq = p.tq ?? prevTq;
+            const cur = phaseAgg.get(p.l) || { ms: 0, tq: 0 };
+            cur.ms += p.ms; cur.tq += dTq;
+            phaseAgg.set(p.l, cur);
+          }
           if (phaseAgg.size) {
             lines.push(en ? '— Phase breakdown (debug) —' : '── 処理内訳（デバッグ）──');
-            for (const [l, ms] of phaseAgg) lines.push(`${l}: ${(ms / 1000).toFixed(2)}s`);
+            for (const [l, v] of phaseAgg) lines.push(`${l}: ${(v.ms / 1000).toFixed(2)}s${v.tq ? ` / TQ ${v.tq}` : ''}`);
           }
         }
 

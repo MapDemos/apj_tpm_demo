@@ -55,9 +55,10 @@ class QueryEngine {
     return M.error_communication; // 穏当な既定（文言から「通信エラー」は撤去済み）
   }
 
-  /** 処理時間プロファイラ（debug表示用）。_pf(ラベル, 開始時刻) で1区間を記録。 */
+  /** 処理時間プロファイラ（debug表示用）。_pf(ラベル, 開始時刻) で1区間を記録。
+   *  tq: この区間終了時点の累積Tilequery発行数（表示側で前区間との差＝区間ごとの発行数を出す）。 */
   _pnow(){ return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
-  _pf(label, t0){ (this._prof || (this._prof = [])).push({ l: label, ms: this._pnow() - t0 }); }
+  _pf(label, t0){ (this._prof || (this._prof = [])).push({ l: label, ms: this._pnow() - t0, tq: this.mcp?._tqRequests ?? 0 }); }
 
   /** Debug-mode step gate: pause until the operator clicks "next" (no-op otherwise). */
   async _step(stepId, label, lines) {
