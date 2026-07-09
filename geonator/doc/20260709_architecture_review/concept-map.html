@@ -523,7 +523,57 @@
         <tr><td class="mono">condition margin</td><td>収集bboxの拡張幅</td><td>maxConditionRadiusM</td><td><span class="st neu">実装済</span></td></tr>
       </tbody>
     </table></div>
-    <div class="target"><h3>整理方針</h3><p>2概念に明記：<b>収集extent</b>（広めOK・取りこぼし防止）／<b>マッチ距離</b>（採点・実距離で並ぶ）。「広め収集でも精度は採点が守る」を仕様書に1行で固定。</p></div>
+
+    <p class="sec-note" style="margin-top:22px"><b>現状の bbox / isochrone サイズ 全対応表（棚卸し）</b> — 単位：<b>R=半径[m]</b>、<b>bbox一辺=2R</b>、<b>iso=[分]</b>、<b>union</b>=各点の円/isoの和を包む矩形。全ケース最後に<b>一辺≤4km</b>（<code>BBOX_MAX_HALF_M</code>=2000）でクリップ。</p>
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>種別</th><th>条件（within / 出口）</th><th>bbox の広さ</th><th>iso(分)</th></tr></thead>
+      <tbody>
+        <tr><td>点アンカー（POI/交差点/住所）</td><td>なし（曖昧近く）</td><td>R=400m（1点）※feature.bbox優先</td><td>なし</td></tr>
+        <tr><td>点アンカー</td><td>within=level</td><td>R=level値（下表）（1点）</td><td>なし</td></tr>
+        <tr><td>点アンカー</td><td>徒歩/自転車/車 n分以内</td><td>iso外接（1点）</td><td>n分</td></tr>
+        <tr><td>点アンカー</td><td>n分以上[m分以内]（ドーナツ）</td><td>外iso(m分)外接、内iso(n分)を穴で除外（1点）</td><td>内n / 外m</td></tr>
+        <tr><td>点アンカー</td><td>Nm/Nkm以内</td><td>R=指定値（1点）</td><td>なし</td></tr>
+        <tr><td>一般地名（locality）</td><td>なし</td><td>地名bbox＋300mマージン／点解決時 R=800m</td><td>なし</td></tr>
+        <tr><td>一般地名</td><td>within=level / n分 / Nm</td><td>代表1点に点アンカーと同じ</td><td>同左</td></tr>
+        <tr><td>駅</td><td>なし</td><td>全出口 × R=600m の <b>union</b></td><td>なし</td></tr>
+        <tr><td>駅</td><td>出口指定・なし</td><td>指定1出口 × R=600m</td><td>なし</td></tr>
+        <tr><td>駅</td><td>徒歩n分以内（出口指定なし）</td><td>全出口(最大8) × n分iso の <b>union</b></td><td>n分 ×出口数</td></tr>
+        <tr><td>駅</td><td>出口指定・徒歩n分以内</td><td>指定1出口 × n分iso</td><td>n分 ×1</td></tr>
+        <tr><td>駅</td><td>Nm以内（出口指定なし）</td><td>全出口 × R=指定値 の <b>union</b></td><td>なし</td></tr>
+        <tr><td>駅</td><td>出口指定・Nm以内</td><td>指定1出口 × R=指定値</td><td>なし</td></tr>
+        <tr><td>駅</td><td>n分以上[m分]（ドーナツ）</td><td><b>先頭出口1点のみ</b>の外iso(m分)外接</td><td>内n / 外m ×1</td></tr>
+        <tr><td>generic（「駅の近く」等・scope無し）</td><td>―</td><td>bbox生成せず→<b>明確化を質問</b></td><td>―</td></tr>
+        <tr><td>scope（範囲・アンカーではない）</td><td>―</td><td>feature.bbox／無ければ R=5000m</td><td>なし</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="cols2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
+      <div>
+        <p class="sec-note" style="margin:0 0 6px"><b>within=level の R 値</b></p>
+        <div class="tbl-scroll"><table style="min-width:0">
+          <thead><tr><th>level</th><th>R</th></tr></thead>
+          <tbody>
+            <tr><td>adjacent（目の前）</td><td>50m</td></tr>
+            <tr><td>roadside（沿い）</td><td>100m</td></tr>
+            <tr><td>very_close（すぐ近く）</td><td>150m</td></tr>
+            <tr><td>nearby</td><td>400m</td></tr>
+            <tr><td>somewhat_nearby</td><td>800m</td></tr>
+            <tr><td>far</td><td>―（pushback・bbox生成せず）</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div>
+        <p class="sec-note" style="margin:0 0 6px"><b>補足（漏れ防止）</b></p>
+        <ul style="font-size:12.5px;color:var(--ink-2);line-height:1.7;margin:0;padding-left:18px">
+          <li><b>near-extent（within無し）の R は種別依存</b>：POI/交差点/住所=400m、駅=600m、地名(点)=800m。駅は各出口に600m上乗せ→出口が散ると一辺が大きくなる。</li>
+          <li><b>iso失敗時の半径近似</b>：分 × walking 80 / cycling 250 / driving 500（m/分）。</li>
+          <li><b>収集グリッド</b>（bboxとは別・1点あたりの問い合わせ半径）：建物/POI=65m、バス停/交差点/信号=500m（上限探索1000m）。within到達圏がある時はグリッドを到達圏unionに限定。</li>
+          <li>表の「R=…」は<b>半径</b>。実bbox一辺は<b>2倍</b>（union行は出口の広がり＋2R）。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="target"><h3>整理方針</h3><p>2概念に明記：<b>収集extent</b>（広めOK・取りこぼし防止）／<b>マッチ距離</b>（採点・実距離で並ぶ）。「広め収集でも精度は採点が守る」を仕様書に1行で固定。<b>near-extent（type別400/600/800）と level表（50〜800）が別系統で並存</b>している点も、reach一本化で統合対象。</p></div>
   </section>
 
   <!-- AXIS: L2 filter -->
