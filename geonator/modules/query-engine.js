@@ -1373,6 +1373,9 @@ class QueryEngine {
       if (mirrorTexts.has((c.text || '').trim())) return false; // anchor/target 複製 → within を縛る
       return true;
     });
+    console.log('[within-infer]', { text, inferred, mirrorTexts: [...mirrorTexts],
+      condTexts: (schema.conditions || []).map(c => ({ t: c.text, min: c.distance?.minutes, m: c.distance?.meters })),
+      dupCond, willSet: !dupCond });
     if (dupCond) return; // その距離は（anchor/targetとは別の）condition のもの → within にしない
     schema.proximity.within = inferred;
   }
