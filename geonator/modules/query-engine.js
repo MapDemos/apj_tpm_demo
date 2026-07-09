@@ -1558,8 +1558,10 @@ class QueryEngine {
         const items = await this.mcp.collectCondition(c, condBbox, sharedGrid);
         condResults[key] = items;
         condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
-        // [S] note if condition returned 0 items
-        if (!items || items.length === 0) {
+        // [S] note if condition returned 0 items.
+        // ただし負条件(negate=「〜が近くに無い」)の0件は「該当POIが周辺に存在しない＝全候補が
+        // 条件を満たす」＝成功なので警告しない（「見つかりませんでした/未収録」は誤解を招く）。
+        if ((!items || items.length === 0) && !c.negate) {
           this.ui.showMessage(this._m().condNotFound(key));
         }
       }));
