@@ -628,20 +628,21 @@ class QueryEngine {
     }
     const stationCoord = chosenFeat.geometry.coordinates; // [lng, lat]
 
-    // 2. Tilequery → all transit entrances
-    const entrances = await this.mcp.tilequeryTransitEntrances(stationCoord[1], stationCoord[0], 500);
+    // 2. Tilequery → transit entrances. 半径は250mに絞る：新丸子⇄武蔵小杉のように隣接駅が
+    //    近い(~400m)と、500mでは隣駅の出口まで拾ってしまい到達圏が2駅にまたがって崩れる。
+    //    自駅の出口は通常~120m以内なので250mで十分。
+    const entrances = await this.mcp.tilequeryTransitEntrances(stationCoord[1], stationCoord[0], 250);
 
-    // proximity.within 指定時（出口指定なし）：出入口を各点として返す。到達圏(within)は各出口から
-    // 張って union するので「どの出口からでも徒歩n分以内」を正しく反映する。以前は駅中心1点に
-    // 集約して出口の広がりを無視していた（出口考慮なしバグ）。大規模駅のisochrone爆発を防ぐため
-    // MAX_STATION_EXITS でcap（各出口1コール）。radiusMは付けない＝withinが範囲を決める。
+    // proximity.within 指定時（出口指定なし）：駅中心＋各出口を到達圏の起点として返す。
+    // 中心を必ず含めるのは、出口が周縁に散った時に中心付近を取りこぼす（到達圏の隙間に落ちる）
+    // のを防ぐため（union は広がるだけなので安全）。到達圏(within)は各点から張って union する
+    // ＝「駅（どの出口からでも）徒歩n分以内」。MAX_STATION_EXITSでcap。radiusMは付けない。
     if (singlePoint && !anchor.subtype?.exit) {
-      if (entrances.length > 0) {
-        const MAX_STATION_EXITS = 8;
-        const used = entrances.length > MAX_STATION_EXITS ? entrances.slice(0, MAX_STATION_EXITS) : entrances;
-        return used.map(e => ({ lng: e.lng, lat: e.lat }));
-      }
-      return [{ lng: stationCoord[0], lat: stationCoord[1] }]; // 出口取れず→駅中心1点にフォールバック
+      const MAX_STATION_EXITS = 8;
+      const pts = [{ lng: stationCoord[0], lat: stationCoord[1] }]; // 駅中心は必ず起点に含める
+      const used = entrances.length > MAX_STATION_EXITS ? entrances.slice(0, MAX_STATION_EXITS) : entrances;
+      for (const e of used) pts.push({ lng: e.lng, lat: e.lat });
+      return pts;
     }
 
     // [C-2] exit-specified
