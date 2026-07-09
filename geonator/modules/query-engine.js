@@ -361,7 +361,7 @@ class QueryEngine {
     // [3-B] collect candidates (unless cached)
     if (cacheInvalid.candidates) {
       const _t2 = this._pnow();
-      this.mcp._gridCircles = []; // TilequeryグリッドをデバッグでリセットしてこのStep1分を蓄積
+      this.mcp._gridCircles = []; this.mcp._gridCirclesSkipped = []; // TilequeryグリッドをデバッグでリセットしてこのStep1分を蓄積
       let collected = await this._collectCandidates(schema, bboxes);
       this._pf('② Step1：候補収集（合計）', _t2);
       if (!collected) return;
@@ -372,6 +372,8 @@ class QueryEngine {
         const tight = await this._resolveOverflow(schema, bboxes, collected);
         if (tight && tight.bbox) {
           if (tight.note) this.ui.showMessage(tight.note);
+          this.ui.drawNarrowBBox?.(tight.bbox); // 絞り込み後の検索bbox（debug時のみ）
+          this.mcp._gridCircles = []; this.mcp._gridCirclesSkipped = []; // 絞込後グリッドだけ描く
           const re = await this._collectCandidates(schema, { targetBbox: tight.bbox, condBbox: bboxes.condBbox });
           if (re) collected = re;
         }
@@ -381,7 +383,7 @@ class QueryEngine {
       this._cache.mainCandidates = collected.main;
       this._cache.condCandidates = collected.conditions;
       // Visualize hits
-      this.ui.drawGrid?.(this.mcp._gridCircles);
+      this.ui.drawGrid?.(this.mcp._gridCircles, this.mcp._gridCirclesSkipped);
       this.ui.drawHits?.(collected.main);
       Object.entries(collected.conditions).forEach(([label, items], ci) => this.ui.drawConditionHits?.(items, ci, label));
       this.ui.refreshCounts?.();
@@ -2410,7 +2412,7 @@ class QueryEngine {
 
     // Collect ONLY the newly-added conditions (old conditions' items come from cache).
     const condResults = { ...(this._cache.condCandidates || {}) };
-    this.mcp._gridCircles = []; // 追加条件ぶんのグリッドだけ可視化
+    this.mcp._gridCircles = []; this.mcp._gridCirclesSkipped = []; // 追加条件ぶんのグリッドだけ可視化
     const newKeys = new Set();
     for (const c of addConds) {
       const key = c.text ?? c.type;
@@ -2439,7 +2441,7 @@ class QueryEngine {
     const frozenLabels = new Set((schema.conditions || []).map(c => c.text ?? c.type));
     this.mcp._evalPolygons = [];
     const results = await this._evaluate(merged, keptPool, condResults, frozenLabels);
-    this.ui.drawGrid?.(this.mcp._gridCircles);
+    this.ui.drawGrid?.(this.mcp._gridCircles, this.mcp._gridCirclesSkipped);
     this.ui.drawHits?.(keptPool);
     Object.entries(condResults).forEach(([label, items], ci) => this.ui.drawConditionHits?.(items, ci, label));
     this.ui.drawPolygons?.(this.mcp._evalPolygons);

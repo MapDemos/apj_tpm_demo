@@ -505,6 +505,11 @@ class LocationFinderApp {
         if (!self._mapActive()) return; // 地図OFF: 描画スキップ
         if (bbox) self._dbgAddBbox(bbox);
       },
+      // 候補多すぎ(overflow)→再アンカーで絞り込んだ後の検索bbox。デバッグモード時のみ表示。
+      drawNarrowBBox(bbox) {
+        if (!self._debugMode || !self._mapActive() || !bbox) return;
+        self._drawNarrowBBox(bbox);
+      },
       drawHits(items) {
         if (!self._mapActive()) return; // 地図OFF: 描画スキップ
         self._condLegend = []; // reset per run (target drawn first, conditions appended)
@@ -531,9 +536,10 @@ class LocationFinderApp {
         self._rebuildLegend();
       },
       // Tilequeryグリッド（各収集点の半径円）をデバッグ地図に描画。デバッグモード時のみ。
-      drawGrid(circles) {
-        if (!self._debugMode || !self._mapActive() || !self._dbg || !circles?.length) return;
-        self._drawGridCircles(circles);
+      // skipped = 穴skip等で問い合わせなかった点（別スタイルで表示）。
+      drawGrid(circles, skipped) {
+        if (!self._debugMode || !self._mapActive() || !self._dbg) return;
+        self._drawGridCircles(circles, skipped);
       },
       drawPolygons(features) {
         if (!self._mapActive() || !self._dbg || !features?.length) return;
@@ -891,7 +897,7 @@ class LocationFinderApp {
   _isolateStep(stepId) {
     const GROUPS = {
       'step-proximity': ['dbg-proximity-c', 'dbg-bboxes-l', 'dbg-bbox-labels-sym'],
-      'step-collect':   ['dbg-grid-fill', 'dbg-grid-line', 'dbg-grid-pts-c', 'dbg-search-hits-c', 'dbg-search-hits-l', 'dbg-tq-hits-c', 'dbg-tq-hits-l', 'dbg-clusters-ring', 'dbg-clusters-label'],
+      'step-collect':   ['dbg-narrow-l', 'dbg-narrow-labels-sym', 'dbg-grid-fill', 'dbg-grid-line', 'dbg-grid-pts-c', 'dbg-grid-skip-fill', 'dbg-grid-skip-line', 'dbg-search-hits-c', 'dbg-search-hits-l', 'dbg-tq-hits-c', 'dbg-tq-hits-l', 'dbg-clusters-ring', 'dbg-clusters-label'],
       'step-eval':      ['dbg-eval-polys-fill', 'dbg-eval-polys-line', 'dbg-route-buf-f', 'dbg-route-line-l', 'dbg-route-labels-sym'],
     };
     const ALL = Object.values(GROUPS).flat();
@@ -920,6 +926,12 @@ class LocationFinderApp {
       row('#f97316', en ? 'proximity / search area' : 'proximity / 検索範囲'),
       ...(this._debugMode ? [
         `<div class="legend-row"><span class="legend-dot legend-circle-only" style="border-color:#34d399"></span>${_esc(en ? 'Tilequery grid' : 'Tilequeryグリッド')}</div>`,
+      ] : []),
+      ...(this._debugMode && this._dbg?.gridSkip?.features?.length ? [
+        `<div class="legend-row"><span class="legend-dot legend-circle-only" style="border-color:#fb7185;border-style:dashed"></span>${_esc(en ? 'grid skipped (hole)' : 'グリッドskip(穴)')}</div>`,
+      ] : []),
+      ...(this._debugMode && this._dbg?.narrowBbox?.features?.length ? [
+        `<div class="legend-row"><span class="legend-dot" style="background:#f43f5e"></span>${_esc(en ? 'narrowed area (overflow)' : '絞込エリア(多すぎ)')}</div>`,
       ] : []),
       row('#06b6d4', en ? 'target candidates' : 'target候補'),
       ...(this._condLegend || []).map(c => row(c.color, `${en ? 'condition' : '条件'}: ${c.label}`)),
@@ -1799,9 +1811,12 @@ class LocationFinderApp {
       tqHits:      { type: 'FeatureCollection', features: [] },
       bboxes:      { type: 'FeatureCollection', features: [] },
       bboxLabels:  { type: 'FeatureCollection', features: [] },
+      narrowBbox:  { type: 'FeatureCollection', features: [] },  // overflow re-anchor narrowed search bbox
+      narrowLabels:{ type: 'FeatureCollection', features: [] },
       evalPolys:   { type: 'FeatureCollection', features: [] },  // Step2 isochrone/radius reach polygons
       grid:        { type: 'FeatureCollection', features: [] },  // Tilequery collection grid (per-point radius circles)
       gridPts:     { type: 'FeatureCollection', features: [] },  // Tilequery grid center points
+      gridSkip:    { type: 'FeatureCollection', features: [] },  // grid points NOT queried (donut hole skip etc.)
       clusters:    { type: 'FeatureCollection', features: [] },  // DBSCAN cluster centers
       routeBuf:    { type: 'FeatureCollection', features: [] },
       routeLine:   { type: 'FeatureCollection', features: [] },
@@ -1848,6 +1863,16 @@ class LocationFinderApp {
       id: 'dbg-grid-pts-c', type: 'circle',
       paint: { 'circle-radius': 2, 'circle-color': '#34d399', 'circle-opacity': 0.85 },
     }]);
+
+    // Rose (dashed): grid circles that were NOT queried (donut hole skip). Shown so the
+    // saved coverage is visible against the queried grid.
+    add('dbg-grid-skip', this._dbg.gridSkip, [
+      { id: 'dbg-grid-skip-fill', type: 'fill',
+        paint: { 'fill-color': '#f43f5e', 'fill-opacity': 0.04 } },
+      { id: 'dbg-grid-skip-line', type: 'line',
+        paint: { 'line-color': '#fb7185', 'line-width': 0.8, 'line-opacity': 0.5,
+                 'line-dasharray': ['literal', [2, 2]] } },
+    ]);
 
     // Teal: Search Box hit points + labels
     add('dbg-search-hits', this._dbg.searchHits, [
@@ -1947,6 +1972,18 @@ class LocationFinderApp {
       paint: labelPaint,
     }]);
 
+    // Rose solid: overflow re-anchor narrowed search bbox + size label (debug-only).
+    add('dbg-narrow', this._dbg.narrowBbox, [{
+      id: 'dbg-narrow-l', type: 'line',
+      paint: { 'line-color': '#f43f5e', 'line-width': 2, 'line-opacity': 0.9 },
+    }]);
+    const rosePaint = { 'text-color': '#fb7185', 'text-halo-color': 'rgba(8,13,26,0.9)', 'text-halo-width': 1.5 };
+    add('dbg-narrow-labels', this._dbg.narrowLabels, [{
+      id: 'dbg-narrow-labels-sym', type: 'symbol',
+      layout: labelLayout('top', [0, 0.4]),
+      paint: rosePaint,
+    }]);
+
     add('dbg-route-labels', this._dbg.routeLabels, [{
       id: 'dbg-route-labels-sym', type: 'symbol',
       layout: { ...labelLayout('left', [0.5, 0]), 'text-color': '#8b5cf6' },
@@ -2019,12 +2056,12 @@ class LocationFinderApp {
   _clearDebugLayers() {
     if (!this._dbg) return;
     Object.keys(this._dbg).forEach(k => { this._dbg[k].features = []; });
-    ['dbg-proximity','dbg-bboxes','dbg-bbox-labels','dbg-eval-polys','dbg-grid','dbg-grid-pts','dbg-search-hits','dbg-clusters','dbg-tq-hits','dbg-route-buf','dbg-route-line','dbg-route-labels'].forEach(id => {
+    ['dbg-proximity','dbg-bboxes','dbg-bbox-labels','dbg-narrow','dbg-narrow-labels','dbg-eval-polys','dbg-grid','dbg-grid-pts','dbg-grid-skip','dbg-search-hits','dbg-clusters','dbg-tq-hits','dbg-route-buf','dbg-route-line','dbg-route-labels'].forEach(id => {
       try { this.map.getSource(id)?.setData({ type: 'FeatureCollection', features: [] }); } catch(_){}
     });
     // Reset any step isolation: make all debug layers visible again for the next run.
     this._isolatedStep = null;
-    ['dbg-proximity-c','dbg-bboxes-l','dbg-bbox-labels-sym','dbg-grid-fill','dbg-grid-line','dbg-grid-pts-c','dbg-search-hits-c','dbg-search-hits-l','dbg-tq-hits-c','dbg-tq-hits-l','dbg-clusters-ring','dbg-clusters-label','dbg-eval-polys-fill','dbg-eval-polys-line','dbg-route-buf-f','dbg-route-line-l','dbg-route-labels-sym'].forEach(lid => {
+    ['dbg-proximity-c','dbg-bboxes-l','dbg-bbox-labels-sym','dbg-narrow-l','dbg-narrow-labels-sym','dbg-grid-fill','dbg-grid-line','dbg-grid-pts-c','dbg-grid-skip-fill','dbg-grid-skip-line','dbg-search-hits-c','dbg-search-hits-l','dbg-tq-hits-c','dbg-tq-hits-l','dbg-clusters-ring','dbg-clusters-label','dbg-eval-polys-fill','dbg-eval-polys-line','dbg-route-buf-f','dbg-route-line-l','dbg-route-labels-sym'].forEach(lid => {
       try { if (this.map.getLayer(lid)) this.map.setLayoutProperty(lid, 'visibility', 'visible'); } catch(_){}
     });
     document.getElementById('mapLegend').style.display = 'none';
@@ -2065,35 +2102,71 @@ class LocationFinderApp {
 
   /**
    * Draw the Tilequery collection grid: one radius circle per grid point + a center dot.
-   * `circles` = [{lng, lat, radius}]. Deduped by rounded coord (shared grids repeat points),
+   * `circles` = queried points, `skipped` = points not queried (donut hole skip etc.).
+   * Both are [{lng, lat, radius}], deduped by rounded coord (shared grids repeat points),
    * capped for performance/readability.
    */
-  _drawGridCircles(circles) {
-    if (!this._dbg || !circles?.length) return;
+  _drawGridCircles(circles, skipped) {
+    if (!this._dbg) return;
     const GRID_CAP = 800;
-    const seen = new Set();
-    const uniq = [];
-    for (const c of circles) {
-      if (c?.lng == null || c?.lat == null) continue;
-      const key = `${c.lng.toFixed(5)},${c.lat.toFixed(5)},${c.radius}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      uniq.push(c);
-      if (uniq.length >= GRID_CAP) break;
-    }
-    const circleFeatures = [];
+    const build = (list) => {
+      const seen = new Set();
+      const circleFeatures = [];
+      for (const c of (list || [])) {
+        if (c?.lng == null || c?.lat == null) continue;
+        const key = `${c.lng.toFixed(5)},${c.lat.toFixed(5)},${c.radius}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        try { circleFeatures.push(turf.circle([c.lng, c.lat], c.radius, { steps: 24, units: 'meters' })); } catch (_) {}
+        if (circleFeatures.length >= GRID_CAP) break;
+      }
+      return circleFeatures;
+    };
+    const keptCircles = build(circles);
+    const skipCircles = build(skipped);
+    // Center dots only for queried points.
     const ptFeatures = [];
-    for (const { lng, lat, radius } of uniq) {
-      try {
-        circleFeatures.push(turf.circle([lng, lat], radius, { steps: 24, units: 'meters' }));
-      } catch (_) {}
-      ptFeatures.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: {} });
+    const seenPt = new Set();
+    for (const c of (circles || [])) {
+      if (c?.lng == null || c?.lat == null) continue;
+      const key = `${c.lng.toFixed(5)},${c.lat.toFixed(5)}`;
+      if (seenPt.has(key)) continue;
+      seenPt.add(key);
+      ptFeatures.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] }, properties: {} });
+      if (ptFeatures.length >= GRID_CAP) break;
     }
-    this._dbg.grid.features    = circleFeatures;
-    this._dbg.gridPts.features = ptFeatures;
+    this._dbg.grid.features     = keptCircles;
+    this._dbg.gridPts.features  = ptFeatures;
+    this._dbg.gridSkip.features = skipCircles;
     try {
       this.map.getSource('dbg-grid')?.setData(this._dbg.grid);
       this.map.getSource('dbg-grid-pts')?.setData(this._dbg.gridPts);
+      this.map.getSource('dbg-grid-skip')?.setData(this._dbg.gridSkip);
+    } catch (_) {}
+    if (keptCircles.length || skipCircles.length) document.getElementById('mapLegend').style.display = 'block';
+  }
+
+  /** Draw the overflow re-anchor narrowed search bbox (debug-only) in rose, with a size label. */
+  _drawNarrowBBox(bbox) {
+    if (!this._dbg || !bbox || bbox.length < 4) return;
+    const [minX, minY, maxX, maxY] = bbox;
+    this._dbg.narrowBbox.features = [{
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [[[minX,minY],[maxX,minY],[maxX,maxY],[minX,maxY],[minX,minY]]] },
+      properties: {},
+    }];
+    const midLat = (minY + maxY) / 2;
+    const wm = Math.round(Math.abs(maxX - minX) * 111320 * Math.cos(midLat * Math.PI / 180));
+    const hm = Math.round(Math.abs(maxY - minY) * 110540);
+    const label = `絞込 ${wm === hm ? `${wm}m` : `${wm}×${hm}m`}`;
+    this._dbg.narrowLabels.features = [{
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [(minX + maxX) / 2, minY] },
+      properties: { label },
+    }];
+    try {
+      this.map.getSource('dbg-narrow')?.setData(this._dbg.narrowBbox);
+      this.map.getSource('dbg-narrow-labels')?.setData(this._dbg.narrowLabels);
     } catch (_) {}
     document.getElementById('mapLegend').style.display = 'block';
   }

@@ -40,8 +40,9 @@ class MapboxMCPClient {
     this._primarySearchIds     = new Set(); // IDs from primary_search (cleared at step1_main)
     this._lastIsochroneData = null; // visualization用
     this._evalPolygons      = []; // Step2 evaluation reach polygons (circle/isochrone) for map drawing
-    this._gridCircles       = []; // Tilequery grid points {lng,lat,radius} for debug map drawing
-    this._gridPointsCache   = new Map(); // gridKey → {points,radius}（cache HIT時もグリッド可視化するため）
+    this._gridCircles       = []; // Tilequery grid points {lng,lat,radius}（実際に問い合わせた点）
+    this._gridCirclesSkipped = []; // 穴skip等で問い合わせなかったグリッド点 {lng,lat,radius}
+    this._gridPointsCache   = new Map(); // gridKey → {points,skipped,radius}（cache HIT時もグリッド可視化するため）
   }
 
   /** Reset per-query API request counters (called at each new query; caps are per-query). */
@@ -1121,7 +1122,10 @@ class MapboxMCPClient {
     if (this._poiGridCache.has(gridKey)) {
       if (this.config.DEBUG) console.log(`[POI grid cache HIT] ${gridKey}`);
       const cp = this._gridPointsCache.get(gridKey);
-      if (cp) this._recordGridCircles(cp.points, cp.radius); // cache HIT でもグリッドを可視化
+      if (cp) { // cache HIT でもグリッドを可視化
+        this._recordGridCircles(cp.points, cp.radius);
+        this._recordGridCircles(cp.skipped, cp.radius, true);
+      }
       return this._poiGridCache.get(gridKey);
     }
     const DEG_LNG = 1 / (111320 * Math.cos(centerLat * Math.PI / 180));
@@ -1192,18 +1196,25 @@ class MapboxMCPClient {
     }
 
     // 穴（内側isochrone内）のグリッド点はskip（proximity.within=「n分以上」のドーナツ収集のコスト削減）
+    let skippedPoints = [];
     if (holePolygon) {
       const before = gridPoints.length;
-      gridPoints = gridPoints.filter(([gLng, gLat]) => !turf.booleanPointInPolygon(turf.point([gLng, gLat]), holePolygon));
-      if (this.config.DEBUG) console.log(`[MapboxMCP] 穴skip: ${before}→${gridPoints.length}点`);
+      const kept = [];
+      for (const p of gridPoints) {
+        if (turf.booleanPointInPolygon(turf.point([p[0], p[1]]), holePolygon)) skippedPoints.push(p);
+        else kept.push(p);
+      }
+      gridPoints = kept;
+      if (this.config.DEBUG) console.log(`[MapboxMCP] 穴skip: ${before}→${gridPoints.length}点（skip ${skippedPoints.length}点）`);
     }
 
     if (this.config.DEBUG)
       console.log(`[MapboxMCP] グリッドTilequery: ${gridPoints.length}点 × r=${radius}m`);
 
-    // グリッド点＋半径を記録（デバッグ地図で可視化・cache用にも保存）
-    this._gridPointsCache.set(gridKey, { points: gridPoints, radius });
+    // グリッド点＋半径を記録（デバッグ地図で可視化・cache用にも保存）。skipped=問い合わせなかった点。
+    this._gridPointsCache.set(gridKey, { points: gridPoints, skipped: skippedPoints, radius });
     this._recordGridCircles(gridPoints, radius);
+    this._recordGridCircles(skippedPoints, radius, true);
 
     const results = await Promise.all(
       gridPoints.map(([gLng, gLat]) => this._tilequeryBuildingSearch(gLat, gLng, radius))
@@ -1231,9 +1242,12 @@ class MapboxMCPClient {
     return gridResult;
   }
 
-  /** Record grid points (with per-point radius) for debug map visualization. */
-  _recordGridCircles(points, radius) {
-    (this._gridCircles ||= []).push(...points.map(([lng, lat]) => ({ lng, lat, radius })));
+  /** Record grid points (with per-point radius) for debug map visualization.
+   *  skipped=true → 問い合わせなかった点（穴skip等）を別配列に。 */
+  _recordGridCircles(points, radius, skipped = false) {
+    if (!points?.length) return;
+    const arr = skipped ? (this._gridCirclesSkipped ||= []) : (this._gridCircles ||= []);
+    arr.push(...points.map(([lng, lat]) => ({ lng, lat, radius })));
   }
 
   /**
