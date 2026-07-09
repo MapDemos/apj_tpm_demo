@@ -923,9 +923,10 @@ class MapboxMCPClient {
       return result;
     }
 
-    // ── Building priority: Grid Tilequery ONLY (マンション/アパート/ビル/ホテル) ──
-    // streets-v8 poi_label has better building coverage than Search Box.
-    // Grid search covers bbox with overlapping 100m circles.
+    // ── Building priority: Grid Tilequery (主) ＋ Search Box (並行補完) (マンション/アパート/ビル) ──
+    // streets-v8 poi_label は建物の網羅性が高いのでグリッドTilequeryを主とし、poi_labelが取りこぼす
+    // 名前付き建物を Search Box が並行で補完する（下記 bSbRequests・0件フォールバックではなく常に並行）。
+    // Grid search covers bbox with overlapping circles (radius=65)。
     if (isBuilding && effectiveProximity) {
       const [lng, lat] = effectiveProximity;
       // If no bbox, create the default ±300m so expansion loop works correctly
@@ -938,7 +939,7 @@ class MapboxMCPClient {
         ? [...bbox]
         : [lng - defM*DEG_LNG0, lat - defM*DEG_LAT0, lng + defM*DEG_LNG0, lat + defM*DEG_LAT0];
       if (this.config.DEBUG)
-        console.log(`[MapboxMCP] 建物系 → グリッドTilequery のみ (初期bbox幅=${Math.round((currentBbox[2]-currentBbox[0])*111320)}m)`);
+        console.log(`[MapboxMCP] 建物系 → グリッドTilequery＋Search Box並行 (初期bbox幅=${Math.round((currentBbox[2]-currentBbox[0])*111320)}m)`);
 
       // Buildings query poi_label. Reuse the shared grid (filtered to this bbox) when
       // provided; else fetch our own dense grid. radius=65 keeps each grid point under
