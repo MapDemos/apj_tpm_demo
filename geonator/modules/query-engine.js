@@ -581,9 +581,16 @@ class QueryEngine {
 
   /** Resolve a scope place/locality to a bbox (used to constrain POI anchor search). */
   async _resolveScopeBbox(scope) {
-    const sb = await this.mcp.searchBox(scope.text, { types: 'place,locality,district' });
-    const f = sb?.features?.[0];
-    if (!f) return null;
+    // types に neighborhood/address を含める（_resolveLocality と揃える）。以前は place,locality,
+    // district のみで、新丸子のような neighborhood 級のscopeが解決できず、近隣の別place（等々力/
+    // 川崎市全体の縦長bbox 等）へfuzzyマッチ→POIアンカーのbiasが崩れ結果が地図中心へ飛ぶ不具合。
+    const sb = await this.mcp.searchBox(scope.text, { types: 'place,locality,neighborhood,district,address' });
+    // 完全一致（正規化）を優先。無ければ先頭。fuzzyな別地名を掴むのを防ぐ。
+    const feats = sb?.features || [];
+    if (!feats.length) { if (this.config.DEBUG) console.log('[scope] no match for', scope.text); return null; }
+    const q = MapboxMCPClient._normalizeName(scope.text);
+    const f = feats.find(x => MapboxMCPClient._normalizeName(x.properties?.name) === q) || feats[0];
+    if (this.config.DEBUG) console.log('[scope]', scope.text, '→', f.properties?.name, f.properties?.full_address, 'coords', f.geometry?.coordinates, 'bbox', f.properties?.bbox);
     const bbox = f.properties?.bbox;
     if (bbox) return bbox;
     // no bbox → build a generous box around the point
@@ -799,6 +806,7 @@ class QueryEngine {
     }
 
     const feature = distinct[0];
+    if (this.config.DEBUG) console.log('[poi-anchor]', anchor.text, 'scopeBbox', scopeBbox, '→', feature.properties?.name, feature.properties?.full_address, 'coords', feature.geometry?.coordinates, '(raw', rawFeatures.length, 'inScope', features.length, ')');
     const ftype = feature.properties?.feature_type;
     // Only reject genuinely huge admin areas; a place (市/区) is acceptable as a
     // broad proximity (its bbox is used when available).
