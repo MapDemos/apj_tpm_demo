@@ -538,6 +538,7 @@ class LocationFinderApp {
       // Tilequeryグリッド（各収集点の半径円）をデバッグ地図に描画。デバッグモード時のみ。
       // skipped = 穴skip等で問い合わせなかった点（別スタイルで表示）。
       drawGrid(circles, skipped) {
+        console.log('[drawGrid] called', { debug: self._debugMode, mapActive: self._mapActive(), hasDbg: !!self._dbg, circles: circles?.length, skipped: skipped?.length });
         if (!self._debugMode || !self._mapActive() || !self._dbg) return;
         self._drawGridCircles(circles, skipped);
       },
@@ -2139,11 +2140,16 @@ class LocationFinderApp {
     this._dbg.grid.features     = keptCircles;
     this._dbg.gridPts.features  = ptFeatures;
     this._dbg.gridSkip.features = skipCircles;
+    console.log('[_drawGridCircles] built', { kept: keptCircles.length, skip: skipCircles.length,
+      srcGrid: !!this.map.getSource('dbg-grid'), lyrFill: !!this.map.getLayer('dbg-grid-fill'),
+      lyrLine: !!this.map.getLayer('dbg-grid-line'),
+      visFill: this.map.getLayer('dbg-grid-fill') ? this.map.getLayoutProperty('dbg-grid-fill','visibility') : 'n/a',
+      sample: keptCircles[0]?.geometry?.coordinates?.[0]?.[0] });
     try {
       this.map.getSource('dbg-grid')?.setData(this._dbg.grid);
       this.map.getSource('dbg-grid-pts')?.setData(this._dbg.gridPts);
       this.map.getSource('dbg-grid-skip')?.setData(this._dbg.gridSkip);
-    } catch (_) {}
+    } catch (e) { console.warn('[_drawGridCircles] setData error', e); }
     if (keptCircles.length || skipCircles.length) document.getElementById('mapLegend').style.display = 'block';
   }
 
