@@ -1855,13 +1855,14 @@ class LocationFinderApp {
     // Drawn under the hit points so hits stay readable. Debug-mode only.
     add('dbg-grid', this._dbg.grid, [
       { id: 'dbg-grid-fill', type: 'fill',
-        paint: { 'fill-color': '#10b981', 'fill-opacity': 0.05 } },
+        paint: { 'fill-color': '#10b981', 'fill-opacity': 0.1 } },
       { id: 'dbg-grid-line', type: 'line',
-        paint: { 'line-color': '#34d399', 'line-width': 0.8, 'line-opacity': 0.5 } },
+        paint: { 'line-color': '#34d399', 'line-width': 1.5, 'line-opacity': 0.9 } },
     ]);
     add('dbg-grid-pts', this._dbg.gridPts, [{
       id: 'dbg-grid-pts-c', type: 'circle',
-      paint: { 'circle-radius': 2, 'circle-color': '#34d399', 'circle-opacity': 0.85 },
+      paint: { 'circle-radius': 3, 'circle-color': '#34d399', 'circle-opacity': 1,
+               'circle-stroke-width': 1, 'circle-stroke-color': '#064e3b' },
     }]);
 
     // Rose (dashed): grid circles that were NOT queried (donut hole skip). Shown so the
@@ -1870,7 +1871,7 @@ class LocationFinderApp {
       { id: 'dbg-grid-skip-fill', type: 'fill',
         paint: { 'fill-color': '#f43f5e', 'fill-opacity': 0.04 } },
       { id: 'dbg-grid-skip-line', type: 'line',
-        paint: { 'line-color': '#fb7185', 'line-width': 0.8, 'line-opacity': 0.5,
+        paint: { 'line-color': '#fb7185', 'line-width': 1.4, 'line-opacity': 0.85,
                  'line-dasharray': ['literal', [2, 2]] } },
     ]);
 
