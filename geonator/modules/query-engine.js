@@ -1297,9 +1297,12 @@ class QueryEngine {
   _inferFloors(text) {
     if (!text) return null;
     let m;
-    if ((m = text.match(/(\d{1,3})\s*階以上/)))            return { min: parseInt(m[1], 10) };
-    if ((m = text.match(/(\d{1,3})\s*階以下/)))            return { max: parseInt(m[1], 10) };
-    // 「12階建て/12階建/12階だて/12階立て(建ての誤記)/12階の」→ value:12
+    // 「N階(建て)以上/超/より上」→ min ／「N階(建て)以下/未満/まで/より低」→ max。
+    // 「建て/建/だて/立て」等が 階 と 以上/以下 の間に入る表記（「10階建て以下」）も拾う。
+    // value(完全一致)より先に判定する＝「10階建て以下」を value:10 に潰さない（過剰制約の防止）。
+    if ((m = text.match(/(\d{1,3})\s*階\s*(建て|建|だて|立て)?\s*(以上|超|より上|より高)/))) return { min: parseInt(m[1], 10) };
+    if ((m = text.match(/(\d{1,3})\s*階\s*(建て|建|だて|立て)?\s*(以下|未満|まで|より低)/))) return { max: parseInt(m[1], 10) };
+    // 「12階建て/12階建/12階だて/12階立て(建ての誤記)/12階の」→ value:12（境界語が無い完全一致）
     if ((m = text.match(/(\d{1,3})\s*階\s*(建て|建|だて|立て|の)/))) return { value: parseInt(m[1], 10) };
     // タワマン系（「タマワン」等のよくある表記ゆれ／タイプミスも吸収）
     if (/(タワマン|タマワン|タワーマンション|タワマンション|超高層|高層(マンション|ビル|階|階建)?)/.test(text)) return { min: 20 };
@@ -1390,6 +1393,17 @@ class QueryEngine {
     if (!schema.target.floors) {
       const f = this._inferFloors(text);
       if (f) schema.target.floors = f;
+    } else {
+      // L1が「N階以下/N階以上」を value(=完全一致) に潰す誤りを、テキストの明示的な境界表現で矯正。
+      // 例:「10階建て以下」→ L1 {value:10} を {max:10} に。境界(min/max)がテキストから読めて、
+      // かつ L1 が value 型を出している時だけ上書き（negate は保持）。正しい完全一致は温存する。
+      const cur = schema.target.floors;
+      if (cur.value != null && cur.min == null && cur.max == null) {
+        const f = this._inferFloors(text);
+        if (f && (f.min != null || f.max != null)) {
+          schema.target.floors = { ...f, negate: cur.negate === true };
+        }
+      }
     }
   }
 
@@ -1853,17 +1867,20 @@ class QueryEngine {
         c._floors = (lat != null && lng != null) ? await this.mcp._getBuildingFloors(lat, lng) : null;
       }));
     }
-    // floorsハード: fail-closed。仕様を「証明できた」候補だけ残す。階数が取れない候補は
-    // 満たすと確認できない以上、ハードでは不合格（除外）にする（例: 20階以上指定で高さ不明の
-    // カフェが素通りして検証済みの高層より上位に来る不具合を防ぐ）。緩めたい場合はソフトへ。
+    // floorsハード: 原則 fail-closed（仕様を「証明できた」候補だけ残す。20階以上指定で高さ不明の
+    // カフェが素通りするのを防ぐ）。ただし「満たす方が大多数」の緩い制約は不明でも fail-open で残す：
+    //  - negate（「N階建てではない」）: 大半の建物は該当高さではない
+    //  - max のみ（「N階以下」）: 上限制約は大半の建物が満たす（不明を切ると候補が空になりやすい）
+    // min（「N階以上」・高層指定）と value（完全一致）は fail-closed を維持。緩めたい場合はソフトへ。
+    const floorsFailOpenUnknown = floorSpec.negate
+      || (floorSpec.max != null && floorSpec.min == null && floorSpec.value == null);
     if (floorsHard) {
       const specLabel = this._floorSpecLabel(floorSpec) + (floorSpec.negate ? 'ではない' : '');
       const kept = [];
       for (const c of mainCandidates) {
         if (c._floors != null && this._floorPass(c._floors, floorSpec)) { kept.push(c); continue; }
-        // negate（「N階建てではない」）で階数不明なら fail-open で残す：大半の建物は該当高さ
-        // ではないので、不明を一律除外すると候補が空になりやすい（positive は従来どおり fail-closed）。
-        if (c._floors == null && floorSpec.negate) { kept.push(c); continue; }
+        // 階数不明の fail-open（上記条件）。それ以外は fail-closed（除外）。
+        if (c._floors == null && floorsFailOpenUnknown) { kept.push(c); continue; }
         this._dbgReport.excludedByHardFilter.push({
           name: c.name || '(名前なし)',
           reason: c._floors == null
