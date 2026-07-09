@@ -691,9 +691,18 @@ class LocationFinderApp {
       L.push('');
       L.push('【QuerySchema】');
       const _w = s.proximity?.within;
-      const _within = _w
-        ? (_w.level ?? ((_w.maxMinutes ?? _w.minutes) != null ? `${_w.maxMinutes ?? _w.minutes}分(${_w.profile || 'walking'})` : ((_w.maxMeters ?? _w.meters) != null ? `${_w.maxMeters ?? _w.meters}m` : '?')))
-        : '(なし)';
+      const _within = (() => {
+        if (!_w) return '(なし)';
+        if (_w.level) return _w.level;
+        const mn = _w.minMinutes, mx = _w.maxMinutes ?? _w.minutes, prof = _w.profile || 'walking';
+        if (mn != null || mx != null) {
+          if (mn != null && mx != null) return `${mn}〜${mx}分(${prof})`;   // ドーナツ（N分以上M分以内）
+          if (mn != null) return `${mn}分以上(${prof})`;                     // 下限のみ
+          return `${mx}分以内(${prof})`;                                     // 上限のみ
+        }
+        const met = _w.maxMeters ?? _w.meters;
+        return met != null ? `${met}m` : '?';
+      })();
       const _scope = s.proximity?.scope ? (s.proximity.scope.text || JSON.stringify(s.proximity.scope)) : '(なし)';
       L.push(`・proximity: ${anchors}  within=${_within}  scope=${_scope}${s.proximity?.bearing_filter ? ' 方角=' + s.proximity.bearing_filter : ''}`);
       L.push(`・target: ${s.target?.text}  intent=${s.target?.query_intent}`);
