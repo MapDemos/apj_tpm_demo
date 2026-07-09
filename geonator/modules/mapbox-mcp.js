@@ -2078,11 +2078,11 @@ class MapboxMCPClient {
    * @returns {Promise<{ bbox: number[]|null, polygons: object[] }>}
    */
   async isochroneReach(points, minutes, profile = 'walking') {
-    const polygons = [];
-    for (const p of (points || [])) {
-      const poly = await this.getIsochronePolygon(p.lat, p.lng, minutes, profile);
-      if (poly) polygons.push(poly);
-    }
+    // 各点（駅の複数出口など）のisochroneを並列取得して union（出口ごとに1コール・cacheあり）。
+    const polys = await Promise.all(
+      (points || []).map(p => this.getIsochronePolygon(p.lat, p.lng, minutes, profile))
+    );
+    const polygons = polys.filter(Boolean);
     if (!polygons.length) return { bbox: null, polygons: [] };
     let bb = turf.bbox(polygons[0]);
     for (let i = 1; i < polygons.length; i++) {

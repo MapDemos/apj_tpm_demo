@@ -494,12 +494,10 @@ class QueryEngine {
     this._withinReachM  = null;
     this._withinNote    = null;
     let bbox = null;
-    // within指定時は基準点を1点（出入口の重心）に集約（駅の出入口の広がりで範囲が膨らむのを防ぐ）。
-    if (active && resolvedPoints.length > 1) {
-      const cLng = resolvedPoints.reduce((s, p) => s + p.lng, 0) / resolvedPoints.length;
-      const cLat = resolvedPoints.reduce((s, p) => s + p.lat, 0) / resolvedPoints.length;
-      resolvedPoints = [{ lng: cLng, lat: cLat }];
-    }
+    // NOTE: 以前は within指定時に複数点（駅の出入口）を重心1点へ集約していたが、これだと
+    // 「入谷駅から徒歩1分」の到達圏が駅中心1個からのisochroneになり、出口寄りの候補を
+    // 取りこぼした（出口考慮なしバグ）。出入口は各点のまま扱い、isochrone/半径を各点で張って
+    // union する（＝「どの出口からでもn分以内」）。数は _resolveStation 側でcap済み。
     const SPEED = { walking: 80, cycling: 250, driving: 500 }; // m/min（isochrone失敗時の半径近似）
     if (level) {
       const rm = DISTANCE_TABLE[level]?.radius_m;
@@ -623,14 +621,21 @@ class QueryEngine {
     }
     const stationCoord = chosenFeat.geometry.coordinates; // [lng, lat]
 
-    // proximity.within 指定時（出口指定なし）は駅中心の1点だけ返す。到達圏(within)がbboxの正
-    // になるので、出入口のtilequery展開も既定半径(400m)も作らない（無駄を省く）。
-    if (singlePoint && !anchor.subtype?.exit) {
-      return [{ lng: stationCoord[0], lat: stationCoord[1] }];
-    }
-
     // 2. Tilequery → all transit entrances
     const entrances = await this.mcp.tilequeryTransitEntrances(stationCoord[1], stationCoord[0], 500);
+
+    // proximity.within 指定時（出口指定なし）：出入口を各点として返す。到達圏(within)は各出口から
+    // 張って union するので「どの出口からでも徒歩n分以内」を正しく反映する。以前は駅中心1点に
+    // 集約して出口の広がりを無視していた（出口考慮なしバグ）。大規模駅のisochrone爆発を防ぐため
+    // MAX_STATION_EXITS でcap（各出口1コール）。radiusMは付けない＝withinが範囲を決める。
+    if (singlePoint && !anchor.subtype?.exit) {
+      if (entrances.length > 0) {
+        const MAX_STATION_EXITS = 8;
+        const used = entrances.length > MAX_STATION_EXITS ? entrances.slice(0, MAX_STATION_EXITS) : entrances;
+        return used.map(e => ({ lng: e.lng, lat: e.lat }));
+      }
+      return [{ lng: stationCoord[0], lat: stationCoord[1] }]; // 出口取れず→駅中心1点にフォールバック
+    }
 
     // [C-2] exit-specified
     const exitName = anchor.subtype?.exit;
