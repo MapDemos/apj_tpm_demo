@@ -1872,9 +1872,10 @@ class QueryEngine {
     //  - negate（「N階建てではない」）: 大半の建物は該当高さではない
     //  - max のみ（「N階以下」）: 上限制約は大半の建物が満たす（不明を切ると候補が空になりやすい）
     // min（「N階以上」・高層指定）と value（完全一致）は fail-closed を維持。緩めたい場合はソフトへ。
-    const floorsFailOpenUnknown = floorSpec.negate
-      || (floorSpec.max != null && floorSpec.min == null && floorSpec.value == null);
     if (floorsHard) {
+      // floorSpec は floorsHard=true の時のみ非null（= !!floorSpec && MODE==='hard'）。この中でだけ参照する。
+      const floorsFailOpenUnknown = floorSpec.negate
+        || (floorSpec.max != null && floorSpec.min == null && floorSpec.value == null);
       const specLabel = this._floorSpecLabel(floorSpec) + (floorSpec.negate ? 'ではない' : '');
       const kept = [];
       for (const c of mainCandidates) {
