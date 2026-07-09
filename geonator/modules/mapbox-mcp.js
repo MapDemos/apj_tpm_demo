@@ -30,6 +30,7 @@ class MapboxMCPClient {
     this._tqCacheHits    = 0;   // Tilequery cache hits
     this._isoRequests    = 0;   // Isochrone API request count (actual fetches only)
     this._isoCacheHits   = 0;   // Isochrone cache hits (within-run isoCache)
+    this._siRequests     = 0;   // Static Images API request count（地図OFF時の静的地図。index.js が加算）
     this._capHit         = { tq: 0, sb: 0, iso: 0 }; // 上限到達でスキップした回数（ユーザー通知用）
     this._tqCache        = new Map(); // url → parsed JSON (cleared on chat reset)
     this._poiGridCache      = new Map();
@@ -48,6 +49,7 @@ class MapboxMCPClient {
     this._tqCacheHits = 0;
     this._isoRequests = 0;
     this._isoCacheHits = 0;
+    this._siRequests = 0;
     this._capHit = { tq: 0, sb: 0, iso: 0 };
   }
 

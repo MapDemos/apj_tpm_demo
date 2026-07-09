@@ -542,7 +542,12 @@ class LocationFinderApp {
       },
       showDebugReport(report) {
         if (!self._debugMode || !report) return;
-        self.addMessage('debug', self._renderDebugReport(report));
+        // 生成された QuerySchema を JSON でモーダル表示（コピー可）するボタンを添える。
+        const actions = report.schema ? [{
+          label: self._lang === 'en' ? '🧬 QuerySchema JSON' : '🧬 QuerySchema JSON を表示',
+          onClick: () => self._showSchemaModal(report.schema),
+        }] : [];
+        self.addMessage('debug', self._renderDebugReport(report), { actions });
       },
       // デバッグ専用の詳細メッセージ（エラー原因など）。通常モードでは何も出さない。
       showDebug(text) {
@@ -553,28 +558,95 @@ class LocationFinderApp {
         if (!stats) return;
         const fmt = n => (n || 0).toLocaleString('ja-JP');
         const secs = (stats.ms / 1000).toFixed(1);
+        const en = self._lang === 'en';
         const shortModel = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
-        const roleLines = [];
+
+        // ロール別トークン（0回は除外）＋ モデル別集計 ＋ 総計
+        const roleData = [];
         let totIn = 0, totOut = 0;
-        // 全ロールを表示（0回=そのクエリで未実行）。L1-1=確認文の先出し / L1-2=クエリ解析。
         for (const [role, s] of [['L1-1', stats.llm?.L1c], ['L1-2', stats.llm?.L1], ['L1-3', stats.llm?.L1_3], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
-          if (!s) continue;
-          // プロンプトキャッシュ: 読み(💾r=約0.1倍)/書き(w=約1.25倍)があれば併記。
-          const cache = (s.cacheRead || s.cacheWrite) ? ` 💾r${fmt(s.cacheRead)}/w${fmt(s.cacheWrite)}` : '';
-          roleLines.push(`${role}(${shortModel(s.model)}): ↑${fmt(s.inTok)} ↓${fmt(s.outTok)}${cache} ・${s.calls}回・${(s.ms/1000).toFixed(1)}s`);
+          if (!s || !s.calls) continue;
+          roleData.push({ role, ...s });
           totIn += s.inTok; totOut += s.outTok;
         }
-        // 処理時間の内訳（フェーズ別・同ラベルは合算＝再収集等を吸収）。performance.now基準。
-        const phaseAgg = new Map();
-        for (const p of (stats.phases || [])) phaseAgg.set(p.l, (phaseAgg.get(p.l) || 0) + p.ms);
-        const phaseLines = [...phaseAgg.entries()].map(([l, ms]) => `${l}: ${(ms / 1000).toFixed(2)}s`);
-        const parts = [
-          self._lang === 'en' ? `⏱ total ${secs}s` : `⏱ 処理時間 合計 ${secs}s`,
-          ...(phaseLines.length ? ['── 処理内訳 ──', ...phaseLines] : []),
-          ...(roleLines.length ? ['── LLM ロール別 ──', ...roleLines] : []),
-          `API: SB ${self.mapboxMCP?._sbRequests ?? 0} / TQ ${self.mapboxMCP?._tqRequests ?? 0} / ISO ${self.mapboxMCP?._isoRequests ?? 0}`,
+        const byModel = new Map(); // モデル別内訳（同一モデルの複数ロールを合算）
+        for (const r of roleData) {
+          const key = shortModel(r.model) || '?';
+          const m = byModel.get(key) || { inTok: 0, outTok: 0, calls: 0, cacheRead: 0, cacheWrite: 0 };
+          m.inTok += r.inTok; m.outTok += r.outTok; m.calls += r.calls;
+          m.cacheRead += (r.cacheRead || 0); m.cacheWrite += (r.cacheWrite || 0);
+          byModel.set(key, m);
+        }
+        // Mapbox 製品別リクエスト（フルネーム。カウンタは run()/絞り込み開始でリセット済み＝この操作ぶん）
+        const mcp = self.mapboxMCP || {};
+        const mbRows = [
+          ['Search Box API',   mcp._sbRequests  ?? 0],
+          ['Tilequery API',    mcp._tqRequests  ?? 0],
+          ['Isochrone API',    mcp._isoRequests ?? 0],
+          ['Static Images API', mcp._siRequests ?? 0],
         ];
-        self.addMessage('tool-status', parts.join('\n'));
+
+        // ── DOM 構築：合計は常時表示、それ以下は <details>（クリックで展開）──
+        self._hideTypingIndicator?.(); // addMessage 相当（考え中表示を消す）
+        const container = document.getElementById('chatMessages');
+        const wrapper = document.createElement('div');
+        wrapper.className = 'message tool-status';
+        const lbl = document.createElement('div');
+        lbl.className = 'msg-label';
+        lbl.textContent = LANG[self._lang].roleTool;
+        wrapper.appendChild(lbl);
+        const bubble = document.createElement('div');
+        bubble.className = 'message-bubble';
+
+        const totalLine = document.createElement('div');
+        totalLine.textContent = en ? `⏱ Total ${secs}s` : `⏱ 処理時間 合計 ${secs}s`;
+        bubble.appendChild(totalLine);
+
+        const det = document.createElement('details');
+        const sum = document.createElement('summary');
+        sum.textContent = en ? '▸ Details (tokens / Mapbox usage)' : '▸ 詳細（消費トークン・Mapbox利用）';
+        sum.style.cssText = 'cursor:pointer;opacity:.85;margin-top:4px;user-select:none';
+        det.appendChild(sum);
+
+        const lines = [];
+        lines.push(en ? `— Tokens total ↑${fmt(totIn)} ↓${fmt(totOut)} —` : `── 消費トークン 合計 ↑${fmt(totIn)} ↓${fmt(totOut)} ──`);
+        if (byModel.size) {
+          for (const [model, m] of byModel) {
+            const cache = (m.cacheRead || m.cacheWrite) ? ` 💾r${fmt(m.cacheRead)}/w${fmt(m.cacheWrite)}` : '';
+            lines.push(`${model}: ↑${fmt(m.inTok)} ↓${fmt(m.outTok)}${cache} ・${m.calls}${en ? ' calls' : '回'}`);
+          }
+        } else {
+          lines.push(en ? '(no LLM calls this step)' : '（この処理でLLM呼び出しなし）');
+        }
+        lines.push(en ? '— Mapbox API requests —' : '── 消費 Mapbox API（製品別）──');
+        for (const [name, n] of mbRows) lines.push(`${name}: ${fmt(n)}`);
+
+        if (self._debugMode) {
+          if (roleData.length) {
+            lines.push(en ? '— LLM by role (debug) —' : '── LLM ロール別（デバッグ）──');
+            for (const r of roleData) {
+              const cache = (r.cacheRead || r.cacheWrite) ? ` 💾r${fmt(r.cacheRead)}/w${fmt(r.cacheWrite)}` : '';
+              lines.push(`${r.role}(${shortModel(r.model)}): ↑${fmt(r.inTok)} ↓${fmt(r.outTok)}${cache} ・${r.calls}${en ? ' calls' : '回'}・${(r.ms / 1000).toFixed(1)}s`);
+            }
+          }
+          const phaseAgg = new Map();
+          for (const p of (stats.phases || [])) phaseAgg.set(p.l, (phaseAgg.get(p.l) || 0) + p.ms);
+          if (phaseAgg.size) {
+            lines.push(en ? '— Phase breakdown (debug) —' : '── 処理内訳（デバッグ）──');
+            for (const [l, ms] of phaseAgg) lines.push(`${l}: ${(ms / 1000).toFixed(2)}s`);
+          }
+        }
+
+        const body = document.createElement('div');
+        body.style.cssText = 'margin-top:4px;font-size:.9em;line-height:1.5;white-space:pre-wrap';
+        body.innerHTML = lines.map(_esc).join('<br>');
+        det.appendChild(body);
+        bubble.appendChild(det);
+        wrapper.appendChild(bubble);
+        container.appendChild(wrapper);
+        container.scrollTop = container.scrollHeight;
+        self._pinCancelToBottom?.(); // addMessage 相当（キャンセル吹き出しを最下部維持）
+
         // 上限到達の警告（TQ/SB/ISO）：どのAPIが上限で打ち切られたかを明示
         const cap = self.mapboxMCP?._capHit;
         if (cap && (cap.tq || cap.sb || cap.iso)) {
@@ -1231,6 +1303,7 @@ class LocationFinderApp {
     if (this._mapOff) {
       const url = this._buildStaticMapUrl([...(full || []), ...(partial || []), ...(none || [])]);
       if (url) {
+        if (this.mapboxMCP) this.mapboxMCP._siRequests = (this.mapboxMCP._siRequests || 0) + 1; // Static Images API 1リクエスト
         const L = LANG[this._lang];
         const fig = document.createElement('figure');
         fig.className = 'static-map';
@@ -2434,9 +2507,75 @@ class LocationFinderApp {
       wrapper.appendChild(btn);
     }
 
+    // 任意アクションボタン（例：デバッグの QuerySchema JSON モーダル表示）
+    if (Array.isArray(opts.actions)) {
+      for (const a of opts.actions) {
+        const btn = document.createElement('button');
+        btn.className = 'btn-action';
+        btn.style.cssText = 'cursor:pointer;margin-top:8px;background:#3a3f4b;color:#fff;border:0;border-radius:6px;padding:6px 12px;font-size:.9em';
+        btn.textContent = a.label;
+        btn.onclick = a.onClick;
+        wrapper.appendChild(btn);
+      }
+    }
+
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
     this._pinCancelToBottom(); // キャンセル吹き出しを最下部に維持
+  }
+
+  /** [デバッグ] 生成された QuerySchema を JSON でモーダル表示＋クリップボードコピー。 */
+  _showSchemaModal(schema) {
+    const json = JSON.stringify(schema ?? {}, null, 2);
+    const en = this._lang === 'en';
+    let overlay = document.getElementById('schemaModal');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'schemaModal';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:9999;padding:24px';
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#1b1f27;color:#e6e6e6;border:1px solid #333;border-radius:10px;max-width:760px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.5)';
+      const head = document.createElement('div');
+      head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #333;gap:12px';
+      const title = document.createElement('div');
+      title.style.cssText = 'font-weight:600';
+      title.textContent = 'QuerySchema (JSON)';
+      const btns = document.createElement('div');
+      btns.style.cssText = 'display:flex;gap:8px;flex:none';
+      const copyBtn = document.createElement('button');
+      copyBtn.style.cssText = 'cursor:pointer;background:#2b6cb0;color:#fff;border:0;border-radius:6px;padding:6px 12px';
+      const closeBtn = document.createElement('button');
+      closeBtn.style.cssText = 'cursor:pointer;background:#3a3f4b;color:#fff;border:0;border-radius:6px;padding:6px 12px';
+      btns.append(copyBtn, closeBtn);
+      head.append(title, btns);
+      const pre = document.createElement('pre');
+      pre.style.cssText = 'margin:0;padding:16px;overflow:auto;font-size:12.5px;line-height:1.5;white-space:pre;flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace';
+      card.append(head, pre);
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+      const close = () => { overlay.style.display = 'none'; };
+      closeBtn.onclick = close;
+      overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && overlay.style.display === 'flex') close(); });
+      overlay._pre = pre; overlay._copyBtn = copyBtn; overlay._closeBtn = closeBtn;
+    }
+    overlay._closeBtn.textContent = en ? 'Close' : '閉じる';
+    overlay._pre.textContent = json;
+    const copyBtn = overlay._copyBtn;
+    const rest = () => { copyBtn.textContent = en ? '📋 Copy' : '📋 コピー'; };
+    rest();
+    copyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(json);
+        copyBtn.textContent = en ? '✓ Copied' : '✓ コピーしました';
+      } catch {
+        const r = document.createRange(); r.selectNodeContents(overlay._pre);
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        copyBtn.textContent = en ? '⚠ Select + Ctrl/⌘C' : '⚠ 選択して Ctrl/⌘C';
+      }
+      setTimeout(rest, 1600);
+    };
+    overlay.style.display = 'flex';
   }
 
   /** Render the hint request panel in chat and wait for operator input. */
