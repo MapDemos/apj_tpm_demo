@@ -766,8 +766,10 @@ class QueryEngine {
     const sbResult = await this.mcp.searchBox(anchor.text, opts);
     const rawFeatures = sbResult?.features || [];
     let features = rawFeatures;
+    let scopeFilteredCount = null; // 真のscope内件数（fallback前）
     if (scopeBbox) {
       const filtered = rawFeatures.filter(f => this._pointInBbox(f.geometry?.coordinates, scopeBbox));
+      scopeFilteredCount = filtered.length;
       // Safety net (recall priority): if the scope box drops EVERYTHING but the raw
       // search did find results, the scope was likely too tight/wrong (or the anchor
       // is actually outside it). Fall back to the proximity-biased raw results rather
@@ -806,7 +808,7 @@ class QueryEngine {
     }
 
     const feature = distinct[0];
-    if (this.config.DEBUG) console.log('[poi-anchor]', anchor.text, 'scopeBbox', scopeBbox, '→', feature.properties?.name, feature.properties?.full_address, 'coords', feature.geometry?.coordinates, '(raw', rawFeatures.length, 'inScope', features.length, ')');
+    if (this.config.DEBUG) console.log('[poi-anchor]', anchor.text, '→', feature.properties?.name, feature.properties?.full_address, 'coords', feature.geometry?.coordinates, `(raw ${rawFeatures.length}, scope内 ${scopeFilteredCount}, fallback=${scopeBbox && scopeFilteredCount === 0})`);
     const ftype = feature.properties?.feature_type;
     // Only reject genuinely huge admin areas; a place (市/区) is acceptable as a
     // broad proximity (its bbox is used when available).
