@@ -117,6 +117,9 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
 
   // target queries default (QE) → fall back to [text]
   if (schema.target) {
+    // query_intent 未指定は 'specific'（最小出力でL1が省略した時の保険。load-bearing＝
+    // general POI検索の分岐 query_intent==='specific' 等が効くよう必ず値を持たせる）。
+    if (!schema.target.query_intent) schema.target.query_intent = 'specific';
     if (!Array.isArray(schema.target.queries) || schema.target.queries.length === 0) {
       schema.target.queries = schema.target.text ? [schema.target.text] : [];
     } else if (schema.target.text && !schema.target.queries.includes(schema.target.text)) {
