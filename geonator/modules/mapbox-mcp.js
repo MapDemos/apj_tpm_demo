@@ -1117,9 +1117,12 @@ class MapboxMCPClient {
    * @param {number[]|null} bbox     - [minLng, minLat, maxLng, maxLat]
    * @param {number}        radius   - per-point radius in meters (default 100)
    */
-  async _gridTilequeryPOI(centerLat, centerLng, bbox, radius = 200, holePolygon = null) {
+  async _gridTilequeryPOI(centerLat, centerLng, bbox, radius = 200, holePolygon = null, keepPolygons = null) {
     const bboxKey  = bbox?.map(v => Math.round(v * 10000)).join(',') ?? 'null';
-    const gridKey  = `${Math.round(centerLat * 10000)},${Math.round(centerLng * 10000)},r${radius},${bboxKey}`;
+    // hole/keep はグリッド点の取捨に影響する→cacheキーに署名を入れて別扱いにする（誤HIT防止）。
+    const polySig  = (holePolygon ? 'h' + turf.bbox(holePolygon).map(v => Math.round(v * 1000)).join('_') : '') +
+                     (keepPolygons?.length ? 'k' + keepPolygons.length + '_' + keepPolygons.map(p => turf.bbox(p).map(v => Math.round(v * 1000)).join('.')).join('|') : '');
+    const gridKey  = `${Math.round(centerLat * 10000)},${Math.round(centerLng * 10000)},r${radius},${bboxKey}${polySig ? ',' + polySig : ''}`;
     if (this._poiGridCache.has(gridKey)) {
       if (this.config.DEBUG) console.log(`[POI grid cache HIT] ${gridKey}`);
       const cp = this._gridPointsCache.get(gridKey);
@@ -1209,6 +1212,25 @@ class MapboxMCPClient {
       if (this.config.DEBUG) console.log(`[MapboxMCP] 穴skip: ${before}→${gridPoints.length}点（skip ${skippedPoints.length}点）`);
     }
 
+    // keepPolygons（proximity.within の到達圏＝各出口のisochrone等）が指定されたら、到達圏の
+    // 外にあるグリッド点は問い合わせない＝bbox矩形全体でなく「到達圏の合計」だけを収集する。
+    // 各点の円(半径radius)が到達圏に届く可能性を残すため、到達圏を radius ぶん buffer して内外判定。
+    if (keepPolygons?.length) {
+      const before = gridPoints.length;
+      let buffered;
+      try {
+        buffered = keepPolygons.map(p => turf.buffer(p, radius, { units: 'meters' })).filter(Boolean);
+      } catch (_) { buffered = keepPolygons; }
+      const kept = [];
+      for (const p of gridPoints) {
+        const pt = turf.point([p[0], p[1]]);
+        if (buffered.some(poly => turf.booleanPointInPolygon(pt, poly))) kept.push(p);
+        else skippedPoints.push(p);
+      }
+      gridPoints = kept;
+      if (this.config.DEBUG) console.log(`[MapboxMCP] 到達圏外skip: ${before}→${gridPoints.length}点`);
+    }
+
     if (this.config.DEBUG)
       console.log(`[MapboxMCP] グリッドTilequery: ${gridPoints.length}点 × r=${radius}m`);
 
@@ -1261,11 +1283,11 @@ class MapboxMCPClient {
    * @param {number}   radius
    * @returns {Promise<Array>} deduped poi_label items { name, longitude, latitude, distance, cls, maki }
    */
-  async buildPoiLabelGrid(bbox, radius = 65, holePolygon = null) {
+  async buildPoiLabelGrid(bbox, radius = 65, holePolygon = null, keepPolygons = null) {
     if (!bbox || bbox.length < 4) return [];
     const centerLng = (bbox[0] + bbox[2]) / 2;
     const centerLat = (bbox[1] + bbox[3]) / 2;
-    return this._gridTilequeryPOI(centerLat, centerLng, bbox, radius, holePolygon);
+    return this._gridTilequeryPOI(centerLat, centerLng, bbox, radius, holePolygon, keepPolygons);
   }
 
   /** Keep only items whose coordinate falls inside bbox (for partitioning a shared grid). */

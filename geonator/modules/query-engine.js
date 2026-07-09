@@ -1373,9 +1373,6 @@ class QueryEngine {
       if (mirrorTexts.has((c.text || '').trim())) return false; // anchor/target 複製 → within を縛る
       return true;
     });
-    console.log('[within-infer]', { text, inferred, mirrorTexts: [...mirrorTexts],
-      condTexts: (schema.conditions || []).map(c => ({ t: c.text, min: c.distance?.minutes, m: c.distance?.meters })),
-      dupCond, willSet: !dupCond });
     if (dupCond) return; // その距離は（anchor/targetとは別の）condition のもの → within にしない
     schema.proximity.within = inferred;
   }
@@ -1600,9 +1597,14 @@ class QueryEngine {
     const targetIsBuilding = ['category_mansion', 'category_apartment', 'category_building']
       .includes(target?.query_intent);
     const useGrid = targetIsBuilding || this.mcp._bboxToRadius(condBbox) <= 1500;
-    // proximity.within の穴（内側isochrone内）はグリッド点をskip（「n分以上」ドーナツのTQ削減）
+    // proximity.within の穴（内側isochrone内）はグリッド点をskip（「n分以上」ドーナツのTQ削減）。
+    // 到達圏polygon（n分以内isochrone・駅なら全出口のunion）があれば、bbox矩形全体でなく到達圏の
+    // 合計だけにグリッドを限定する（矩形の隅・出口間の隙間を問い合わせない＝TQ削減。結果は到達圏
+    // ハード足切りで元々落ちる領域なので recall 不変）。
     const _tg = this._pnow();
-    const sharedGrid = useGrid ? await this.mcp.buildPoiLabelGrid(condBbox, 65, this._reachHole || null) : null;
+    const sharedGrid = useGrid
+      ? await this.mcp.buildPoiLabelGrid(condBbox, 65, this._reachHole || null, this._reachPolygons || null)
+      : null;
     this._pf('　└ グリッド構築（Tilequery）', _tg);
 
     // Target collection (partition shared grid to the tight target bbox)
