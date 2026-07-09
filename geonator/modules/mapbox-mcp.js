@@ -916,7 +916,8 @@ class MapboxMCPClient {
     // ── Bus stop: use bus stop tileset only when explicitly mentioned ──
     if (isBusStop && effectiveProximity) {
       const [lng, lat] = effectiveProximity;
-      const radius = bbox ? Math.round(this._bboxToRadius(bbox)) : 500;
+      // バス停名の検索は単発tilequery（グリッドなし）。半径は500m固定（bbox依存で広げない）。
+      const radius = 500;
       if (this.config.DEBUG) console.log(`[MapboxMCP] バス停クエリ → バス停タイルセットのみ (r=${radius}m)`);
       const busStops = await this._busStopFallback(lat, lng, radius);
       busStops.forEach(item => { if (!seen.has(item.name)) seen.set(item.name, item); });
@@ -1369,8 +1370,8 @@ class MapboxMCPClient {
   // ─────────────────────────────────────────────────────────────
 
   async _busStopLocationSearch(lat, lng, radius) {
-    // グリッド方式: 1クエリ50件枠を節約
-    const GRID_RADIUS = 100;
+    // グリッド方式: 半径500mで1点あたり50件枠に収まる（新宿駅でも<50件と実測）＝点数を大幅削減
+    const GRID_RADIUS = 500;
     const DEG_LNG = 1 / (111320 * Math.cos(lat * Math.PI / 180));
     const DEG_LAT = 1 / 110540;
     const spacingM = GRID_RADIUS * 1.5;
@@ -1383,12 +1384,13 @@ class MapboxMCPClient {
         if (d <= radius) gridPoints.push([lng + ix * spacingM * DEG_LNG, lat + iy * spacingM * DEG_LAT]);
       }
     }
+    this._recordGridCircles(gridPoints, GRID_RADIUS); // デバッグ地図で可視化
 
     try {
       const results = await Promise.all(gridPoints.map(async ([gLng, gLat]) => {
         const url =
           `${this.config.TILEQUERY_API}/${gLng},${gLat}.json` +
-          `?access_token=${this.token}&radius=${GRID_RADIUS}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=transit_stop_label`;
+          `?access_token=${this.token}&radius=${GRID_RADIUS}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=transit_stop_label&geometry=point`;
         const res = await this._fetchTilequeryWithCache(url);
         if (!res.ok) return [];
         const data = await res.json();
@@ -2196,8 +2198,8 @@ class MapboxMCPClient {
   // ─────────────────────────────────────────────────────────────
 
   async _findIntersections(lat, lng, radius, nameFilter = null) {
-    // グリッド方式: 小半径(100m)で複数点から検索し道路線分による50件枠の圧迫を回避
-    const GRID_RADIUS = 100;
+    // グリッド方式: 半径500m＋geometry=point（交差点はpoint。道路線分を拾わないので50件枠に収まる／実測<50）
+    const GRID_RADIUS = 500;
     const DEG_LNG = 1 / (111320 * Math.cos(lat * Math.PI / 180));
     const DEG_LAT = 1 / 110540;
     const spacingM = GRID_RADIUS * 1.5;
@@ -2214,12 +2216,13 @@ class MapboxMCPClient {
         if (d <= radius) gridPoints.push([gLng, gLat]);
       }
     }
+    this._recordGridCircles(gridPoints, GRID_RADIUS); // デバッグ地図で可視化
 
     try {
       const results = await Promise.all(gridPoints.map(async ([gLng, gLat]) => {
         const url =
           `${this.config.TILEQUERY_API}/${gLng},${gLat}.json` +
-          `?access_token=${this.token}&radius=${GRID_RADIUS}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road`;
+          `?access_token=${this.token}&radius=${GRID_RADIUS}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road&geometry=point`;
         const res = await this._fetchTilequeryWithCache(url);
         if (!res.ok) return [];
         const data = await res.json();
@@ -2268,8 +2271,8 @@ class MapboxMCPClient {
   // ─────────────────────────────────────────────────────────────
 
   async _findTrafficSignals(lat, lng, radius) {
-    // グリッド方式: 道路線分による50件枠圧迫を回避
-    const GRID_RADIUS = 100;
+    // グリッド方式: 半径500m＋geometry=point（信号はpoint。道路線分を拾わないので50件枠に収まる／実測<50）
+    const GRID_RADIUS = 500;
     const DEG_LNG = 1 / (111320 * Math.cos(lat * Math.PI / 180));
     const DEG_LAT = 1 / 110540;
     const spacingM = GRID_RADIUS * 1.5;
@@ -2282,12 +2285,13 @@ class MapboxMCPClient {
         if (d <= radius) gridPoints.push([lng + ix * spacingM * DEG_LNG, lat + iy * spacingM * DEG_LAT]);
       }
     }
+    this._recordGridCircles(gridPoints, GRID_RADIUS); // デバッグ地図で可視化
 
     try {
       const results = await Promise.all(gridPoints.map(async ([gLng, gLat]) => {
         const url =
           `${this.config.TILEQUERY_API}/${gLng},${gLat}.json` +
-          `?access_token=${this.token}&radius=${GRID_RADIUS}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road`;
+          `?access_token=${this.token}&radius=${GRID_RADIUS}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true&layers=road&geometry=point`;
         const res = await this._fetchTilequeryWithCache(url);
         if (!res.ok) return [];
         const data = await res.json();
