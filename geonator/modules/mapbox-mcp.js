@@ -1146,9 +1146,23 @@ class MapboxMCPClient {
       const gMinLat = minLat + radiusLat;
       const gMaxLat = maxLat - radiusLat;
 
-      // Degenerate case: bbox smaller than 2*radius → single center point
+      // bbox が 2*radius より小さい場合：以前は「中心1点」に縮退させていたが、その1点は
+      // radius(=65m) しか届かず、到達圏内でも radius 外(66〜80m)の建物を取りこぼす＋密集地で
+      // 50件truncation。結果、条件の有無で条件bboxが広がると多点化して収集が変わる不整合の主因。
+      // → 小bboxでも bbox 全体を覆う最小グリッド（各軸最低2点・spacing≤radius で重なり被覆）を張る。
       if (gMinLng >= gMaxLng || gMinLat >= gMaxLat) {
-        gridPoints = [[(minLng + maxLng) / 2, (minLat + maxLat) / 2]];
+        const wM = (maxLng - minLng) / DEG_LNG, hM = (maxLat - minLat) / DEG_LAT;
+        const nnx = Math.max(2, Math.ceil(wM / radius) + 1);
+        const nny = Math.max(2, Math.ceil(hM / radius) + 1);
+        gridPoints = [];
+        for (let iy = 0; iy < nny; iy++) {
+          for (let ix = 0; ix < nnx; ix++) {
+            gridPoints.push([
+              minLng + ix * (maxLng - minLng) / (nnx - 1),
+              minLat + iy * (maxLat - minLat) / (nny - 1),
+            ]);
+          }
+        }
       } else {
         const widthM  = (gMaxLng - gMinLng) / DEG_LNG;
         const heightM = (gMaxLat - gMinLat) / DEG_LAT;
