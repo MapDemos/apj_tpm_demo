@@ -979,9 +979,11 @@ class MapboxMCPClient {
       });
 
       const rawCount = seen.size; // pre-slice merged count → overflow signal
+      // reach前に最寄150で切らない（到達圏の外側リングを取りこぼす／真の件数が見えずoverflow誘導が
+      // 出ない不具合の原因だった）。距離順のまま全件返し、query-engine が到達圏フィルタ後に
+      // CANDIDATE_LIMIT で丸める＋overflow判定する。
       const items = this._assignIds([...seen.values()]
-        .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
-        .slice(0, 150), isPrimary);
+        .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999)), isPrimary);
       const result = this._minify({
         source: 'Tilequery poi_label grid (buildings) + Search Box',
         count: items.length, items,
@@ -1072,10 +1074,11 @@ class MapboxMCPClient {
       });
     }
 
-    const rawCount = seen.size; // pre-slice merged count → overflow signal
+    const rawCount = seen.size; // merged count → overflow signal（真の件数）
+    // reach前に最寄150で切らない（外側リング取りこぼし＋overflow誘導不発の原因）。距離順で全件返し、
+    // query-engine が到達圏フィルタ後に CANDIDATE_LIMIT で丸める＋overflow判定する。
     const items = this._assignIds([...seen.values()]
-      .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
-      .slice(0, 150), isPrimary);
+      .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999)), isPrimary);
     const tqActuallyRan = hasPOIQuery && proximity?.length >= 2;
     const source = items.length
       ? (tqActuallyRan ? 'Search Box + Tilequery poi_label (parallel)' : 'Search Box API')
@@ -2088,10 +2091,11 @@ class MapboxMCPClient {
     if (!point || minMinutes == null) return null;
     const inner = await this.getIsochronePolygon(point.lat, point.lng, minMinutes, profile);
     if (!inner) return null;
-    if (maxMinutes != null) { // ドーナツ: 外側=iso(m)のbbox、内側=iso(n)で除外
+    if (maxMinutes != null) { // ドーナツ: 外側=iso(m)、内側=iso(n)で除外
       const outer = await this.getIsochronePolygon(point.lat, point.lng, maxMinutes, profile);
       if (!outer) return null;
-      return { bbox: turf.bbox(outer), hole: inner, tooLarge: false };
+      // outer polygon も返す：候補を「外側(m分)内 ∧ 内側(n分)外」＝リングに絞るため（bbox矩形だけだと隅が漏れる）
+      return { bbox: turf.bbox(outer), hole: inner, outer, tooLarge: false };
     }
     // n分以上（上限なし）: 外側=内側iso外接bboxを拡張。内側isoが既定bboxを覆うなら広すぎ。
     const ib = turf.bbox(inner);

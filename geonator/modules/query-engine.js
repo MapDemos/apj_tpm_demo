@@ -506,6 +506,8 @@ class QueryEngine {
       const reach = await this.mcp.computeWithinReach(resolvedPoints[0], { minMinutes: minMin, maxMinutes: maxMin, profile: prof }, defaultBbox);
       if (reach?.bbox) {
         bbox = reach.bbox; this._reachHole = reach.hole;
+        // 外側(m分)polygon があれば候補も「リング内」に絞る（bbox矩形の隅漏れ防止）。無ければ従来通りbboxのみ。
+        if (reach.outer) this._reachPolygons = [reach.outer];
         if (reach.tooLarge) this._withinNote = this._m().reachTooLarge(minMin, prof, schema.proximity.anchors?.[0]?.text || '');
       }
     } else if (maxMin != null) {
@@ -1593,7 +1595,13 @@ class QueryEngine {
         name: c.name || '(名前なし)', reason: `到達圏（proximity.within）外のため除外`,
       }));
       mainRaw = kept;
-      reachRaw = mainRaw.length;
+      reachRaw = mainRaw.length; // 到達圏内の"真の"件数（丸め前）→ _targetRaw/overflow判定に使う
+    }
+    // 到達圏フィルタ後（非到達圏クエリはそのまま）に CANDIDATE_LIMIT で最寄り順に丸める。
+    // reachRaw/raw_count が真の件数を保持するので、多すぎ(>CANDIDATE_LIMIT)なら overflow誘導が発火。
+    // ＝「最寄り150で切る」を到達圏フィルタの"後ろ"へ移動（外側リング取りこぼし・偏り・誘導不発の解消）。
+    if (mainRaw.length > this.config.CANDIDATE_LIMIT) {
+      mainRaw = mainRaw.slice(0, this.config.CANDIDATE_LIMIT);
     }
 
     // Conditions collection (partition shared grid to the wide condition bbox) — parallel
