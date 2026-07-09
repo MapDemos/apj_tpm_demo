@@ -1574,23 +1574,26 @@ class QueryEngine {
     mainRaw = await this._applyCategoryFilter(schema, mainRaw, condResults);
     this._pf('　└ L2-1 カテゴリ妥当性（LLM）', _t21);
 
-    // [3-B1] L2-2 relevance rating: remove 'no', tag kept as definitely/probably/unknown
+    // [3-B1] L2-2 relevance rating: target と poi条件を並列実行（①並列化）。
+    // 両者は別プール(mainRaw / condResults)を名前で採点するだけで相互に独立し、
+    // どちらも L2-1(カテゴリ)完了後の後段。以前は target→条件 の直列だったが、
+    // 独立なので Promise.all で畳み、直列2段ぶんのラウンドトリップを1段の壁時間に。
+    // poi条件も「no」を除外：L2-1は同分野を残す方針のため、スーパー条件に八百屋が
+    // 残る等が起きる。通常クエリ(target/condition)として挙動を揃え、条件も名前で弾く。
     const _t22 = this._pnow();
-    const { kept, excludedNames } = await this._rateMain(target, mainRaw);
-    this._pf('　└ L2-2 名前関連性・target（LLM）', _t22);
-
-    // [3-B1'] poi条件にも同じ名前ベース関連性(L2-2)を適用し「no」を除外。
-    // L2-1（カテゴリ）は同分野を残す方針のため、スーパー条件に八百屋が残る等が起きる。
-    // 通常クエリの一部（target/condition）として挙動を揃えるため、条件も名前で弾く。
-    const _t22c = this._pnow();
-    await Promise.all((schema.conditions || []).filter(c => c.type === 'poi').map(async c => {
-      const key = c.text ?? c.type;
-      const items = condResults[key];
-      if (!items?.length) return;
-      const { kept: keptCond } = await this._rateMain({ text: c.text, query_intent: c.query_intent || 'specific' }, items);
-      condResults[key] = keptCond;
-    }));
-    if ((schema.conditions || []).some(c => c.type === 'poi')) this._pf('　└ L2-2 名前関連性・条件（LLM）', _t22c);
+    const poiConds = (schema.conditions || []).filter(c => c.type === 'poi');
+    const [mainRated] = await Promise.all([
+      this._rateMain(target, mainRaw),
+      ...poiConds.map(async c => {
+        const key = c.text ?? c.type;
+        const items = condResults[key];
+        if (!items?.length) return;
+        const { kept: keptCond } = await this._rateMain({ text: c.text, query_intent: c.query_intent || 'specific' }, items);
+        condResults[key] = keptCond;
+      }),
+    ]);
+    const { kept, excludedNames } = mainRated;
+    this._pf('　└ L2-2 名前関連性・target＋条件（並列/LLM）', _t22);
 
     // Debug: target + condition collection breakdown
     const tdbg = this.mcp._lastTargetDebug || null;
@@ -2162,7 +2165,11 @@ class QueryEngine {
 
     // Reset telemetry for this refine cycle BEFORE computing suggestions, so the L3
     // suggestion call is counted (otherwise the reset would wipe its stats).
+    // API リクエストカウンタもここでリセット：以前は run() でしかリセットされず、絞り込みの
+    // stats に初回クエリぶんの SB/TQ/ISO が累積表示されて紛らわしかった（LLMだけリセットされ
+    // API側が据え置き＝噛み合わない）。この絞り込み操作ぶんだけを計上する。per-opキャップも刷新。
     this.llm.resetStats?.();
+    this.mcp.resetRequestCounts?.();
     this._runStart = Date.now();
 
     // [L3] Agent suggestions (narrow only): differentiating landmarks near the top-tier
@@ -2172,9 +2179,24 @@ class QueryEngine {
     // 例）A は離れていて固有の目印あり、B/C は目印なし → A=目印, B/C=階数（一意なら）。
     let suggestions = [];
     if (action === 'narrow') {
-      const landmarks = await this._computeSuggestions(schema);
+      // 目印(poi_labelグリッド)と階数(building点クエリ)は別レイヤーだが、階数の"取得"は
+      // 目印に依存しない（coveredIdsは階数の"提示"だけに効く）。以前は目印(グリッド＋LLM)の
+      // 完了を待って building Tilequery を直列に叩いていたが、building fetch を目印計算と
+      // 並列で先行させ、suggestLandmarks(LLM)の裏で階数を c._floors に埋めておく（同時実行）。
+      // _basisTier は候補の参照を返すので、ここで埋めた floors を _computeFloorSuggestions が
+      // そのまま再利用（再fetchなし）。幾何は変えず精度そのまま、直列2段を1段の壁時間に畳む。
+      const floorBasis = this._basisTier(this._cache.surfaced || []).slice(0, 5);
+      const [landmarks] = await Promise.all([
+        this._computeSuggestions(schema),
+        Promise.all(floorBasis.map(async c => {
+          if (c._floors === undefined) {
+            const lat = c.latitude ?? c.lat, lng = c.longitude ?? c.lng;
+            c._floors = (lat != null && lng != null) ? await this.mcp._getBuildingFloors(lat, lng) : null;
+          }
+        })),
+      ]);
       const covered = new Set(landmarks.map(s => s.candId).filter(id => id != null));
-      const floors  = await this._computeFloorSuggestions(schema, covered);
+      const floors  = await this._computeFloorSuggestions(schema, covered); // c._floors済み→ネットワーク無し
       suggestions = [...landmarks, ...floors];
 
       // デバッグ: なぜサジェストが出た/出ないのかを可視化（プール・各候補の階数・目印割り当て）。
