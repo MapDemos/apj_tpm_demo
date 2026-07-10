@@ -91,25 +91,28 @@ class QueryEngine {
     const gen = (this._runGen = (this._runGen || 0) + 1); // 実行世代（新クエリ/キャンセルで無効化）
     this.ui.clearResults();
 
-    // 確認文を「真っ先に」出すため、軽量な確認文(Haiku)をフルのL1解析(Sonnet)と【並行】発行。
-    // 先に返った方を表示（通常Haikuが速い）。L1側の confirmation はフォールバック。
+    // L0: 会話の入口。ユーザーの発話に自然文で必ず一言返す（検索依頼／雑談／ミッション外を問わず）。
+    // L1-2(parseQuery)と並列発行。_parseAndValidate に l0Promise を渡し、L0が既に応答済みなら
+    // not_a_query 等の定型メッセージは出さない（二重発話の防止）。confirmInput(L1-1)は非活性化
+    // （メソッド自体はllm-client.jsに温存）。
     let confirmShown = false;
-    this.llm.confirmInput?.(merged, this._langCode())
-      ?.then(msg => {
-        if (msg && !confirmShown) { confirmShown = true; this.ui.showMessage(msg); this.ui.thinking?.(); }
+    const l0Promise = (this.llm.converse?.(merged, this._langCode()) ?? Promise.resolve(''))
+      .then(msg => {
+        if (msg && !confirmShown) { confirmShown = true; this.ui.showL0Message?.(msg); this.ui.thinking?.(); }
+        return !!msg;
       })
-      ?.catch(() => {});
+      .catch(() => false);
 
     const _tp = this._pnow();
-    const schema = await this._parseAndValidate(merged, null);
+    const schema = await this._parseAndValidate(merged, null, false, l0Promise);
     this._pf('⓪ L1解析（検証・再試行・意図確認込）', _tp);
     if (!schema) return; // clarification was handled inside
     if (this._aborted(gen)) return; // キャンセル/新クエリなら以降の描画をしない
 
     this._dbgReport.schema = schema;
 
-    // 高速確認がまだ出ていなければ（Haiku失敗/解析の方が速かった等）L1の confirmation を表示。
-    if (!confirmShown && schema.confirmation) { confirmShown = true; this.ui.showMessage(schema.confirmation); }
+    // L0がまだ応答していなければ（失敗/解析の方が速かった等）L1の confirmation をL0の声として表示。
+    if (!confirmShown && schema.confirmation) { confirmShown = true; this.ui.showL0Message?.(schema.confirmation); }
 
     // 除外事項は表示された確認文(Haiku/Sonnet いずれか)に載らないことがあるため、JS側で決定的に
     // 注記する。透明化 A=上限超過の地理条件 / B=非地理的な特徴(壁が赤い等)。両方を1吹き出しに。
@@ -157,7 +160,7 @@ class QueryEngine {
   // [2] L1 parse + [A] structural checks + [II] validate
   // ─────────────────────────────────────────────
 
-  async _parseAndValidate(userText, previousText, skipInterp = false) {
+  async _parseAndValidate(userText, previousText, skipInterp = false, l0Promise = null) {
     // ブロークンな入力（音声等）は L1 が場所依頼を取りこぼすことがある。手がかりがありそうな
     // （＝それなりの長さの）入力で not_a_query/必須欠落になったら、注記を付けて再試行する。
     // 挨拶等の短い入力は1回で確定（無駄な再試行をしない）。temp=0でも注記でプロンプトが変わり
@@ -182,12 +185,16 @@ class QueryEngine {
       schema = null;                                // substantial なら注記付きで再試行
     }
     if (!schema) {
+      // l0Promise: L0が既にこのターンで何か発話済みなら、定型メッセージは二重発話になるため出さない。
+      // フラグではなく実際に await するのは、短文入力の即時棄却(このパス)がL0のネットワーク往復より
+      // 速く終わりうるため（フラグだけだと競合し、先に定型文→直後にL0の発話、が起きる）。
+      const l0Replied = l0Promise ? await l0Promise : false;
       if (lastErr) {
         // デバッグモードでは根本原因（打ち切り・不正JSON・HTTP等）をそのまま可視化する。
         this.ui.showDebug?.(`⚠️ L1解析エラー\n${lastErr?.message || String(lastErr)}`);
-        this.ui.showMessage(this._friendlyError(lastErr));
+        if (!l0Replied) this.ui.showMessage(this._friendlyError(lastErr));
       } else {
-        this.ui.showMessage(this._m().not_a_query); // 再試行しても場所依頼と取れなかった
+        if (!l0Replied) this.ui.showMessage(this._m().not_a_query); // 再試行しても場所依頼と取れなかった
       }
       return null;
     }
@@ -198,11 +205,12 @@ class QueryEngine {
       console.warn('[QueryEngine] L1 schema invalid:', validation.errors);
       // デバッグモードでは検証エラーの中身（どのフィールドが不正か）を可視化する。
       this.ui.showDebug?.(`⚠️ L1スキーマ検証エラー\n${(validation.errors || []).join('\n')}`);
+      const l0Replied = l0Promise ? await l0Promise : false;
       // If it lacks the essentials, it's more likely a non-query than a comm error.
       if (!schema?.proximity?.anchors?.length || !schema?.target?.text) {
-        this.ui.showMessage(this._m().not_a_query);
+        if (!l0Replied) this.ui.showMessage(this._m().not_a_query);
       } else {
-        this.ui.showMessage(this._m().err_understand); // 構造が崩れた＝解釈できなかった扱い
+        if (!l0Replied) this.ui.showMessage(this._m().err_understand); // 構造が崩れた＝解釈できなかった扱い
       }
       return null;
     }

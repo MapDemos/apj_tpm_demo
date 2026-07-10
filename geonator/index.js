@@ -87,8 +87,8 @@ class LocationFinderApp {
       // 5. Init JS-driven QueryEngine (new architecture)
       this._initQueryEngine();
 
-      // 6. Welcome message (bilingual via LANG)
-      this.addMessage('assistant', LANG[this._lang].welcome);
+      // 6. Welcome message (bilingual via LANG) — L0の固定挨拶（LLM呼び出しではなく決め打ち文言）
+      this.addMessage('l0', LANG[this._lang].welcome);
 
       // Build version in header (キャッシュで古いJSを読んでいないかの確認用)
       const verEl = document.getElementById('app-version');
@@ -112,8 +112,9 @@ class LocationFinderApp {
     // target-relevance model, so it maps to L2_2; L2_1 defaults to Haiku).
     try {
       const saved = JSON.parse(localStorage.getItem('geonator_models') || '{}');
+      if (saved.L0)   this.config.L0_MODEL   = saved.L0;   // L0（会話マネジメント）
       if (saved.L1)   this.config.L1_MODEL   = saved.L1;   // L1-2（クエリ解析）
-      if (saved.L1c)  this.config.L1_CONFIRM_MODEL = saved.L1c; // L1-1（確認文の先出し）
+      if (saved.L1c)  this.config.L1_CONFIRM_MODEL = saved.L1c; // L1-1（確認文の先出し・非活性）
       if (saved.L1_3) this.config.L1_3_MODEL = saved.L1_3; // L1-3（広域の絞り込み提案）
       if (saved.L2_1) this.config.L2_1_MODEL = saved.L2_1;
       if (saved.L2_2) this.config.L2_2_MODEL = saved.L2_2;
@@ -137,6 +138,7 @@ class LocationFinderApp {
       if (b.floors === 'hard' || b.floors === 'soft')             this.config.FLOORS_MODE       = b.floors;
     } catch (_) {}
 
+    const l0Sel  = document.getElementById('l0ModelSelect');
     const l1Sel  = document.getElementById('l1ModelSelect');
     const l1cSel = document.getElementById('l1ConfirmModelSelect');
     const l1_3Sel = document.getElementById('l1_3ModelSelect');
@@ -148,6 +150,7 @@ class LocationFinderApp {
     const sbModeSel  = document.getElementById('sameBuildingModeSelect');
     const flModeSel  = document.getElementById('floorsModeSelect');
     const modal  = document.getElementById('settingsModal');
+    if (l0Sel)  l0Sel.value  = this.config.L0_MODEL;
     if (l1Sel)  l1Sel.value  = this.config.L1_MODEL;
     if (l1cSel) l1cSel.value = this.config.L1_CONFIRM_MODEL;
     if (l1_3Sel) l1_3Sel.value = this.config.L1_3_MODEL;
@@ -163,6 +166,7 @@ class LocationFinderApp {
     const persist = () => {
       try {
         localStorage.setItem('geonator_models', JSON.stringify({
+          L0: this.config.L0_MODEL,
           L1: this.config.L1_MODEL, L1c: this.config.L1_CONFIRM_MODEL, L1_3: this.config.L1_3_MODEL,
           L2_1: this.config.L2_1_MODEL, L2_2: this.config.L2_2_MODEL, L3: this.config.L3_MODEL,
         }));
@@ -178,6 +182,7 @@ class LocationFinderApp {
     const persistJudge = () => {
       try { localStorage.setItem('geonator_judge', JSON.stringify({ sameBuilding: this.config.SAME_BUILDING_MODE, floors: this.config.FLOORS_MODE })); } catch (_) {}
     };
+    l0Sel?.addEventListener('change',  e => { this.config.L0_MODEL   = e.target.value; persist(); });
     l1Sel?.addEventListener('change',  e => { this.config.L1_MODEL   = e.target.value; persist(); });
     l1cSel?.addEventListener('change', e => { this.config.L1_CONFIRM_MODEL = e.target.value; persist(); });
     l1_3Sel?.addEventListener('change', e => { this.config.L1_3_MODEL = e.target.value; persist(); });
@@ -205,8 +210,9 @@ class LocationFinderApp {
     // relevance等もHaikuで実用十分と確認できたため。必要なら設定画面で個別に Sonnet 等へ変更可。
     const HAIKU = 'claude-haiku-4-5-20251001';
     // L2-2(target関連性)だけ名前ニュアンス判定のため Sonnet 4.6 既定。他は Haiku（速さ優先）。
-    const MODEL_DEFAULTS = { L1: HAIKU, L1c: HAIKU, L1_3: HAIKU, L2_1: HAIKU, L2_2: 'claude-sonnet-4-6', L3: HAIKU };
+    const MODEL_DEFAULTS = { L0: HAIKU, L1: HAIKU, L1c: HAIKU, L1_3: HAIKU, L2_1: HAIKU, L2_2: 'claude-sonnet-4-6', L3: HAIKU };
     document.getElementById('settingsResetBtn')?.addEventListener('click', () => {
+      this.config.L0_MODEL   = MODEL_DEFAULTS.L0;
       this.config.L1_MODEL   = MODEL_DEFAULTS.L1;
       this.config.L1_CONFIRM_MODEL = MODEL_DEFAULTS.L1c;
       this.config.L1_3_MODEL = MODEL_DEFAULTS.L1_3;
@@ -217,6 +223,7 @@ class LocationFinderApp {
       this.config.MAX_CONDITIONS = 3;              // default condition cap
       this.config.SAME_BUILDING_MODE = 'hard';     // default: hard filter
       this.config.FLOORS_MODE        = 'hard';     // default: hard filter
+      if (l0Sel)  l0Sel.value  = MODEL_DEFAULTS.L0;
       if (l1Sel)  l1Sel.value  = MODEL_DEFAULTS.L1;
       if (l1cSel) l1cSel.value = MODEL_DEFAULTS.L1c;
       if (l1_3Sel) l1_3Sel.value = MODEL_DEFAULTS.L1_3;
@@ -311,7 +318,7 @@ class LocationFinderApp {
     const el = document.getElementById('model-badge');
     if (!el) return;
     const s = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
-    el.textContent = `L1-1:${s(this.config.L1_CONFIRM_MODEL)} / L1-2:${s(this.config.L1_MODEL)} / L1-3:${s(this.config.L1_3_MODEL)} / L2-1:${s(this.config.L2_1_MODEL)} / L2-2:${s(this.config.L2_2_MODEL)} / L3:${s(this.config.L3_MODEL)}`;
+    el.textContent = `L0:${s(this.config.L0_MODEL)} / L1-2:${s(this.config.L1_MODEL)} / L1-3:${s(this.config.L1_3_MODEL)} / L2-1:${s(this.config.L2_1_MODEL)} / L2-2:${s(this.config.L2_2_MODEL)} / L3:${s(this.config.L3_MODEL)}`;
   }
 
   /** 各役割の推奨モデル（＝既定）のオプションに「（推奨）」を付す。言語に追従。 */
@@ -319,7 +326,8 @@ class LocationFinderApp {
     const suffix = this._lang === 'en' ? ' (Recommended)' : '（推奨）';
     // MODEL_DEFAULTS と一致させること（役割ごとの既定＝推奨）。全ロール Haiku 既定（速さ優先）。
     const rec = {
-      l1ConfirmModelSelect: 'claude-haiku-4-5-20251001', // L1-1 確認文
+      l0ModelSelect:   'claude-haiku-4-5-20251001',      // L0 会話マネジメント
+      l1ConfirmModelSelect: 'claude-haiku-4-5-20251001', // L1-1 確認文（非活性）
       l1ModelSelect:   'claude-haiku-4-5-20251001',      // L1-2 解析
       l1_3ModelSelect: 'claude-haiku-4-5-20251001',      // L1-3 広域絞り込み提案
       l2_1ModelSelect: 'claude-haiku-4-5-20251001',
@@ -439,6 +447,10 @@ class LocationFinderApp {
     return {
       showMessage(text) {
         self.addMessage('assistant', text);
+      },
+      // L0（会話マネジメント）の発話。既存の assistant とは別ロール・別スタイルで表示する。
+      showL0Message(text) {
+        self.addMessage('l0', text);
       },
       showSearching(text) {
         self._updateThinking(text);
@@ -595,7 +607,7 @@ class LocationFinderApp {
         // ロール別トークン（0回は除外）＋ モデル別集計 ＋ 総計
         const roleData = [];
         let totIn = 0, totOut = 0;
-        for (const [role, s] of [['L1-1', stats.llm?.L1c], ['L1-2', stats.llm?.L1], ['L1-3', stats.llm?.L1_3], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
+        for (const [role, s] of [['L0', stats.llm?.L0], ['L1-1', stats.llm?.L1c], ['L1-2', stats.llm?.L1], ['L1-3', stats.llm?.L1_3], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
           if (!s || !s.calls) continue;
           roleData.push({ role, ...s });
           totIn += s.inTok; totOut += s.outTok;
@@ -1259,7 +1271,7 @@ class LocationFinderApp {
     document.getElementById('mapStatus').textContent = '地図の準備ができました';
     const examples = document.getElementById('examplesArea');
     if (examples) examples.style.display = '';
-    this.addMessage('assistant', LANG[this._lang].welcome);
+    this.addMessage('l0', LANG[this._lang].welcome);
   }
 
   /**
@@ -2709,6 +2721,7 @@ class LocationFinderApp {
     const roleLabels = {
       user:           t.roleUser,
       assistant:      t.roleAssistant,
+      l0:             t.roleL0,
       'thinking-msg': t.roleThinking,
       'tool-status':  t.roleTool,
       error:          t.roleError,
@@ -3149,7 +3162,7 @@ class LocationFinderApp {
     // Update welcome message if conversation hasn't started yet
     const hasUserMsg = document.querySelectorAll('#chatMessages .message.user').length > 0;
     if (!hasUserMsg) {
-      const firstBubble = document.querySelector('#chatMessages .message.assistant .message-bubble');
+      const firstBubble = document.querySelector('#chatMessages .message.l0 .message-bubble');
       if (firstBubble) firstBubble.innerHTML = _formatMsg(t.welcome);
     }
 
@@ -3318,12 +3331,11 @@ const LANG = {
     examplesLabel: '入力例',
     mapReady:      '地図の準備ができました',
     mapLoading:    '地図を読み込み中…',
-    welcome:
-      'こんにちは、ジオネーターです！\n\n' +
-      '曖昧な言葉から、場所を特定します。近くのお店や、駅、方角、道路、川や海など、特徴的なものをいくつか教えてください。',
+    welcome: 'こんにちは、ジオネーターです！どこを探しますか？',
     // Chat role labels
     roleUser:      'オペレーター',
     roleAssistant: 'AI エージェント',
+    roleL0:        'ジオネーター',
     roleThinking:  'AI 思考',
     roleTool:      'ツール実行',
     roleError:     'エラー',
@@ -3447,11 +3459,10 @@ const LANG = {
     examplesLabel: 'Examples',
     mapReady:      'Map ready',
     mapLoading:    'Loading map…',
-    welcome:
-      'Hi, I\'m Geonator!\n\n' +
-      'I identify locations from vague descriptions. Share nearby features — stores, stations, directions, roads, rivers, or landmarks.',
+    welcome: 'Hi, I\'m Geonator! Where would you like to search?',
     roleUser:      'Caller',
     roleAssistant: 'AI Agent',
+    roleL0:        'Geonator',
     roleThinking:  'AI Thinking',
     roleTool:      'Tool',
     roleError:     'Error',

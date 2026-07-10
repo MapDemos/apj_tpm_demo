@@ -321,6 +321,7 @@ body { display: flex; flex-direction: column; }
 .message { display: flex; flex-direction: column; max-width: 94%; }
 .message.user { align-self: flex-end; align-items: flex-end; }
 .message.assistant,
+.message.l0,
 .message.thinking-msg,
 .message.tool-status,
 .message.error { align-self: flex-start; align-items: flex-start; }
@@ -348,6 +349,14 @@ body { display: flex; flex-direction: column; }
   background: var(--bg-card);
   color: var(--text-1);
   border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+/* L0（会話マネジメント）: assistantと同じ基本形だが、左アクセントバーで別ロールと視覚的に区別 */
+.message.l0 .message-bubble {
+  background: var(--bg-card);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
   border-bottom-left-radius: 4px;
 }
 .message.thinking-msg .message-bubble {

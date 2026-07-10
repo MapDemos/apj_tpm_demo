@@ -14,6 +14,7 @@ class LLMClient {
   resetStats() {
     // cacheRead/cacheWrite: プロンプトキャッシュのヒット可視化用（read=約0.1倍/write=約1.25倍）。
     this.stats = {
+      L0:   { model: this.config.L0_MODEL,   inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L1c:  { model: this.config.L1_CONFIRM_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L1:   { model: this.config.L1_MODEL,   inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L1_3: { model: this.config.L1_3_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
@@ -199,6 +200,24 @@ class LLMClient {
    * 解析はしない＝ユーザーの依頼の丁寧な復唱のみ。場所探し以外なら空文字。
    * @returns {Promise<string>}
    */
+  /**
+   * L0: 会話マネジメント。confirmInput(L1-1)の後継。必ず何か返す（非query/雑談でも沈黙しない）。
+   * @returns {Promise<string>}
+   */
+  async converse(userText, lang = 'ja') {
+    if (typeof PROMPT_L0 === 'undefined') return '';
+    try {
+      const langNote = lang === 'en' ? '\nReply in English.' : '';
+      const result = await this._callClaude(
+        { system: PROMPT_L0, user: `発話:\n${userText}${langNote}` },
+        220,
+        this.config.L0_MODEL || 'claude-haiku-4-5-20251001',
+        'L0'
+      );
+      return (result || '').trim().replace(/^["「]|["」]$/g, '');
+    } catch { return ''; }
+  }
+
   async confirmInput(userText, lang = 'ja') {
     if (typeof PROMPT_CONFIRM === 'undefined') return '';
     try {

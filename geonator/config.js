@@ -9,7 +9,7 @@
 const CONFIG = {
 
   // ビルド確認用バージョン（キャッシュで古いJSを読んでいないかの切り分けに使う）。変更ごとに更新。
-  APP_VERSION: '2026-07-10.1330',
+  APP_VERSION: '2026-07-10.1358',
 
   // ============================================
   // API KEYS
@@ -31,8 +31,9 @@ const CONFIG = {
   // Per-role models (JS-driven arch). Changeable from the ⚙️ settings modal.
   // 全ロール Haiku 既定（速さ優先）。load-bearing フィールド(within/floors)はJS保険で復元、
   // relevance/解析もHaikuで実用十分と確認済み。精度を上げたい役割だけ設定画面で Sonnet 等へ。
+  L0_MODEL:        'claude-haiku-4-5-20251001', // L0: 会話マネジメント（毎ターン必ず発火・速度優先でHaiku既定）
   L1_MODEL:        'claude-haiku-4-5-20251001', // query parsing（proximity/target切り分け・intent等）
-  L1_CONFIRM_MODEL:'claude-haiku-4-5-20251001', // 高速確認文（L1と並行・真っ先に「〜を探しますね」）
+  L1_CONFIRM_MODEL:'claude-haiku-4-5-20251001', // 高速確認文（L1と並行・真っ先に「〜を探しますね」）※L0導入後は非活性
   // L2-1 = category妥当性チェック（poi_category/class）／L2-2 = Target関連性（名前ベース4段階）
   L2_1_MODEL:      'claude-haiku-4-5-20251001', // category validity
   L2_2_MODEL:      'claude-sonnet-4-6',         // target relevance（名前ニュアンス判定→Sonnet既定）

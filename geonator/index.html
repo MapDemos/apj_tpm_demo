@@ -69,14 +69,23 @@
       <!-- ① モデル -->
       <div class="settings-subtitle" id="set-model-title">モデル</div>
       <label class="settings-row">
-        <span id="set-l1c-label">L1-1（確認文の先出し）</span>
+        <span id="set-l0-label">L0（会話マネジメント）</span>
+        <select id="l0ModelSelect">
+          <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+          <option value="claude-sonnet-5">Sonnet 5</option>
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+        </select>
+      </label>
+      <div class="settings-modelwhy" id="set-l0-why">ユーザーとの対話全般（挨拶・雑談・ミッション外の切り分け含む）を担当。毎ターン必ず発火するため速さ優先でHaiku推奨。対話の質を重視するならSonnetへ。</div>
+      <label class="settings-row">
+        <span id="set-l1c-label">L1-1（確認文の先出し・非活性）</span>
         <select id="l1ConfirmModelSelect">
           <option value="claude-sonnet-4-6">Sonnet 4.6</option>
           <option value="claude-sonnet-5">Sonnet 5</option>
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
         </select>
       </label>
-      <div class="settings-modelwhy" id="set-l1c-why">ユーザーの依頼を一文で復唱して確認するだけの軽量処理。解析(L1-2)と並行して真っ先に出すので、速さ優先で Haiku 推奨。</div>
+      <div class="settings-modelwhy" id="set-l1c-why">L0導入により現在は呼び出されません（コードは温存）。</div>
       <label class="settings-row">
         <span id="set-l1-label">L1-2（クエリ解析）</span>
         <select id="l1ModelSelect">
@@ -337,6 +346,7 @@
   <script src="data/poi-blocklist.js"></script>
 
   <!-- 2. Prompts (L1/L2 for JS-driven arch + legacy) -->
+  <script src="./prompts/prompt-l0.js"></script>
   <script src="./prompts/prompt-l1.js"></script>
   <script src="./prompts/prompt-l2.js"></script>
 
