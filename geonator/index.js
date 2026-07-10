@@ -599,6 +599,7 @@ class LocationFinderApp {
           ['Search Box API',   mcp._sbRequests  ?? 0],
           ['Tilequery API',    mcp._tqRequests  ?? 0],
           ['Isochrone API',    mcp._isoRequests ?? 0],
+          ['Matrix API',       mcp._matrixRequests ?? 0],
           ['Static Images API', mcp._siRequests ?? 0],
         ];
 
@@ -1161,6 +1162,7 @@ class LocationFinderApp {
       this.mapboxMCP._tqCacheHits = 0;
       this.mapboxMCP._isoRequests  = 0;
       this.mapboxMCP._isoCacheHits = 0;
+      this.mapboxMCP._matrixRequests = 0;
       this.mapboxMCP._tqCache.clear();
       this.mapboxMCP._poiGridCache?.clear();
       this.mapboxMCP._searchResultCache?.clear();
@@ -3112,6 +3114,8 @@ class LocationFinderApp {
     if (iso) iso.textContent = isoHits > 0
       ? `ISO: ${isoReal} req (+${isoHits}↩)`
       : `ISO: ${isoReal} req`;
+    const mx = document.getElementById('api-counter-mx');
+    if (mx) mx.textContent = `MX: ${this.mapboxMCP?._matrixRequests ?? 0} req`;
   }
 
   _updateTokenDisplay() {
