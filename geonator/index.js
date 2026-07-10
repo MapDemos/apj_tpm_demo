@@ -1181,6 +1181,15 @@ class LocationFinderApp {
     // Resolve any pending feedback wait (unknown value → _handleFeedback does nothing,
     // so run() returns cleanly and _handleSend's finally re-enables the input).
     if (this._feedbackResolve) { this._feedbackResolve(null); this._feedbackResolve = null; }
+    // [fix] 入力欄の再有効化を非同期の巻き戻り(run()→_execQuery.finally)に依存しない。
+    // クエリ実行中（フィードバック/ヒント/デバッグ一時停止に達する前＝解決すべき保留が無い状態）に
+    // クリアすると、その巻き戻りが発生せず _querying=true / input.disabled=true が残り、空パネルなのに
+    // 入力できないバグになる。ここで明示的に中断＋ロック解除＋強制再有効化する（クリア後は必ず入力可能に）。
+    // 並行実行の旧run()は _execQuery の _advanceMapGen による世代ガードで描画を止めるので安全。
+    this._cancelled = true;   // 実行中クエリを中断（run()/mcp が参照して停止）
+    this._querying  = false;  // 実行ロック解除
+    { const _in = document.getElementById('chatInput'), _sb = document.getElementById('sendBtn');
+      if (_in) _in.disabled = false; if (_sb) _sb.disabled = false; }
     // Hide the in-progress "検索しています" widget immediately (belt-and-braces;
     // _handleSend's finally also hides it once the resolved run() returns).
     this._hideThinking?.();
