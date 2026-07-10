@@ -196,28 +196,39 @@ class LLMClient {
   }
 
   /**
-   * 高速な確認文だけを生成（L1本体と並行してHaikuで実行し、真っ先に「〜を探しますね」を出す）。
-   * 解析はしない＝ユーザーの依頼の丁寧な復唱のみ。場所探し以外なら空文字。
-   * @returns {Promise<string>}
+   * L0: 会話マネジメント＋意図分類。confirmInput(L1-1)の後継。必ず何か返す（非query/雑談でも沈黙しない）。
+   * 振り分け（intent）＝非決定でよい。地理的な意味の確定はしない（それはエンジンの仕事）。
+   * @returns {Promise<{intent: 'new_search'|'refine'|'chatter'|'off_mission', reply: string}>}
    */
-  /**
-   * L0: 会話マネジメント。confirmInput(L1-1)の後継。必ず何か返す（非query/雑談でも沈黙しない）。
-   * @returns {Promise<string>}
-   */
-  async converse(userText, lang = 'ja') {
-    if (typeof PROMPT_L0 === 'undefined') return '';
+  async converse(userText, lang = 'ja', history = []) {
+    const fallback = { intent: 'new_search', reply: '' };
+    if (typeof PROMPT_L0 === 'undefined') return fallback;
     try {
       const langNote = lang === 'en' ? '\nReply in English.' : '';
+      const messages = [
+        ...history.map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.text })),
+        { role: 'user', content: `発話:\n${userText}${langNote}` },
+      ];
       const result = await this._callClaude(
-        { system: PROMPT_L0, user: `発話:\n${userText}${langNote}` },
+        { system: PROMPT_L0, messages },
         220,
         this.config.L0_MODEL || 'claude-haiku-4-5-20251001',
         'L0'
       );
-      return (result || '').trim().replace(/^["「]|["」]$/g, '');
-    } catch { return ''; }
+      const json = this._extractJSON(result);
+      if (!json || typeof json.reply !== 'string') return fallback;
+      return {
+        intent: ['new_search', 'refine', 'chatter', 'off_mission'].includes(json.intent) ? json.intent : 'new_search',
+        reply: json.reply.trim().replace(/^["「]|["」]$/g, ''),
+      };
+    } catch { return fallback; }
   }
 
+  /**
+   * 高速な確認文だけを生成（L1本体と並行してHaikuで実行し、真っ先に「〜を探しますね」を出す）。
+   * 解析はしない＝ユーザーの依頼の丁寧な復唱のみ。場所探し以外なら空文字。L0導入後は非活性。
+   * @returns {Promise<string>}
+   */
   async confirmInput(userText, lang = 'ja') {
     if (typeof PROMPT_CONFIRM === 'undefined') return '';
     try {
@@ -394,7 +405,9 @@ class LLMClient {
         model:      useModel,
         max_tokens: maxTokens,
         system: systemField,
-        messages: [{ role: 'user', content: prompt.user }],
+        // prompt.messages（多ターン履歴込みの配列）が渡された場合はそれを使う。
+        // 従来どおり prompt.user のみの呼び出し（L1/L2/L3等）は単発メッセージのまま。
+        messages: Array.isArray(prompt.messages) ? prompt.messages : [{ role: 'user', content: prompt.user }],
       };
       // temperature は対応モデルにだけ付与（5世代/Opus4.7+ は送ると400）。
       if (this._supportsTemperature(useModel)) reqBody.temperature = 0;

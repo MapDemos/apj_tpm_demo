@@ -39,6 +39,16 @@ class QueryEngine {
     this._awaitingClarify = false; // last run ended asking for more info (main-input answer merges)
     this._ratingCache = new Map(); // L2-2 relevance cache: "intent||name" → definitely|probably|unknown|no (session stability)
     this._catCache    = new Map(); // L2-1 category cache: "intent||sortedCats" → { remove_poi_category:Set, remove_class:Set }
+    this._convHistory = []; // L0多ターン履歴: {role:'user'|'l0', text}[]。検索セッション(_cache等)とはライフサイクル分離＝run()でもクリアしない
+  }
+
+  /** L0会話履歴に1ターン追記し、直近 N 件（既定10=5往復）でトリムする（JS決定的・LLM不使用）。
+   *  エンジンに渡す実際のクエリテキストには使わず、L0の応答生成用の文脈としてのみ使う。 */
+  _recordTurn(role, text) {
+    if (!text) return;
+    this._convHistory.push({ role, text });
+    const max = this.config.L0_HISTORY_MAX_TURNS || 10;
+    if (this._convHistory.length > max) this._convHistory.splice(0, this._convHistory.length - max);
   }
 
   /** Localized message bundle for the current UI language. */
@@ -98,17 +108,24 @@ class QueryEngine {
     // not_a_query 等の定型メッセージは出さない（二重発話の防止）。confirmInput(L1-1)は非活性化
     // （メソッド自体はllm-client.jsに温存）。
     let confirmShown = false;
-    const l0Promise = (this.llm.converse?.(merged, this._langCode()) ?? Promise.resolve(''))
-      .then(msg => {
-        if (msg && !confirmShown) { confirmShown = true; this.ui.showL0Message?.(msg); this.ui.thinking?.(); }
-        return !!msg;
+    const l0Promise = (this.llm.converse?.(merged, this._langCode(), this._convHistory) ?? Promise.resolve({ intent: 'new_search', reply: '' }))
+      .then(({ intent, reply }) => {
+        this._recordTurn('user', merged);
+        if (reply) this._recordTurn('l0', reply);
+        this._dbgReport.l0Intent = intent; // デバッグ表示専用。制御フローの分岐にはまだ使わない
+        if (reply && !confirmShown) { confirmShown = true; this.ui.showL0Message?.(reply); this.ui.thinking?.(); }
+        return !!reply;
       })
       .catch(() => false);
 
     const _tp = this._pnow();
     const schema = await this._parseAndValidate(merged, null, false, l0Promise);
     this._pf('⓪ L1解析（検証・再試行・意図確認込）', _tp);
-    if (!schema) return; // clarification was handled inside
+    if (!schema) {
+      // schema化されない発話（雑談/ミッション外/解釈不能）でもL0のintent分類はデバッグで見えるようにする。
+      if (this._dbgReport.l0Intent) this.ui.showDebug?.(`L0 intent: ${this._dbgReport.l0Intent}`);
+      return; // clarification was handled inside
+    }
     if (this._aborted(gen)) return; // キャンセル/新クエリなら以降の描画をしない
 
     this._dbgReport.schema = schema;

@@ -730,6 +730,7 @@ class LocationFinderApp {
   _renderDebugReport(r) {
     const L = [];
     L.push(`🔧 デバッグ情報  (v${this.config.APP_VERSION || '?'})`);
+    if (r.l0Intent) L.push(`・L0 intent: ${r.l0Intent}`);
 
     // ── QuerySchema ──
     if (r.schema) {
