@@ -22,7 +22,7 @@ class QueryEngine {
    *   showChoices(question: string, choices: string[]): Promise<string>
    *   showHintInput(prompt: string): Promise<string>
    *   showSearching(text: string): void
-   *   showResults(full, partial, none, summary, conditionLabels, droppedNote): void
+   *   showResults(full, partial, none, conditionLabels, droppedNote): void
    *   showFeedback(): Promise<'done'|'continue'|'restart'>
    *   clearResults(): void
    */
@@ -2409,19 +2409,8 @@ class QueryEngine {
     // fallback display, so it must not become part of the narrow pool.
     this._cache.surfaced = [...full, ...partial];
 
-    // Summary shown as the header INSIDE the candidate-list bubble (not a separate message).
-    // 全一致(F)の件数でMECEに分岐。条件の有無で語を出し分け。
     const M = this._m();
-    const hasCond = (schema.conditions?.length || 0) > 0;
     const F = full.length;
-    let summary;
-    if (F === 1)                summary = M.resultPinpoint(hasCond);
-    else if (F >= 2 && F <= 5)  summary = M.resultFew(F, hasCond);
-    else if (F >= 6 && F <= 10) summary = M.resultSomewhat(F, hasCond);
-    else if (F >= 11)           summary = M.resultMany(hasCond);
-    else if (partial.length > 0 || displayNone.length > 0)
-                                summary = M.resultNoExact(partial.length + displayNone.length);
-    else                        summary = M.resultNone(hasCond);
 
     // 確度コメント＋上位5件紹介：tier分布からJSが決定的に判定した確度ラベルと、上位5件の
     // 名前・スコア・満たしている条件（JS決定的・_candidateReasons再利用）をL0に渡し、1回の
@@ -2442,7 +2431,7 @@ class QueryEngine {
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
     // 除外事項(A:上限超過の地理条件 / B:非地理的な特徴)を結果の場所でも透明化（早出し吹き出しに加えパネルにも併記）。
     const droppedNote = this._exclusionNote(schema);
-    this.ui.showResults(full, partial, displayNone, summary, conditionLabels, droppedNote);
+    this.ui.showResults(full, partial, displayNone, conditionLabels, droppedNote);
 
     // [大体の位置] area result: draw an approximate area (convex hull) around the
     // surfaced candidates when the query asked for a rough location, not a pinpoint.
@@ -2776,12 +2765,6 @@ const MESSAGES = {
     intersectionNotFound: t => `「${t}」という名前の交差点が見つかりませんでした。`,
     condNotFound:    k => `「${k}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`,
     mainZero:        (anchor, target) => `${anchor || 'この付近'}の近くに${target ? `「${target}」` : '候補'}は見つかりませんでした。追加の情報を教えていただけますか？`,
-    resultPinpoint: hc => hc ? '条件を1つに絞り込めました！' : '候補を1つに特定できました！',
-    resultFew:      (n, hc) => `${hc ? '条件に合う候補' : '候補'}が ${n}件 見つかりました。`,
-    resultSomewhat: (n, hc) => `${hc ? '条件に合う候補' : '候補'}が少し多めに（${n}件）見つかりました。上位5件を表示します。`,
-    resultMany:     hc => `${hc ? '条件に合う候補' : '候補'}が多数見つかりました。上位5件を表示します。`,
-    resultNoExact:  n => `条件に完全一致する候補はありませんでした。近い候補を${n}件表示します。`,
-    resultNone:     hc => hc ? '条件に合う候補を見つけられませんでした。' : '候補が見つかりませんでした。',
     confidenceDecisive:  'これは高い確率で当たりだと思います。',
     confidenceAmbiguous: '確率順に並べましたが、正直つけがたいです。',
     confidenceTentative: '一番手はこれですが、確証まではという感じです。',
@@ -2827,12 +2810,6 @@ const MESSAGES = {
     intersectionNotFound: t => `No intersection named "${t}" was found.`,
     condNotFound:    k => `"${k}" wasn't found in this area (it may not be in the map data).`,
     mainZero:        (anchor, target) => `No ${target ? `"${target}"` : 'candidates'} found near ${anchor || 'this area'}. Could you give more information?`,
-    resultPinpoint: hc => hc ? 'Narrowed down to a single match!' : 'Pinpointed a single candidate!',
-    resultFew:      (n, hc) => `Found ${n} ${hc ? 'matching candidates' : 'candidates'}.`,
-    resultSomewhat: (n, hc) => `Found quite a few ${hc ? 'matching candidates' : 'candidates'} (${n}). Showing the top 5.`,
-    resultMany:     hc => `Found many ${hc ? 'matching candidates' : 'candidates'}. Showing the top 5.`,
-    resultNoExact:  n => `No exact match; showing ${n} close candidate(s).`,
-    resultNone:     hc => hc ? 'No matching candidates found.' : 'No candidates found.',
     confidenceDecisive:  'I think this is very likely the right one.',
     confidenceAmbiguous: "I've ranked them by probability, but honestly it's hard to call.",
     confidenceTentative: "This one's the top pick, but I'm not fully sure yet.",

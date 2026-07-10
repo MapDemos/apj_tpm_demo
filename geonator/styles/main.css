@@ -1173,9 +1173,6 @@ body { display: flex; flex-direction: column; }
 /* Debug: isolated step panel (click a step to show only its map elements) */
 .debug-step.step-isolated { outline: 2px solid #f59e0b; outline-offset: 1px; }
 
-/* Result summary line at the top of the candidate-list bubble */
-.candidate-summary { font-size: 13px; font-weight: 600; color: #e2e8f0; margin: 0 0 8px; line-height: 1.5; }
-
 /* 除外した条件の注記（透明化A）。控えめだが結果と同じバブル内で見える */
 .candidate-dropped { font-size: 12px; color: #f0b866; background: rgba(240,184,102,0.10); border-left: 3px solid rgba(240,184,102,0.6); padding: 6px 8px; margin: 0 0 8px; border-radius: 4px; line-height: 1.5; }
 

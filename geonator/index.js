@@ -521,13 +521,13 @@ class LocationFinderApp {
         if (!self._debugMode) return Promise.resolve();
         return new Promise(resolve => self._showStepPanel(stepId, label, lines, resolve));
       },
-      showResults(full, partial, none, summary, conditionLabels, droppedNote) {
+      showResults(full, partial, none, conditionLabels, droppedNote) {
         // Tier-aware markers. QueryEngine set _tier + _matchInfo.score.
         self._renderTierMarkers([...full, ...partial, ...none]);
 
-        // Candidate list in the dialogue panel (clickable + feedback for ground truth),
-        // with the result summary as the header of the SAME bubble.
-        self._renderCandidatePanel(full, partial, none, summary, droppedNote);
+        // Candidate list in the dialogue panel (clickable + feedback for ground truth).
+        // Result-count summary is not shown here — it's already covered by L0's message.
+        self._renderCandidatePanel(full, partial, none, droppedNote);
       },
       async showFeedback(proximityLabel, opts) {
         self._hideCancelBtn(); // フィードバック待ち＝キャンセル不要
@@ -1494,11 +1494,11 @@ class LocationFinderApp {
    * truth (shared between operator and Claude via CSV export). Available in both
    * normal and debug mode.
    */
-  _renderCandidatePanel(full, partial, none, summary, droppedNote) {
+  _renderCandidatePanel(full, partial, none, droppedNote) {
     this._hideTypingIndicator();
     this._hideCancelBtn(); // 候補が出たらキャンセルは不要（以降はフィードバック/絞り込み）
     const rows = [...(full || []), ...(partial || [])];
-    if (rows.length === 0 && (!none || none.length === 0) && !summary) return;
+    if (rows.length === 0 && (!none || none.length === 0)) return;
 
     const container = document.getElementById('chatMessages');
     const wrapper = document.createElement('div');
@@ -1507,14 +1507,6 @@ class LocationFinderApp {
 
     const panel = document.createElement('div');
     panel.className = 'candidate-panel';
-
-    // Result summary at the top of the bubble (before the candidate list).
-    if (summary) {
-      const sum = document.createElement('div');
-      sum.className = 'candidate-summary';
-      sum.textContent = summary;
-      panel.appendChild(sum);
-    }
 
     // 上限超過で除外した条件を結果の場所でも明示（透明化A）。冒頭の早出し吹き出しは別途残る。
     if (droppedNote) {
@@ -1661,16 +1653,15 @@ class LocationFinderApp {
     // 処理ビューOFF時は詳細（候補リスト・地図・CSV等）を折りたたむ（会話モード向け）。
     // L0の口頭説明(describeResults)だけでは件数・スコア詳細・地図の完全な代替にはならないため、
     // 情報自体は生成したまま初期表示だけ最小化し、ボタンで展開できるようにする。
-    // 概要行（candidate-summary）だけは常時表示に残す。機能（クリック選択・正解/違うボタン等）は無変更。
+    // 機能（クリック選択・正解/違うボタン等）は無変更。
     if (this._processingViewOff) {
-      const keepEl = panel.querySelector('.candidate-summary');
       const details = document.createElement('details');
       const dsum = document.createElement('summary');
       const en = this._lang === 'en';
       dsum.textContent = en ? `▸ View candidates (${rows.length})` : `▸ 候補を見る（${rows.length}件）`;
       dsum.style.cssText = 'cursor:pointer;opacity:.85;margin-top:4px;user-select:none';
       details.appendChild(dsum);
-      Array.from(panel.children).forEach(child => { if (child !== keepEl) details.appendChild(child); });
+      Array.from(panel.children).forEach(child => details.appendChild(child));
       panel.appendChild(details);
     }
 
