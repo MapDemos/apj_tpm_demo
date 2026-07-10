@@ -2361,6 +2361,16 @@ class QueryEngine {
     none.forEach(c => { c._tier = 'none'; });
   }
 
+  /** tier分布(full/partial件数)から確度ラベルを決定的に判定する（design.md §6）。
+   *  L0はこのラベルを自然文に言い換えるだけ＝JSが確度の"主張"を決める。
+   *  decisive: fullが1件だけ / ambiguous: fullが複数 / tentative: 最上位がpartial / none: 該当なし */
+  _computeConfidenceLabel(fullCount, partialCount) {
+    if (fullCount === 1) return 'decisive';
+    if (fullCount >= 2) return 'ambiguous';
+    if (partialCount > 0) return 'tentative';
+    return 'none';
+  }
+
   // ─────────────────────────────────────────────
   // [4] Show results
   // ─────────────────────────────────────────────
@@ -2397,6 +2407,15 @@ class QueryEngine {
     else if (partial.length > 0 || displayNone.length > 0)
                                 summary = M.resultNoExact(partial.length + displayNone.length);
     else                        summary = M.resultNone(hasCond);
+
+    // 確度コメント：tier分布からJSが決定的に判定したラベルをL0の声で伝える（design.md §6）。
+    const confidenceKey = {
+      decisive: 'confidenceDecisive', ambiguous: 'confidenceAmbiguous',
+      tentative: 'confidenceTentative', none: 'confidenceNone',
+    }[this._computeConfidenceLabel(F, partial.length)];
+    const confidenceText = M[confidenceKey];
+    this.ui.showL0Message?.(confidenceText);
+    this._recordTurn('l0', confidenceText);
 
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
     // 除外事項(A:上限超過の地理条件 / B:非地理的な特徴)を結果の場所でも透明化（早出し吹き出しに加えパネルにも併記）。
@@ -2730,6 +2749,10 @@ const MESSAGES = {
     resultMany:     hc => `${hc ? '条件に合う候補' : '候補'}が多数見つかりました。上位5件を表示します。`,
     resultNoExact:  n => `条件に完全一致する候補はありませんでした。近い候補を${n}件表示します。`,
     resultNone:     hc => hc ? '条件に合う候補を見つけられませんでした。' : '候補が見つかりませんでした。',
+    confidenceDecisive:  'これは高い確率で当たりだと思います。',
+    confidenceAmbiguous: '確率順に並べましたが、正直つけがたいです。',
+    confidenceTentative: '一番手はこれですが、確証まではという感じです。',
+    confidenceNone:      '該当が見つかりませんでした。',
     reachTooLarge:  (min, prof, anchor) => `${({ walking: '徒歩', cycling: '自転車', driving: '車' })[prof] || '徒歩'}${min}分以上は範囲が広すぎるため、${anchor || 'この地点'}の周辺で探します。`,
     thinkingResolve: '場所を特定しています',
     thinkingCollect: '候補を集めています',
@@ -2777,6 +2800,10 @@ const MESSAGES = {
     resultMany:     hc => `Found many ${hc ? 'matching candidates' : 'candidates'}. Showing the top 5.`,
     resultNoExact:  n => `No exact match; showing ${n} close candidate(s).`,
     resultNone:     hc => hc ? 'No matching candidates found.' : 'No candidates found.',
+    confidenceDecisive:  'I think this is very likely the right one.',
+    confidenceAmbiguous: "I've ranked them by probability, but honestly it's hard to call.",
+    confidenceTentative: "This one's the top pick, but I'm not fully sure yet.",
+    confidenceNone:      'No match was found.',
     reachTooLarge:  (min, prof, anchor) => `${min}+ min by ${prof || 'walking'} covers too wide an area; searching around ${anchor || 'this point'} instead.`,
     thinkingResolve: 'Locating the area',
     thinkingCollect: 'Gathering candidates',
