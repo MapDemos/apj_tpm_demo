@@ -1659,7 +1659,7 @@ class LocationFinderApp {
       const dsum = document.createElement('summary');
       const en = this._lang === 'en';
       dsum.textContent = en ? `▸ View candidates (${rows.length})` : `▸ 候補を見る（${rows.length}件）`;
-      dsum.style.cssText = 'cursor:pointer;opacity:.85;margin-top:4px;user-select:none';
+      dsum.style.cssText = 'cursor:pointer;opacity:.85;margin:0 0 8px;user-select:none';
       details.appendChild(dsum);
       Array.from(panel.children).forEach(child => details.appendChild(child));
       panel.appendChild(details);
