@@ -40,6 +40,7 @@ class QueryEngine {
     this._ratingCache = new Map(); // L2-2 relevance cache: "intent||name" → definitely|probably|unknown|no (session stability)
     this._catCache    = new Map(); // L2-1 category cache: "intent||sortedCats" → { remove_poi_category:Set, remove_class:Set }
     this._convHistory = []; // L0多ターン履歴: {role:'user'|'l0', text}[]。検索セッション(_cache等)とはライフサイクル分離＝run()でもクリアしない
+    this._fragmentTries = 0; // 断片的発話合成(_markFragmentaryAttempt)の連続失敗回数
   }
 
   /** L0会話履歴に1ターン追記し、直近 N 件（既定10=5往復）でトリムする（JS決定的・LLM不使用）。
@@ -84,10 +85,15 @@ class QueryEngine {
   async run(userText) {
     // If the previous run ended waiting for clarification (e.g. "池袋は複数あります"),
     // the user's main-input answer (「池袋駅」) is merged with the original query so
-    // target/conditions are retained.
-    const merged = (this._awaitingClarify && this._previousText)
-      ? `${this._previousText}\n追加情報：${userText}`
+    // target/conditions are retained. 句点でつなげるだけの素直な地の文にする（"追加情報："
+    // ラベルの多段連結だと壊れた音声入力ともL1が読みにくい特殊な形になり、断片が増えるほど
+    // 解析に失敗しやすくなっていた。句点区切りなら壊れた音声入力の書き起こしに近い形になり、
+    // L1が元々持つ耐性（_parseAndValidateの再試行ヒント）にそのまま乗れる）。
+    const continuingFragment = !!(this._awaitingClarify && this._previousText);
+    const merged = continuingFragment
+      ? `${this._previousText}。${userText}`
       : userText;
+    if (!continuingFragment) this._fragmentTries = 0; // 新規の合成チェーンが始まる＝カウンタもリセット
     this._previousText = merged;
     this._awaitingClarify = false;
     this._clarifyCount = 0;
@@ -179,10 +185,20 @@ class QueryEngine {
    *  （既存の_awaitingClarify/_previousText機構に乗せる。JS決定的な文字列連結・LLM要約は挟まない）
    *  対象にする。雑談/ミッション外は対象外＝無関係な発言を次の解析に混ぜない。
    *  L0が既に自信ありげに応答済み(l0Replied)で定型フォールバックが出せない場合は、エンジンの声で
-   *  「まだ続けて」と安全網の一言を足す（L0の発話がエンジンの実態より先走るのを防ぐ）。 */
+   *  「まだ続けて」と安全網の一言を足す（L0の発話がエンジンの実態より先走るのを防ぐ）。
+   *  連続失敗が上限(FRAGMENT_MERGE_MAX_TRIES)に達したら、無限ループを避けて諦めてリセットする。 */
   _markFragmentaryAttempt(l0Replied) {
     const intent = this._dbgReport?.l0Intent;
     if (intent !== 'new_search' && intent !== 'refine') return;
+    this._fragmentTries = (this._fragmentTries || 0) + 1;
+    const maxTries = this.config.FRAGMENT_MERGE_MAX_TRIES ?? 3;
+    if (this._fragmentTries >= maxTries) {
+      this.ui.showProcessingNote?.(this._m().fragment_give_up);
+      this._awaitingClarify = false;
+      this._previousText = null;
+      this._fragmentTries = 0;
+      return;
+    }
     this._awaitingClarify = true;
     if (l0Replied) this.ui.showProcessingNote?.(this._m().continue_hint);
   }
@@ -2643,6 +2659,7 @@ const MESSAGES = {
     clarify_limit:        '情報が不足しています。分かる範囲で場所を教えてください。',
     not_a_query:          '場所の情報が読み取れませんでした。駅名・施設名・住所などと、探しているものを教えてください。（例：西大島駅の近くのマンション、バス停が目の前）',
     continue_hint:        'まだ場所を特定できていません。続けて駅名・地名・施設名など教えてください。',
+    fragment_give_up:     'うまく組み立てられませんでした。恐れ入りますが、一から言い直していただけますか？',
     anchorNotFound:  t => `${t}が見つかりませんでした。別の地名や駅名をお試しください。`,
     whichArea:       t => `「${t}」はどちらですか？`,
     whichPoi:        t => `「${t}」はどれですか？`,
@@ -2689,6 +2706,7 @@ const MESSAGES = {
     clarify_limit:        'Not enough information. Please tell me the location as best you can.',
     not_a_query:          "I couldn't read a location. Please give a station/facility/address and what you are looking for (e.g. a condo near Nishi-ojima station with a bus stop right in front).",
     continue_hint:        "I haven't pinned down a location yet. Please keep going — a station, area, or facility name would help.",
+    fragment_give_up:     "I couldn't quite put that together. Could you please start over and describe what you're looking for?",
     anchorNotFound:  t => `Couldn't find "${t}". Please try another place or station name.`,
     whichArea:       t => `Which "${t}" do you mean?`,
     whichPoi:        t => `Which "${t}"?`,
