@@ -266,17 +266,18 @@ class QueryEngine {
       case 'proximity_missing': {
         // [DD] Mode2 — ask for location
         const answer = await this.ui.showHintInput(this._m().ask_proximity);
-        if (!answer) return false;
+        // スキップ／再解析失敗＝無言で終わらせない（「探し直す」スキップと同種のバグ修正）。
+        if (!answer) { this.ui.showL0Message?.(this._m().confirmed); return false; }
         const newSchema = await this._reparseMerged(answer);
-        if (!newSchema) return false;
+        if (!newSchema) { this.ui.showL0Message?.(this._m().err_understand); return false; }
         Object.assign(schema, newSchema);
         return true;
       }
       case 'target_missing': {
         const answer = await this.ui.showHintInput(this._m().ask_target);
-        if (!answer) return false;
+        if (!answer) { this.ui.showL0Message?.(this._m().confirmed); return false; }
         const newSchema = await this._reparseMerged(answer);
-        if (!newSchema) return false;
+        if (!newSchema) { this.ui.showL0Message?.(this._m().err_understand); return false; }
         Object.assign(schema, newSchema);
         return true;
       }
@@ -2322,13 +2323,21 @@ class QueryEngine {
     const canNarrow = (this._cache.surfaced?.length || 0) > 1;
     const action = await this.ui.showFeedback(proximityLabel, { canNarrow });
 
-    if (action === 'done') {
+    // ボタンではなく自由文で答えた場合（{freeText}形）＝ボタンを押させず「探し直す」の追加情報
+    // として扱う（固定的なJS決定ルール。番号/序数語に一致しない自由文は常にこの意味、という
+    // ルーターの最小の一歩。意味解釈のLLM分類はしない）。既に得た文言を後段のヒントに使うので
+    // showHintInputで二度聞きしない。
+    const isFreeText = action && typeof action === 'object' && action.freeText != null;
+    const effectiveAction = isFreeText ? 'research' : action;
+    const presetHint = isFreeText ? action.freeText : null;
+
+    if (effectiveAction === 'done') {
       this.ui.showL0Message?.(this._m().confirmed);
       this._resetCache();
       return;
     }
 
-    if (action !== 'narrow' && action !== 'research') return;
+    if (effectiveAction !== 'narrow' && effectiveAction !== 'research') return;
 
     // Reset telemetry for this refine cycle BEFORE computing suggestions, so the L3
     // suggestion call is counted (otherwise the reset would wipe its stats).
@@ -2345,7 +2354,7 @@ class QueryEngine {
     // 目印サジェスト（候補ごと）＋ 目印が付かなかった候補には階数サジェストを併用。
     // 例）A は離れていて固有の目印あり、B/C は目印なし → A=目印, B/C=階数（一意なら）。
     let suggestions = [];
-    if (action === 'narrow') {
+    if (effectiveAction === 'narrow') {
       // 目印(poi_labelグリッド)と階数(building点クエリ)は別レイヤーだが、階数の"取得"は
       // 目印に依存しない（coveredIdsは階数の"提示"だけに効く）。以前は目印(グリッド＋LLM)の
       // 完了を待って building Tilequery を直列に叩いていたが、building fetch を目印計算と
@@ -2383,7 +2392,8 @@ class QueryEngine {
       }
     }
 
-    const hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
+    // 自由文で既にヒントを得ている場合はshowHintInputを呼ばない（二度聞き防止）。
+    const hint = presetHint ?? await this.ui.showHintInput(this._m().ask_hint, suggestions);
     // スキップ＝もう情報を出さない＝「終了する」と同義。無言で終わらせず、doneと同じ一言＋
     // キャッシュリセットをする（以前は何も表示せず会話が唐突に途切れるバグだった）。
     if (!hint) { this.ui.showL0Message?.(this._m().confirmed); this._resetCache(); return; }
@@ -2414,7 +2424,7 @@ class QueryEngine {
 
     // ── narrow: filter WITHIN the already-surfaced Target candidates (pool fixed,
     // target NOT re-collected). Purely additive — only new conditions apply. ──
-    if (action === 'narrow') {
+    if (effectiveAction === 'narrow') {
       if (!addConds.length) { this.ui.showL0Message?.(this._m().err_understand); return; }
       if (delta.confirmation) this.ui.showL0Message?.(delta.confirmation);
       await this._narrowWithin(schema, addConds);

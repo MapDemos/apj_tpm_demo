@@ -885,16 +885,16 @@ class LocationFinderApp {
     if (chatMessages) { chatMessages.appendChild(wrapper); chatMessages.scrollTop = chatMessages.scrollHeight; }
 
     // 本体入力欄からの番号入力にも対応（ボタンは残したまま・番号は決定的なJS処理）。
+    // 番号/序数語に一致しない自由文＝ボタンを押させず「探し直す」の追加情報として扱う
+    // （固定的なJS決定ルール。ここにLLM分類は使わない）。query-engine.js側は
+    // action={freeText}を effectiveAction='research'・presetHint=freeText として処理する。
     const handleTyped = (text) => {
       // text==null は停止/クリア時の _resolvePendingWaits シグナル。ここでは何もしない
       // （直後に _feedbackResolve(null) が呼ばれ、そちらが待ちの終了を処理する）。
       if (text == null) return;
       const idx = this._parseChoiceSelection(text, buttons.length);
       if (idx != null) { finalize(buttons[idx].label, buttons[idx].value, false); return; }
-      this.addMessage('l0', LANG[this._lang].pickNumberHint);
-      this._pendingInputResolver = handleTyped; // 待ちを継続
-      const mi = document.getElementById('chatInput');
-      if (mi) { mi.disabled = false; mi.focus(); }
+      finalize(text, { freeText: text }, false);
     };
     this._pendingInputResolver = handleTyped;
     const mainInput = document.getElementById('chatInput');
@@ -1132,7 +1132,11 @@ class LocationFinderApp {
       resolve(text);
       return;
     }
-    if (this._querying) return; // 新規送信は多重発火ガード（実行中は無視・入力は消さない）
+    // アクティブ処理中（保留パネル無し＝上のif分岐に入らなかった）に何か打たれた＝
+    // 「今の処理はやめて、これをやって」という意図とみなし、キャンセルしてから新規送信として
+    // 続行する（無言で入力を捨てない）。_uiGen世代ガードにより古い実行の後始末が新しい実行の
+    // 状態を壊さない。
+    if (this._querying) this._cancelQuery();
     const examples = document.getElementById('examplesArea'); // Hide examples on first send
     if (examples) examples.style.display = 'none';
     input.value = '';
@@ -1145,6 +1149,11 @@ class LocationFinderApp {
   async _execQuery(text) {
     if (this._querying) return; // 多重発火ガード（click+Enter同時/連打での二重起動を防ぐ・同期的に確保）
     this._querying = true;
+    // 世代ガード（query-engine.js の _runGen/_aborted(gen) と同じ考え方）。
+    // 「キャンセル→即座に新規クエリ開始」を安全にするため：古い実行の finally が非同期に
+    // 巻き戻ってきた時、既に新しい実行が始まっていたら後始末をしない（新しい実行の状態を
+    // 誤って上書きしないようにする）。
+    const gen = (this._uiGen = (this._uiGen || 0) + 1);
     const input   = document.getElementById('chatInput');
     this._lastQuery = text;
     this._cancelled = false;
@@ -1157,14 +1166,16 @@ class LocationFinderApp {
     try {
       await this.processUserMessage(text);
     } catch (err) {
-      if (!this._cancelled) this._showErrorWithRetry(err, text);
+      if (!this._cancelled && gen === this._uiGen) this._showErrorWithRetry(err, text);
     } finally {
-      this._querying = false; // ロック解除
-      this._hideThinking();
-      this._hideTypingIndicator();
-      this._setProcessing(false); // 送信ボタンを送信(➤)へ戻す
-      input.disabled   = false;
-      input.focus();
+      if (gen === this._uiGen) { // 自分より新しい実行が始まっていなければ後始末
+        this._querying = false; // ロック解除
+        this._hideThinking();
+        this._hideTypingIndicator();
+        this._setProcessing(false); // 送信ボタンを送信(➤)へ戻す
+        input.disabled   = false;
+        input.focus();
+      }
     }
   }
 
@@ -1256,6 +1267,8 @@ class LocationFinderApp {
   _cancelQuery() {
     if (this._cancelled) return;
     this._cancelled = true;                 // mcp/queryEngine が参照して中断
+    this._querying   = false;               // ロック解除（直後に新規クエリを送れるように。古い
+                                             // 実行のfinallyは_uiGen世代ガードにより後始末をしない）
     this._resolvePendingWaits(null);        // 確認待ち中の停止で run() がハングしないよう待ちを解放
     this._hideThinking();
     this._hideTypingIndicator();
