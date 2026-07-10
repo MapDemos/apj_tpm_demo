@@ -263,9 +263,11 @@ class LLMClient {
         ...history.map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.text })),
         { role: 'user', content: `[検索結果]\n${summaryText}${langNote}` },
       ];
+      // 上位5件の比較・言及を含むため、他のL0呼び出し(220)より長めのmax_tokensが要る
+      // （220だとJSON前に自然文で下書きしてしまい、そのままJSON側で尻切れ→パース失敗する事例が発生）。
       const result = await this._callClaude(
         { system: PROMPT_L0, messages },
-        220,
+        500,
         this.config.L0_MODEL || 'claude-haiku-4-5-20251001',
         'L0'
       );
