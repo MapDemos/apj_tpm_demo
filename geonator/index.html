@@ -76,16 +76,16 @@
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
         </select>
       </label>
-      <div class="settings-modelwhy" id="set-l0-why">ユーザーとの対話全般（挨拶・雑談・ミッション外の切り分け含む）を担当。毎ターン必ず発火するため速さ優先でHaiku推奨。対話の質を重視するならSonnetへ。</div>
-      <label class="settings-row">
+      <div class="settings-modelwhy" id="set-l0-why">ユーザーとの対話全般（挨拶・雑談・ミッション外の切り分け含む）を担当。毎ターン必ず発火するが、自然な対話の質を重視してSonnet 4.6を推奨。速度優先ならHaikuへ。</div>
+      <label class="settings-row settings-row-inactive">
         <span id="set-l1c-label">L1-1（確認文の先出し・非活性）</span>
-        <select id="l1ConfirmModelSelect">
+        <select id="l1ConfirmModelSelect" disabled>
           <option value="claude-sonnet-4-6">Sonnet 4.6</option>
           <option value="claude-sonnet-5">Sonnet 5</option>
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
         </select>
       </label>
-      <div class="settings-modelwhy" id="set-l1c-why">L0導入により現在は呼び出されません（コードは温存）。</div>
+      <div class="settings-modelwhy settings-row-inactive" id="set-l1c-why">L0導入により現在は呼び出されません（コードは温存）。</div>
       <label class="settings-row">
         <span id="set-l1-label">L1-2（クエリ解析）</span>
         <select id="l1ModelSelect">

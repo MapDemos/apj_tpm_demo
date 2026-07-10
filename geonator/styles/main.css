@@ -409,6 +409,9 @@ body { display: flex; flex-direction: column; }
 .settings-subtitle { font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
 .settings-hint { font-size: 11px; font-weight: 400; color: var(--text-2, #94a3b8); }
 .settings-modelwhy { font-size: 11px; color: var(--text-2, #94a3b8); margin: -6px 0 12px; line-height: 1.4; }
+/* 非活性ロール（例: L1-1）を隠さずグレーアウトして表示 */
+.settings-row-inactive { opacity: .45; }
+.settings-row-inactive select { cursor: not-allowed; }
 /* 一貫したアクションボタン（緑=やり直す / 赤=キャンセル） */
 .btn-retry, .btn-cancel {
   align-self: flex-start;
