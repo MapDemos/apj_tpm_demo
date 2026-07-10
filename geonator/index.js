@@ -1125,10 +1125,11 @@ class LocationFinderApp {
   }
 
   // 旧・別枠キャンセル吹き出しは廃止。停止は送信ボタン(■)に集約（_setProcessing）。
-  // 既存の多数の呼び出し箇所を壊さないため、メソッド名は残して no-op 化する。
-  _showCancelBtn() {}
-  _hideCancelBtn() {}
-  _pinCancelToBottom() {}
+  // 既存の呼び出し箇所（choices/hint/feedback/候補パネル表示の前後）は「今キャンセル可能な
+  // バックグラウンド処理があるか」を正確な境界で示しており、そのまま送信⇄■の切替に流用する。
+  _showCancelBtn() { this._setProcessing(true); }  // 処理再開＝■
+  _hideCancelBtn() { this._setProcessing(false); } // ユーザー操作待ち（ボタン/候補閲覧）＝キャンセル不要→➤
+  _pinCancelToBottom() {} // 旧・別枠吹き出しの位置維持用。送信ボタンは固定位置なので不要。
 
   /** 送信ボタンを送信(➤)/停止(■)モードに切替。処理中は停止ボタンとして機能する。 */
   _setProcessing(on) {
