@@ -30,6 +30,10 @@ html, body {
   color: var(--text-1);
   font-size: 14px;
 }
+/* ページ全体を縦フレックスに：ヘッダー(可変高)＋本体。以前は app-container を
+   height:calc(100vh - 45px) と決め打ちしており、ヘッダーが折り返して45pxを超えると
+   本体が画面からはみ出し入力欄が下に切れていた。flexで残り高さを自動配分する。 */
+body { display: flex; flex-direction: column; }
 
 /* ── Header ──────────────────────────────────────────────────── */
 
@@ -265,7 +269,8 @@ html, body {
 
 .app-container {
   display: flex;
-  height: calc(100vh - 45px);
+  flex: 1;          /* ヘッダー以外の残り高さを埋める（100vh決め打ちをやめ、ヘッダー高に非依存に） */
+  min-height: 0;    /* 子(チャット/地図)のスクロールを効かせるため */
   overflow: hidden;
 }
 
@@ -737,7 +742,8 @@ html, body {
 
 .input-area {
   flex-shrink: 0;
-  padding: 16px 16px 28px;
+  /* 下部にゆとり＋スマホのホームバー領域(safe-area)を全ビューポートで確保（画面ギリギリ回避） */
+  padding: 16px 16px calc(28px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border);
   background: var(--bg-panel);
 }
