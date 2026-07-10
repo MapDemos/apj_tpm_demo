@@ -775,11 +775,10 @@ body { display: flex; flex-direction: column; }
 .chat-input:disabled { opacity: .5; }
 
 .send-btn {
-  background: var(--accent);
+  background: none;             /* 青背景をやめて他UIと調和（背景なし・矢印のみ） */
   border: none;
-  border-radius: 10px;
-  color: #fff;
-  font-size: 16px;
+  color: var(--text-1);        /* 白矢印。resting は他のUIの文字色に合わせる */
+  font-size: 18px;             /* 背景が無いぶん矢印を少し大きく */
   width: 48px;
   height: 48px;    /* 入力欄の最小高(48px)に合わせる＝1行時に上下が揃う */
   cursor: pointer;
@@ -787,10 +786,11 @@ body { display: flex; flex-direction: column; }
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background .15s;
+  transition: color .15s, transform .1s;
 }
-.send-btn:hover:not(:disabled) { background: var(--accent-dim); }
-.send-btn:disabled { opacity: .4; cursor: not-allowed; }
+.send-btn:hover:not(:disabled) { color: var(--accent); } /* ホバーでアクセント色に変化 */
+.send-btn:active:not(:disabled) { transform: translateY(1px); }
+.send-btn:disabled { opacity: .35; cursor: not-allowed; }
 
 /* ── Map Panel ───────────────────────────────────────────────── */
 
