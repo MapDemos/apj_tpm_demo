@@ -433,6 +433,9 @@ body { display: flex; flex-direction: column; }
   0%, 80%, 100% { opacity: .3; transform: translateY(0); }
   40%           { opacity: 1;  transform: translateY(-3px); }
 }
+/* 入力中のユーザー側「・・・」：ユーザー吹き出し上で見えるよう明色のドット */
+.message.user-typing .message-bubble { display: inline-flex; align-items: center; }
+.message.user-typing .typing-dots span { background: rgba(255,255,255,.9); }
 
 /* 地図OFF時に候補パネル先頭へ出す静的地図 */
 .static-map { margin: 0 0 10px; }

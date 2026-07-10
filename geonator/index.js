@@ -44,6 +44,10 @@ class LocationFinderApp {
 
     // Hint system
     this._hintResolve = null;
+    // 本体入力欄に統合した「自由入力の回答待ち」ルータ（refine/絞り込み/確認）。保留中は
+    // _handleSend がここへ回答を流す。選択パネルの resolver も停止/クリア時の解放用に保持。
+    this._pendingInputResolver = null;
+    this._choiceResolve = null;
 
     // Probable area
     this._probableAreaActive = false;
@@ -1014,11 +1018,13 @@ class LocationFinderApp {
       }
     });
 
-    // Auto-resize textarea
+    // Auto-resize textarea ＋ 入力中の「・・・」アニメ（アシスタント側とお揃いのモチーフ）
     input.addEventListener('input', () => {
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+      if (input.value.trim()) this._showUserTyping(); else this._hideUserTyping();
     });
+    input.addEventListener('blur', () => this._hideUserTyping());
 
     document.getElementById('clearChatBtn').addEventListener('click', () => this._resetChat());
 
@@ -1067,13 +1073,26 @@ class LocationFinderApp {
   }
 
   async _handleSend() {
-    if (this._querying) return; // 多重発火ガード（実行中は無視・入力は消さない）
     const input = document.getElementById('chatInput');
     const text  = input.value.trim();
     if (!text) return;
+    // 保留中の自由入力待ち（refine/絞り込み/確認の回答）があれば、本体入力をそこへ流す（入力欄統合）。
+    // これにより追加条件などが専用textareaでなく本体の入力欄で完結する。
+    if (this._pendingInputResolver) {
+      const resolve = this._pendingInputResolver;
+      this._pendingInputResolver = null;
+      input.value = '';
+      input.disabled = true;      // 回答後は処理が再開する＝入力を一旦閉じる（次の質問で再開放）
+      this._hideUserTyping();
+      this.addMessage('user', text);
+      resolve(text);
+      return;
+    }
+    if (this._querying) return; // 新規送信は多重発火ガード（実行中は無視・入力は消さない）
     const examples = document.getElementById('examplesArea'); // Hide examples on first send
     if (examples) examples.style.display = 'none';
     input.value = '';
+    this._hideUserTyping();
     this.addMessage('user', text);
     await this._execQuery(text);
   }
@@ -1134,13 +1153,37 @@ class LocationFinderApp {
     else this._handleSend();
   }
 
+  /** 保留中のユーザー入力待ち（選択/自由入力/フィードバック/デバッグ一時停止）をすべて解決して解放。
+   *  停止(■)は処理中いつでも押せる＝確認待ち中に停止された時、宙に浮いた await で run() がハングするのを防ぐ。 */
+  _resolvePendingWaits(value = null) {
+    for (const key of ['_pendingInputResolver', '_choiceResolve', '_feedbackResolve', '_debugStepResolve']) {
+      const r = this[key];
+      if (r) { this[key] = null; try { r(value); } catch (_) {} }
+    }
+  }
+
+  /** 入力中の「・・・」アニメ（アシスタントの考え中とお揃い・右寄せのユーザー吹き出し）。 */
+  _showUserTyping() {
+    if (document.getElementById('userTypingIndicator')) return;
+    const container = document.getElementById('chatMessages');
+    if (!container) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message user typing-indicator user-typing';
+    wrapper.id = 'userTypingIndicator';
+    wrapper.innerHTML = `<div class="message-bubble"><span class="typing-dots"><span></span><span></span><span></span></span></div>`;
+    container.appendChild(wrapper);
+    container.scrollTop = container.scrollHeight;
+  }
+  _hideUserTyping() { document.getElementById('userTypingIndicator')?.remove(); }
+
   /** ソフトキャンセル：以降の新規API発行を止め(mcpが_cancelledを見る)、UIを即復帰、結果描画を抑止。 */
   _cancelQuery() {
     if (this._cancelled) return;
     this._cancelled = true;                 // mcp/queryEngine が参照して中断
+    this._resolvePendingWaits(null);        // 確認待ち中の停止で run() がハングしないよう待ちを解放
     this._hideThinking();
     this._hideTypingIndicator();
-    this._hideCancelBtn();
+    this._hideUserTyping();
     this.addMessage('assistant', LANG[this._lang].cancelled);
     this._setProcessing(false); // 停止(■)→送信(➤)へ復帰
     const input = document.getElementById('chatInput');
@@ -1187,13 +1230,10 @@ class LocationFinderApp {
     this._conditionTracker = [];
     this._lastProximity    = null;
     this._updateAPICountDisplay();
-    // Resolve any pending debug pause
-    if (this._debugStepResolve) { this._debugStepResolve(); this._debugStepResolve = null; }
-    // Resolve any pending hint request
-    if (this._hintResolve) { this._hintResolve(null); this._hintResolve = null; }
-    // Resolve any pending feedback wait (unknown value → _handleFeedback does nothing,
-    // so run() returns cleanly and _handleSend's finally re-enables the input).
-    if (this._feedbackResolve) { this._feedbackResolve(null); this._feedbackResolve = null; }
+    // 保留中の待ち（デバッグ一時停止/自由入力/フィードバック/選択）をまとめて解決して解放。
+    // unknown value(null) → 各フローは何もせず run() が綺麗に戻り、入力が再有効化される。
+    this._resolvePendingWaits(null);
+    this._hideUserTyping();
     // [fix] 入力欄の再有効化を非同期の巻き戻り(run()→_execQuery.finally)に依存しない。
     // クエリ実行中（フィードバック/ヒント/デバッグ一時停止に達する前＝解決すべき保留が無い状態）に
     // クリアすると、その巻き戻りが発生せず _querying=true / input.disabled=true が残り、空パネルなのに
@@ -2768,7 +2808,8 @@ class LocationFinderApp {
     overlay.style.display = 'flex';
   }
 
-  /** Render the hint request panel in chat and wait for operator input. */
+  /** Render the hint request panel in chat and wait for operator input.
+   *  自由入力は本体の入力欄に統合（_pendingInputResolver 経由）。パネルには提案ボタンとスキップのみ。 */
   _showHintPanel(claudeMessage, onResponse, suggestions) {
     const container = document.getElementById('chatMessages');
     const uid = `hint-${Date.now()}`;
@@ -2790,49 +2831,39 @@ class LocationFinderApp {
       <div class="hint-bubble">
         <div class="hint-question">${_formatMsg(claudeMessage)}</div>
         ${sugHTML}
-        <textarea id="${uid}-input" class="hint-input" placeholder="${ht.hintPlaceholder}" rows="3"></textarea>
         <div class="hint-actions">
-          <button class="hint-submit-btn" id="${uid}-ok">${ht.hintSubmit}</button>
-          <button class="hint-skip-btn"   id="${uid}-skip">${ht.hintSkip}</button>
+          <button class="hint-skip-btn" id="${uid}-skip">${ht.hintSkip}</button>
         </div>
       </div>
     `;
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
 
-    // Suggestion click = submit that suggestion as the hint.
+    const disableAll = () => wrapper.querySelectorAll('.hint-suggest-btn, .hint-skip-btn')
+      .forEach(b => { b.disabled = true; });
+
+    // 自由入力は本体の入力欄で受ける。回答（テキスト）が来たら _handleSend がこのルータを呼ぶ。
+    this._pendingInputResolver = (text) => { disableAll(); onResponse(text); };
+    const mainInput = document.getElementById('chatInput');
+    if (mainInput) { mainInput.disabled = false; mainInput.focus(); }
+
+    // Suggestion click = submit that suggestion object (自由入力ルータは解除)。
     if (sugList.length) {
       wrapper.querySelectorAll('.hint-suggest-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const s = sugList[+btn.dataset.i];
-          document.getElementById(`${uid}-input`).disabled = true;
-          document.getElementById(`${uid}-ok`).disabled    = true;
-          document.getElementById(`${uid}-skip`).style.display = 'none';
-          wrapper.querySelectorAll('.hint-suggest-btn').forEach(b => { b.disabled = true; });
+          this._pendingInputResolver = null;
+          disableAll();
           this.addMessage('user', s.text);
-          this._hintResolve = null;
           onResponse(s); // resolve with the suggestion object (carries resolved items)
         });
       });
     }
 
-    document.getElementById(`${uid}-ok`).addEventListener('click', () => {
-      const text = document.getElementById(`${uid}-input`).value.trim();
-      if (!text) return;
-      document.getElementById(`${uid}-input`).disabled = true;
-      document.getElementById(`${uid}-ok`).disabled    = true;
-      document.getElementById(`${uid}-ok`).textContent = LANG[this._lang].hintDone;
-      document.getElementById(`${uid}-skip`).style.display = 'none';
-      this._hintResolve = null;
-      onResponse(text);
-    });
-
     document.getElementById(`${uid}-skip`).addEventListener('click', () => {
-      document.getElementById(`${uid}-input`).disabled   = true;
-      document.getElementById(`${uid}-ok`).disabled      = true;
-      document.getElementById(`${uid}-skip`).disabled    = true;
+      this._pendingInputResolver = null;
       wrapper.querySelector('.hint-bubble').style.opacity = '0.5';
-      this._hintResolve = null;
+      disableAll();
       onResponse(null);
     });
   }
@@ -2851,6 +2882,7 @@ class LocationFinderApp {
    */
   _showChoicePanel(question, choices) {
     return new Promise(resolve => {
+      this._choiceResolve = resolve; // 停止/クリア時に解放できるよう保持
       const container = document.getElementById('chatMessages');
       const uid = `choice-${Date.now()}`;
 
@@ -2881,6 +2913,7 @@ class LocationFinderApp {
             }
           });
           this.addMessage('user', choice);
+          this._choiceResolve = null;
           // Return the RAW choice string (QueryEngine matches it by index).
           // (Old agentic loop used a "選択: " prefix; that broke index matching.)
           resolve(choice);
