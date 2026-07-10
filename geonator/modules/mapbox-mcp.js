@@ -699,10 +699,32 @@ class MapboxMCPClient {
     return name ? name.replace(/[​‌‍﻿]/g, '') : name;
   }
 
+  /** 住所系の接尾辞（丁目/番地/号/条）の直前にある漢数字を算用数字に変換する。
+   *  「入谷二丁目」→「入谷2丁目」で、算用数字入力(入谷2丁目)と表記統一できる。位置を
+   *  丁目/番/号/条 の直前に限定するので「三菱」「二郎」等の固有名は誤変換しない。〜99を想定。 */
+  static _kanjiToArabicInAddress(s) {
+    const D = { 〇: 0, 零: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+    const parse = (k) => {
+      let total = 0, cur = 0, seen = false;
+      for (const ch of k) {
+        if (D[ch] != null) { cur = D[ch]; seen = true; }
+        else if (ch === '十') { total += (cur || 1) * 10; cur = 0; seen = true; }
+        else if (ch === '百') { total += (cur || 1) * 100; cur = 0; seen = true; }
+        else return null;
+      }
+      return seen ? total + cur : null;
+    };
+    return s.replace(/[〇零一二三四五六七八九十百]+(?=丁目|丁|番地|番|号|条)/g, (m) => {
+      const n = parse(m);
+      return n == null ? m : String(n);
+    });
+  }
+
   /**
    * Normalize a name for dedup / matching:
    * - NFKC（全角英数→半角、半角カナ→全角カナ・濁点結合）
    * - ひらがな→カタカナ（すし→スシ、ﾌｧﾐﾏ→ファミマ→そのまま）
+   * - 住所接尾辞(丁目/番地/号/条)の直前の漢数字→算用数字（入谷二丁目=入谷2丁目）
    * - 空白・中点・ハイフン・括弧を除去、小文字化。長音(ー)は保持。
    * 注: 漢字↔かな（寿司↔すし）は統一しない → それはQE(queries展開)で担保。
    */
@@ -711,6 +733,8 @@ class MapboxMCPClient {
     let s = (MapboxMCPClient._cleanName(name) || '').normalize('NFKC');
     // ひらがな → カタカナ
     s = s.replace(/[ぁ-ゖ]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0x60));
+    // 住所の丁目等の漢数字を算用数字へ（表記統一・位置限定で固有名は壊さない）
+    s = MapboxMCPClient._kanjiToArabicInAddress(s);
     // 空白・中点・各種ハイフン・括弧類を除去（長音ー(U+30FC)は残す）
     s = s.replace(/[\s・‐-―−()\[\]「」【】\-]/g, '');
     return s.toLowerCase();
@@ -2348,8 +2372,9 @@ class MapboxMCPClient {
       }));
 
       if (nameFilter) {
-        const filter = nameFilter.toLowerCase();
-        items = items.filter(f => f.name.toLowerCase().includes(filter));
+        // 表記揺れ（全半角/かなカナ/丁目の漢数字↔算用数字）を吸収して部分一致。
+        const filter = MapboxMCPClient._normalizeName(nameFilter);
+        items = items.filter(f => MapboxMCPClient._normalizeName(f.name).includes(filter));
       }
 
       items.sort((a, b) => a.distance - b.distance);
