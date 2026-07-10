@@ -42,6 +42,10 @@ class LocationFinderApp {
     this._debugStepResolve = null;
     this._debugPauseCount = 0;
 
+    // 吹き出しラベルのLINE風グルーピング：直前の話者カテゴリ('user'|'l0'|'proc'|'error')。
+    // 同じカテゴリが連続する時はラベルを省略する（_appendAgentLabel参照）。
+    this._lastAgentCategory = null;
+
     // Hint system
     this._hintResolve = null;
     // 本体入力欄に統合した「自由入力の回答待ち」ルータ（refine/絞り込み/確認）。保留中は
@@ -640,10 +644,7 @@ class LocationFinderApp {
         const container = document.getElementById('chatMessages');
         const wrapper = document.createElement('div');
         wrapper.className = 'message tool-status';
-        const lbl = document.createElement('div');
-        lbl.className = 'msg-label';
-        lbl.textContent = LANG[self._lang].roleTool;
-        wrapper.appendChild(lbl);
+        self._appendAgentLabel(wrapper, 'proc');
         const bubble = document.createElement('div');
         bubble.className = 'message-bubble';
 
@@ -838,8 +839,13 @@ class LocationFinderApp {
    */
   _showFeedbackButtons(onAction, proximityLabel, opts = {}) {
     // 候補パネルと同じ意匠の枠を持たせる（.feedback-panel）＝処理エージェント系パネルの共通言語。
+    // .message ラッパーで包んで話者ラベル(処理エージェント)を表示できるようにする。
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message feedback-request';
     const container = document.createElement('div');
     container.className = 'feedback-panel';
+    wrapper.appendChild(container);
+    this._appendAgentLabel(wrapper, 'proc');
 
     const px = (proximityLabel || '').trim();
     let buttons = this._lang === 'en'
@@ -861,7 +867,7 @@ class LocationFinderApp {
     this._feedbackResolve = onAction;
     // fromClick=trueの時だけここでuserバブルを出す（番号入力は _handleSend が既に表示済み）。
     const finalize = (label, value, fromClick) => {
-      container.remove();
+      wrapper.remove();
       this._feedbackResolve = null;
       this._pendingInputResolver = null;
       if (fromClick) this.addMessage('user', label);
@@ -876,7 +882,7 @@ class LocationFinderApp {
     });
 
     const chatMessages = document.getElementById('chatMessages');
-    if (chatMessages) { chatMessages.appendChild(container); chatMessages.scrollTop = chatMessages.scrollHeight; }
+    if (chatMessages) { chatMessages.appendChild(wrapper); chatMessages.scrollTop = chatMessages.scrollHeight; }
 
     // 本体入力欄からの番号入力にも対応（ボタンは残したまま・番号は決定的なJS処理）。
     const handleTyped = (text) => {
@@ -910,10 +916,12 @@ class LocationFinderApp {
       ? 'Click to show only this step on the map (click again to restore)'
       : 'クリックでこのステップの地図要素だけ表示（再クリックで元に戻す）';
     const body = (lines || []).map(l => _esc(l)).join('<br>');
+    // ステップ名は話者ラベルの位置ではなく吹き出し本文の先頭行に（情報を失わない）。
+    // 話者ラベル(処理エージェント)は _appendAgentLabel で別途付与する。
     wrapper.innerHTML =
-      `<div class="msg-label">🪜 ${_esc(label)}</div>` +
-      `<div class="message-bubble">${body}<div style="margin-top:8px">` +
+      `<div class="message-bubble"><div class="step-label">🪜 ${_esc(label)}</div>${body}<div style="margin-top:8px">` +
       `<button class="choice-btn step-next-btn">▶ 次へ</button></div></div>`;
+    this._appendAgentLabel(wrapper, 'proc');
     // Click the panel body (not the ▶次へ button) → isolate this step's map elements.
     wrapper.addEventListener('click', (e) => {
       if (e.target.closest('.step-next-btn')) return;
@@ -1280,6 +1288,7 @@ class LocationFinderApp {
     this.messages = [];
     this._tokens  = { input: 0, output: 0 };
     this._updateTokenDisplay();
+    this._lastAgentCategory = null; // クリア後は次のメッセージで必ず話者ラベルを表示させる
     if (this.mapboxMCP) {
       this.mapboxMCP._sbRequests  = 0;
       this.mapboxMCP._tqRequests  = 0;
@@ -1456,6 +1465,7 @@ class LocationFinderApp {
     const container = document.getElementById('chatMessages');
     const wrapper = document.createElement('div');
     wrapper.className = 'message candidates';
+    this._appendAgentLabel(wrapper, 'proc');
 
     const panel = document.createElement('div');
     panel.className = 'candidate-panel';
@@ -2728,6 +2738,25 @@ class LocationFinderApp {
   // UI Helpers
   // ═══════════════════════════════════════════════════════════════
 
+  /** 話者カテゴリ（'user'|'l0'|'proc'|'error'）に応じたラベルテキスト。 */
+  _agentLabelText(category) {
+    const t = LANG[this._lang];
+    return { user: t.roleUser, l0: t.roleL0, proc: t.roleProcessing, error: t.roleError }[category] || '';
+  }
+
+  /** LINE風グルーピング：直前と同じ話者カテゴリなら省略、違えば表示して更新。
+   *  wrapper（.message要素）の先頭にラベルdivを挿入する（category未指定なら何もしない）。 */
+  _appendAgentLabel(wrapper, category) {
+    if (!category) return;
+    const show = category !== this._lastAgentCategory;
+    this._lastAgentCategory = category;
+    if (!show) return;
+    const lbl = document.createElement('div');
+    lbl.className = `msg-label msg-label-${category}`;
+    lbl.textContent = this._agentLabelText(category);
+    wrapper.insertBefore(lbl, wrapper.firstChild);
+  }
+
   /**
    * Append a message bubble to the chat panel.
    *
@@ -2772,26 +2801,16 @@ class LocationFinderApp {
     this._hideTypingIndicator(); // 実メッセージが出る＝考え中を消す
     const container = document.getElementById('chatMessages');
 
-    const t = LANG[this._lang];
-    const roleLabels = {
-      user:           t.roleUser,
-      assistant:      t.roleAssistant,
-      l0:             t.roleL0,
-      'proc-note':    t.roleNote,
-      'thinking-msg': t.roleThinking,
-      'tool-status':  t.roleTool,
-      error:          t.roleError,
+    // ロール→話者カテゴリ（会話エージェント/処理エージェント/エラー/user）。LINE風グルーピングは
+    // _appendAgentLabel が担当（連続する同カテゴリはラベル省略）。'assistant'/'thinking-msg'は
+    // 実質未使用のレガシーロールのため未マッピング（ラベル無し・従来通り）。
+    const categoryByRole = {
+      user: 'user', l0: 'l0', 'proc-note': 'proc', 'tool-status': 'proc', debug: 'proc', error: 'error',
     };
 
     const wrapper = document.createElement('div');
     wrapper.className = `message ${role}`;
-
-    if (roleLabels[role]) {
-      const lbl = document.createElement('div');
-      lbl.className   = 'msg-label';
-      lbl.textContent = roleLabels[role];
-      wrapper.appendChild(lbl);
-    }
+    this._appendAgentLabel(wrapper, categoryByRole[role]);
 
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
@@ -2896,15 +2915,18 @@ class LocationFinderApp {
       : '';
     const wrapper = document.createElement('div');
     wrapper.className = 'message hint-request';
+    // 「💭 追加情報のお願い（n回）」は話者ラベル位置から本文先頭行へ移設（情報を失わない）。
+    // 話者ラベル自体は「処理エージェント」で統一する。
     wrapper.innerHTML = `
-      <div class="msg-label">${ht.hintTitle(this.config.HINT_EXTRA_TURNS)}</div>
       <div class="hint-bubble">
+        <div class="hint-title">${ht.hintTitle(this.config.HINT_EXTRA_TURNS)}</div>
         ${sugHTML}
         <div class="hint-actions">
           <button class="hint-skip-btn" id="${uid}-skip">${ht.hintSkip}</button>
         </div>
       </div>
     `;
+    this._appendAgentLabel(wrapper, 'proc');
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
 
@@ -2969,7 +2991,6 @@ class LocationFinderApp {
       const wrapper = document.createElement('div');
       wrapper.className = 'message choice-request';
       wrapper.innerHTML = `
-        <div class="msg-label">🔀 選択</div>
         <div class="choice-bubble">
           <div class="choice-buttons" id="${uid}-btns">
             ${choices.map((c, i) =>
@@ -2978,6 +2999,7 @@ class LocationFinderApp {
           </div>
         </div>
       `;
+      this._appendAgentLabel(wrapper, 'proc');
       container.appendChild(wrapper);
       container.scrollTop = container.scrollHeight;
 
@@ -3410,7 +3432,8 @@ const LANG = {
     // Chat role labels
     roleUser:      'オペレーター',
     roleAssistant: 'AI エージェント',
-    roleL0:        'ジオネーター',
+    roleL0:        '会話エージェント',
+    roleProcessing:'処理エージェント',
     roleNote:      '📋 補足事項',
     roleThinking:  'AI 思考',
     roleTool:      'ツール実行',
@@ -3539,7 +3562,8 @@ const LANG = {
     welcome: 'Hi, I\'m Geonator! Where would you like to search?',
     roleUser:      'Caller',
     roleAssistant: 'AI Agent',
-    roleL0:        'Geonator',
+    roleL0:        'Conversation Agent',
+    roleProcessing:'Processing Agent',
     roleNote:      '📋 Note',
     roleThinking:  'AI Thinking',
     roleTool:      'Tool',
