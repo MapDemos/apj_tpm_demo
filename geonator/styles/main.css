@@ -793,6 +793,9 @@ body { display: flex; flex-direction: column; }
 .send-btn:hover:not(:disabled) { color: var(--accent); background: rgba(59,130,246,.12); }
 .send-btn:active:not(:disabled) { transform: translateY(1px); }
 .send-btn:disabled { opacity: .35; cursor: not-allowed; }
+/* 処理中：送信ボタンが停止(■)に変化。赤系で「止める」を明示。 */
+.send-btn.stop { color: var(--red-badge, #ef4444); font-size: 16px; }
+.send-btn.stop:hover:not(:disabled) { color: var(--red-badge, #ef4444); background: rgba(239,68,68,.14); }
 
 /* ── Map Panel ───────────────────────────────────────────────── */
 

@@ -1000,7 +1000,7 @@ class LocationFinderApp {
     const input   = document.getElementById('chatInput');
     const sendBtn = document.getElementById('sendBtn');
 
-    sendBtn.addEventListener('click', () => this._handleSend());
+    sendBtn.addEventListener('click', () => this._onSendOrStop());
 
     // Double-Enter to send: first Enter = newline, second Enter on empty line = send
     input.addEventListener('keydown', e => {
@@ -1083,15 +1083,13 @@ class LocationFinderApp {
     if (this._querying) return; // 多重発火ガード（click+Enter同時/連打での二重起動を防ぐ・同期的に確保）
     this._querying = true;
     const input   = document.getElementById('chatInput');
-    const sendBtn = document.getElementById('sendBtn');
     this._lastQuery = text;
     this._cancelled = false;
-    sendBtn.disabled = true;
     input.disabled   = true;
+    this._setProcessing(true); // 送信ボタンを停止(■)モードに
     this._advanceMapGen();
     this._showThinking(LANG[this._lang].connecting);
     this._showTypingIndicator();
-    this._showCancelBtn();
 
     try {
       await this.processUserMessage(text);
@@ -1101,35 +1099,39 @@ class LocationFinderApp {
       this._querying = false; // ロック解除
       this._hideThinking();
       this._hideTypingIndicator();
-      this._hideCancelBtn();
-      sendBtn.disabled = false;
+      this._setProcessing(false); // 送信ボタンを送信(➤)へ戻す
       input.disabled   = false;
       input.focus();
     }
   }
 
-  /** 処理中のみ、チャット内にユーザー吹き出し（右寄せ・赤）としてキャンセルボタンを出す。 */
-  _showCancelBtn() {
-    this._hideCancelBtn();
-    const container = document.getElementById('chatMessages');
-    if (!container) return;
-    const row = document.createElement('div');
-    row.className = 'message user cancel-row';
-    row.id = 'cancelRow';
-    const btn = document.createElement('button');
-    btn.className = 'btn-cancel';
-    btn.textContent = LANG[this._lang].cancelBtn;
-    btn.onclick = () => this._cancelQuery();
-    row.appendChild(btn);
-    container.appendChild(row);
-    container.scrollTop = container.scrollHeight;
+  // 旧・別枠キャンセル吹き出しは廃止。停止は送信ボタン(■)に集約（_setProcessing）。
+  // 既存の多数の呼び出し箇所を壊さないため、メソッド名は残して no-op 化する。
+  _showCancelBtn() {}
+  _hideCancelBtn() {}
+  _pinCancelToBottom() {}
+
+  /** 送信ボタンを送信(➤)/停止(■)モードに切替。処理中は停止ボタンとして機能する。 */
+  _setProcessing(on) {
+    const sendBtn = document.getElementById('sendBtn');
+    if (!sendBtn) return;
+    sendBtn.disabled = false; // 送信・停止のどちらでもクリック可
+    if (on) {
+      sendBtn.classList.add('stop');
+      sendBtn.textContent = '■';
+      sendBtn.title = this._lang === 'en' ? 'Stop' : '停止';
+    } else {
+      sendBtn.classList.remove('stop');
+      sendBtn.textContent = '➤';
+      sendBtn.title = this._lang === 'en' ? 'Send' : '送信';
+    }
   }
-  _hideCancelBtn() { document.getElementById('cancelRow')?.remove(); }
-  /** キャンセル吹き出しを常に最下部（＝最新のエージェント吹き出しの下）に保つ。 */
-  _pinCancelToBottom() {
-    const r = document.getElementById('cancelRow');
-    const c = document.getElementById('chatMessages');
-    if (r && c && c.lastElementChild !== r) { c.appendChild(r); c.scrollTop = c.scrollHeight; }
+
+  /** 送信ボタンのクリック：停止(■)モードならキャンセル、そうでなければ送信。 */
+  _onSendOrStop() {
+    const sendBtn = document.getElementById('sendBtn');
+    if (sendBtn && sendBtn.classList.contains('stop')) this._cancelQuery();
+    else this._handleSend();
   }
 
   /** ソフトキャンセル：以降の新規API発行を止め(mcpが_cancelledを見る)、UIを即復帰、結果描画を抑止。 */
@@ -1140,8 +1142,8 @@ class LocationFinderApp {
     this._hideTypingIndicator();
     this._hideCancelBtn();
     this.addMessage('assistant', LANG[this._lang].cancelled);
-    const input = document.getElementById('chatInput'), sendBtn = document.getElementById('sendBtn');
-    if (sendBtn) sendBtn.disabled = false;
+    this._setProcessing(false); // 停止(■)→送信(➤)へ復帰
+    const input = document.getElementById('chatInput');
     if (input) { input.disabled = false; input.focus(); }
   }
 
@@ -1199,8 +1201,9 @@ class LocationFinderApp {
     // 並行実行の旧run()は _execQuery の _advanceMapGen による世代ガードで描画を止めるので安全。
     this._cancelled = true;   // 実行中クエリを中断（run()/mcp が参照して停止）
     this._querying  = false;  // 実行ロック解除
-    { const _in = document.getElementById('chatInput'), _sb = document.getElementById('sendBtn');
-      if (_in) _in.disabled = false; if (_sb) _sb.disabled = false; }
+    { const _in = document.getElementById('chatInput');
+      if (_in) _in.disabled = false; }
+    this._setProcessing(false); // 送信ボタンを送信(➤)に戻す
     // Hide the in-progress "検索しています" widget immediately (belt-and-braces;
     // _handleSend's finally also hides it once the resolved run() returns).
     this._hideThinking?.();
