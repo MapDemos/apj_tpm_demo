@@ -147,8 +147,9 @@ body { display: flex; flex-direction: column; }
 /* Hint request panel */
 .message.hint-request { align-self: flex-start; align-items: flex-start; max-width: 98%; }
 .hint-bubble {
-  background: linear-gradient(rgba(59,130,246,.08), rgba(59,130,246,.08)), var(--bg-card);
-  border: 1px solid rgba(59,130,246,.35);
+  /* 候補パネルと同じ意匠（不透明ベース+アンバー）＝処理エージェント系パネルの共通言語 */
+  background: linear-gradient(rgba(245,158,11,.06), rgba(245,158,11,.06)), var(--bg-card);
+  border: 1px solid rgba(245,158,11,.3);
   border-radius: 10px;
   padding: 11px 13px;
   display: flex;
@@ -526,6 +527,16 @@ body { display: flex; flex-direction: column; }
   border: 1px solid rgba(245,158,11,.3);
   border-radius: 10px; padding: 10px 12px; font-size: 13px;
 }
+/* フィードバックパネル（終了/絞り込む/探し直す）: 候補パネルと同じ意匠で枠を持たせる */
+.feedback-panel {
+  background: linear-gradient(rgba(245,158,11,.06), rgba(245,158,11,.06)), var(--bg-card);
+  border: 1px solid rgba(245,158,11,.3);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex; flex-wrap: wrap; gap: 8px;
+  align-self: flex-start;
+  max-width: 94%;
+}
 .candidate-header {
   display: flex; align-items: center; justify-content: space-between;
   font-weight: 700; margin-bottom: 8px; color: var(--text-1, #e5e7eb);
@@ -568,9 +579,10 @@ body { display: flex; flex-direction: column; }
 
 .message.debug { align-self: stretch; align-items: stretch; }
 .message.debug .message-bubble {
-  background: rgba(139,92,246,.07);
-  border: 1px dashed rgba(139,92,246,.35);
-  color: #c4b5fd;
+  /* 候補パネルと同じ不透明ベース+アンバー（壁紙で透けないように） */
+  background: linear-gradient(rgba(245,158,11,.06), rgba(245,158,11,.06)), var(--bg-card);
+  border: 1px dashed rgba(245,158,11,.35);
+  color: #fcd34d;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   line-height: 1.5;
@@ -581,9 +593,10 @@ body { display: flex; flex-direction: column; }
 /* Debug step-through panel */
 .message.debug-step { align-self: stretch; align-items: stretch; }
 .message.debug-step .message-bubble {
-  background: rgba(59,130,246,.08);
-  border: 1px solid rgba(96,165,250,.4);
-  color: #bfdbfe;
+  /* 候補パネルと同じ不透明ベース+アンバー（壁紙で透けないように） */
+  background: linear-gradient(rgba(245,158,11,.06), rgba(245,158,11,.06)), var(--bg-card);
+  border: 1px solid rgba(245,158,11,.3);
+  color: #fcd34d;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   line-height: 1.6;
@@ -592,9 +605,10 @@ body { display: flex; flex-direction: column; }
   transition: box-shadow .25s ease, border-color .25s ease;
 }
 .message.debug-step .step-next-btn { margin-top: 4px; }
+/* ハイライト時はベースがアンバーになったため、視認性を保つためアクセント色(青)で強調 */
 .step-highlight .message-bubble {
-  border-color: #f59e0b !important;
-  box-shadow: 0 0 0 2px rgba(245,158,11,.55), 0 0 14px 2px rgba(245,158,11,.4);
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgba(59,130,246,.55), 0 0 14px 2px rgba(59,130,246,.4);
 }
 .dbg-tip {
   font-size: 11px;
@@ -1064,11 +1078,12 @@ body { display: flex; flex-direction: column; }
 }
 
 /* Choice panel (ask_choice tool) */
-.message.choice-request .msg-label { color: #a78bfa; }
+.message.choice-request .msg-label { color: var(--amber); }
 .choice-bubble {
-  background: rgba(99, 102, 241, 0.08);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  border-radius: 8px;
+  /* 候補パネルと同じ意匠（不透明ベース+アンバーの色味）＝処理エージェント系パネルの共通言語 */
+  background: linear-gradient(rgba(245,158,11,.06), rgba(245,158,11,.06)), var(--bg-card);
+  border: 1px solid rgba(245,158,11,.3);
+  border-radius: 10px;
   padding: 12px 14px;
 }
 .choice-question {
@@ -1082,26 +1097,26 @@ body { display: flex; flex-direction: column; }
   gap: 8px;
 }
 .choice-btn {
-  /* 壁紙で透けないよう不透明ベースにインディゴの色味を重ねる */
-  background: linear-gradient(rgba(99,102,241,.15), rgba(99,102,241,.15)), var(--bg-card);
-  border: 1px solid rgba(99, 102, 241, 0.5);
+  /* 壁紙で透けないよう不透明ベースにアンバーの色味を重ねる（候補パネルと共通の意匠） */
+  background: linear-gradient(rgba(245,158,11,.15), rgba(245,158,11,.15)), var(--bg-card);
+  border: 1px solid rgba(245,158,11,.5);
   border-radius: 6px;
-  color: #c4b5fd;
+  color: #fcd34d;
   font-size: 13px;
   padding: 6px 16px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
 .choice-btn:hover:not(:disabled) {
-  background: linear-gradient(rgba(99,102,241,.3), rgba(99,102,241,.3)), var(--bg-card);
-  border-color: #818cf8;
-  color: #e0e7ff;
+  background: linear-gradient(rgba(245,158,11,.3), rgba(245,158,11,.3)), var(--bg-card);
+  border-color: #fbbf24;
+  color: #fef3c7;
 }
 .choice-btn:disabled { opacity: 0.5; cursor: default; }
 .choice-btn-selected {
-  background: linear-gradient(rgba(99,102,241,.4), rgba(99,102,241,.4)), var(--bg-card) !important;
-  border-color: #818cf8 !important;
-  color: #e0e7ff !important;
+  background: linear-gradient(rgba(245,158,11,.4), rgba(245,158,11,.4)), var(--bg-card) !important;
+  border-color: #fbbf24 !important;
+  color: #fef3c7 !important;
   opacity: 1 !important;
 }
 /* Debug pause tabs */

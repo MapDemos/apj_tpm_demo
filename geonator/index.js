@@ -832,9 +832,9 @@ class LocationFinderApp {
    *   research — 〈proximity〉周辺で探し直す（条件を足して再検索）
    */
   _showFeedbackButtons(onAction, proximityLabel, opts = {}) {
+    // 候補パネルと同じ意匠の枠を持たせる（.feedback-panel）＝処理エージェント系パネルの共通言語。
     const container = document.createElement('div');
-    container.className = 'feedback-buttons';
-    container.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;';
+    container.className = 'feedback-panel';
 
     const px = (proximityLabel || '').trim();
     let buttons = this._lang === 'en'
@@ -871,7 +871,7 @@ class LocationFinderApp {
     });
 
     const chatMessages = document.getElementById('chatMessages');
-    if (chatMessages) chatMessages.appendChild(container);
+    if (chatMessages) { chatMessages.appendChild(container); chatMessages.scrollTop = chatMessages.scrollHeight; }
 
     // 本体入力欄からの番号入力にも対応（ボタンは残したまま・番号は決定的なJS処理）。
     const handleTyped = (text) => {
