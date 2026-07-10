@@ -213,7 +213,8 @@ class LLMClient {
         { system: PROMPT_L0, messages },
         220,
         this.config.L0_MODEL || 'claude-haiku-4-5-20251001',
-        'L0'
+        'L0',
+        { cacheSystem: true } // 不変な L0 システムプロンプトをプロンプトキャッシュ（同一セッション内で複数回呼ばれる）
       );
       const json = this._extractJSON(result);
       if (!json || typeof json.reply !== 'string') return fallback;
@@ -241,7 +242,8 @@ class LLMClient {
         { system: PROMPT_L0, messages },
         220,
         this.config.L0_MODEL || 'claude-haiku-4-5-20251001',
-        'L0'
+        'L0',
+        { cacheSystem: true } // 不変な L0 システムプロンプトをプロンプトキャッシュ（同一セッション内で複数回呼ばれる）
       );
       const json = this._extractJSON(result);
       if (!json || typeof json.reply !== 'string') return '';
@@ -269,7 +271,8 @@ class LLMClient {
         { system: PROMPT_L0, messages },
         500,
         this.config.L0_MODEL || 'claude-haiku-4-5-20251001',
-        'L0'
+        'L0',
+        { cacheSystem: true } // 不変な L0 システムプロンプトをプロンプトキャッシュ（同一セッション内で複数回呼ばれる）
       );
       const json = this._extractJSON(result);
       if (!json || typeof json.reply !== 'string') return '';
@@ -302,7 +305,8 @@ class LLMClient {
         { system: PROMPT_L0, messages },
         150,
         this.config.L0_MODEL || 'claude-haiku-4-5-20251001',
-        'L0'
+        'L0',
+        { cacheSystem: true } // 不変な L0 システムプロンプトをプロンプトキャッシュ（同一セッション内で複数回呼ばれる）
       );
       const json = this._extractJSON(result);
       if (!json || !['done', 'narrow', 'research'].includes(json.action)) return '';
@@ -480,7 +484,7 @@ class LLMClient {
     const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
     const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
-    // opts.cacheSystem: システムプロンプトをプロンプトキャッシュ対象にする（不変で使い回す L1/L2 向け）。
+    // opts.cacheSystem: システムプロンプトをプロンプトキャッシュ対象にする（不変で使い回す L0/L1/L2 向け）。
     // 文字列を content ブロック配列にし、末尾に cache_control を付ける（prefixキャッシュ）。
     const systemField = (opts.cacheSystem && typeof prompt.system === 'string')
       ? [{ type: 'text', text: prompt.system, cache_control: { type: 'ephemeral' } }]
