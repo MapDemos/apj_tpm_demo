@@ -79,6 +79,9 @@ class LocationFinderApp {
       this._mapOff = this._readMapOffPref();
       if (!this._mapOff) await this._ensureMap();
 
+      // 2b. 処理ビュー（tool-status/proc-note吹き出し）ON/OFF。既定ON（詳細モード）。
+      this._processingViewOff = this._readUIPref('processingViewOff', false);
+
       // 3. Wire up UI event listeners
       this._setupEventListeners();
 
@@ -253,6 +256,24 @@ class LocationFinderApp {
     modal?.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
   }
 
+  /** localStorageの'geonator_ui'ブロブから1個の設定値を読む（無ければdefaultValue）。
+   *  複数のUIトグル（地図・処理ビュー等）が同じキーを共有するため、読み取りを共通化。 */
+  _readUIPref(key, defaultValue) {
+    try {
+      const ui = JSON.parse(localStorage.getItem('geonator_ui') || '{}');
+      if (key in ui) return ui[key];
+    } catch (_) {}
+    return defaultValue;
+  }
+
+  /** localStorageの'geonator_ui'ブロブに1個の設定値をマージ保存する（他キーを消さない）。 */
+  _persistUIPref(patch) {
+    try {
+      const cur = JSON.parse(localStorage.getItem('geonator_ui') || '{}');
+      localStorage.setItem('geonator_ui', JSON.stringify({ ...cur, ...patch }));
+    } catch (_) {}
+  }
+
   /** localStorage から地図OFF設定を読む（初期化で地図生成の要否判断に使う）。
    *  明示設定があればそれを尊重。無ければスマホ幅は既定OFF（スマホ向け軽量表示）。 */
   _readMapOffPref() {
@@ -279,9 +300,23 @@ class LocationFinderApp {
     document.querySelector('.app-container')?.classList.toggle('map-off', this._mapOff);
     const btn = document.getElementById('mapToggleBtn');
     if (btn) btn.textContent = this._mapOff ? LANG[this._lang].mapShow : LANG[this._lang].mapHide;
-    try { localStorage.setItem('geonator_ui', JSON.stringify({ mapOff: this._mapOff })); } catch (_) {}
+    this._persistUIPref({ mapOff: this._mapOff });
     // 再表示時: 非表示中はコンテナ幅が0なので mapbox の再計算が必要
     if (!this._mapOff && this.map) setTimeout(() => { try { this.map.resize(); } catch (_) {} }, 60);
+  }
+
+  /** トグル。処理ビューOFF＝tool-status(処理時間・トークン内訳)とproc-note(除外事項・仮定の
+   *  申し送り)の吹き出しを隠す（候補パネル・選択肢パネルは対象外・常時表示のまま）。
+   *  既定はON（詳細モード）。エンジンの判定・検索ロジックには一切触れない、純粋な表示切替。 */
+  _toggleProcessingView() {
+    this._setProcessingViewOff(!this._processingViewOff);
+  }
+
+  _setProcessingViewOff(off) {
+    this._processingViewOff = !!off;
+    const btn = document.getElementById('processingViewToggleBtn');
+    if (btn) btn.textContent = this._processingViewOff ? LANG[this._lang].procViewOff : LANG[this._lang].procViewOn;
+    this._persistUIPref({ processingViewOff: this._processingViewOff });
   }
 
   /** 地図OFF時に候補パネルへ差し込む静的地図URL（Static Images API）。上位5件をティア色ピンで。
@@ -450,7 +485,9 @@ class LocationFinderApp {
       },
       // 処理エージェント発の申し送り事項（除外条件・rail/地下鉄の扱い等）。会話ではなく
       // エンジンの決定的な注記なので、L0とは別の処理エージェント系スタイル(アンバー)で表示する。
+      // 処理ビューOFF時は非表示（会話モード向け・エンジンの判断自体には影響しない）。
       showProcessingNote(text) {
+        if (self._processingViewOff) return;
         self.addMessage('proc-note', text);
       },
       showSearching(text) {
@@ -596,6 +633,7 @@ class LocationFinderApp {
       },
       showRunStats(stats) {
         if (!stats) return;
+        self._hideTypingIndicator?.(); // 考え中表示は処理ビューの状態に関わらず常に消す
         const fmt = n => (n || 0).toLocaleString('ja-JP');
         const secs = (stats.ms / 1000).toFixed(1);
         const en = self._lang === 'en';
@@ -628,7 +666,8 @@ class LocationFinderApp {
         ];
 
         // ── DOM 構築：合計は常時表示、それ以下は <details>（クリックで展開）──
-        self._hideTypingIndicator?.(); // addMessage 相当（考え中表示を消す）
+        // 処理ビューOFF時はこの吹き出し自体を出さない（会話モード向け・上限警告は別途常に出す）。
+        if (!self._processingViewOff) {
         const container = document.getElementById('chatMessages');
         const wrapper = document.createElement('div');
         wrapper.className = 'message tool-status';
@@ -692,8 +731,9 @@ class LocationFinderApp {
         container.appendChild(wrapper);
         container.scrollTop = container.scrollHeight;
         self._pinCancelToBottom?.(); // addMessage 相当（キャンセル吹き出しを最下部維持）
+        }
 
-        // 上限到達の警告（TQ/SB/ISO）：どのAPIが上限で打ち切られたかを明示
+        // 上限到達の警告（TQ/SB/ISO）：どのAPIが上限で打ち切られたかを明示（処理ビューの状態に関わらず常に表示）
         const cap = self.mapboxMCP?._capHit;
         if (cap && (cap.tq || cap.sb || cap.iso)) {
           const L = LANG[self._lang], caps = [];
@@ -1085,6 +1125,10 @@ class LocationFinderApp {
     // 地図表示 ON/OFF（OFFで対話パネルを中央表示＝スマホ風）。設定は localStorage に永続化。
     document.getElementById('mapToggleBtn')?.addEventListener('click', () => this._toggleMap());
     this._setMapOff(this._mapOff); // 起動時のDOM反映（bool は initialize() で確定済み）
+
+    // 処理ビュー ON/OFF（OFFでtool-status/proc-note吹き出しを隠す）。設定は localStorage に永続化。
+    document.getElementById('processingViewToggleBtn')?.addEventListener('click', () => this._toggleProcessingView());
+    this._setProcessingViewOff(this._processingViewOff); // 起動時のDOM反映（bool は initialize() で確定済み）
 
     // Example chips
     document.querySelectorAll('.example-chip').forEach(btn => {
@@ -3178,6 +3222,8 @@ class LocationFinderApp {
     // Map toggle button (respect current state)
     const mapBtn = document.getElementById('mapToggleBtn');
     if (mapBtn) mapBtn.textContent = this._mapOff ? t.mapShow : t.mapHide;
+    const procViewBtn = document.getElementById('processingViewToggleBtn');
+    if (procViewBtn) procViewBtn.textContent = this._processingViewOff ? t.procViewOff : t.procViewOn;
     // （キャンセルボタンは処理中に動的生成する吹き出しなのでここでは扱わない）
 
     // Examples label
@@ -3386,6 +3432,8 @@ const LANG = {
     debugOn:       '🔍 デバッグ ON',
     mapHide:       '🗺 地図表示OFF',
     mapShow:       '🗺 地図表示ON',
+    procViewOn:    '🔧 処理ビュー ON',
+    procViewOff:   '🔧 処理ビュー OFF',
     staticMapCap:  '上位5件まで表示',
     staticMapAlt:  '検索結果の地図（上位5件）',
     staticMapLoading: '地図を読み込み中…',
@@ -3517,6 +3565,8 @@ const LANG = {
     debugOn:       '🔍 Debug ON',
     mapHide:       '🗺 Map OFF',
     mapShow:       '🗺 Map ON',
+    procViewOn:    '🔧 Processing View ON',
+    procViewOff:   '🔧 Processing View OFF',
     staticMapCap:  'Showing up to top 5',
     staticMapAlt:  'Result map (top 5)',
     staticMapLoading: 'Loading map…',
