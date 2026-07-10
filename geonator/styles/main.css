@@ -76,37 +76,6 @@ body { display: flex; flex-direction: column; }
   gap: 10px;
 }
 
-.header-sub {
-  font-size: 11px;
-  color: var(--text-2);
-}
-.lang-toggle-btn {
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  color: var(--text-2);
-  font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background .15s, color .15s, border-color .15s;
-  white-space: nowrap;
-}
-.lang-toggle-btn:hover {
-  background: #1e3050;
-  color: var(--text-1);
-  border-color: var(--accent);
-}
-
-.model-badge {
-  font-size: 10px;
-  color: #7aa9f7;
-  background: rgba(59,130,246,.12);
-  border: 1px solid rgba(59,130,246,.25);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-family: monospace;
-  white-space: nowrap;
-}
 .debug-toggle-btn {
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -236,25 +205,6 @@ body { display: flex; flex-direction: column; }
 }
 .debug-next-btn:hover:not(:disabled) { opacity: .85; }
 .debug-next-btn:disabled { opacity: .5; cursor: default; }
-
-.api-counter {
-  font-size: 10px;
-  color: var(--text-3);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  padding: 2px 7px;
-  border-radius: 4px;
-  font-family: monospace;
-  white-space: nowrap;
-}
-.token-display {
-  font-size: 11px;
-  color: var(--text-2);
-  font-family: monospace;
-  white-space: nowrap;
-  min-width: 110px;
-  text-align: right;
-}
 
 #clearChatBtn {
   background: var(--bg-input);
@@ -1243,8 +1193,7 @@ body { display: flex; flex-direction: column; }
      ヘッダーが折り返して高くなっても本文が正しく残り領域を埋め、入力欄も画面内に収まる。 */
   body { display: flex; flex-direction: column; }
   .app-header { flex-wrap: wrap; height: auto; padding: 6px 10px; gap: 6px; flex-shrink: 0; }
-  .header-sub, .model-badge, .api-counter, .token-display { display: none; } /* テレメトリは省スペース */
-  .app-header .control-btn, .lang-toggle-btn { font-size: 11px; padding: 5px 8px; }
+  .app-header .control-btn { font-size: 11px; padding: 5px 8px; }
 
   .app-container { flex: 1 1 auto; height: auto; min-height: 0; overflow: hidden; }
 

@@ -34,9 +34,6 @@ class LocationFinderApp {
     // Language state
     this._lang = 'ja';
 
-    // Token tracking
-    this._tokens = { input: 0, output: 0 };
-
     // Debug step mode
     this._debugMode       = false;
     this._debugStepResolve = null;
@@ -178,7 +175,6 @@ class LocationFinderApp {
           L2_1: this.config.L2_1_MODEL, L2_2: this.config.L2_2_MODEL, L3: this.config.L3_MODEL,
         }));
       } catch (_) {}
-      this._updateModelBadge();
     };
     const persistNull = () => {
       try { localStorage.setItem('geonator_l2_1', JSON.stringify({ keepNull: this.config.L2_1_KEEP_NULL_CATEGORY })); } catch (_) {}
@@ -245,7 +241,6 @@ class LocationFinderApp {
       if (sbModeSel) sbModeSel.value = 'hard';
       if (flModeSel) flModeSel.value = 'hard';
       try { localStorage.removeItem('geonator_models'); localStorage.removeItem('geonator_l2_1'); localStorage.removeItem('geonator_search'); localStorage.removeItem('geonator_judge'); } catch (_) {}
-      this._updateModelBadge();
       this._resetScoring?.(); // weights + decisiveness (defined in _initScoringSettings)
     });
 
@@ -256,8 +251,6 @@ class LocationFinderApp {
       if (modal) modal.style.display = 'none';
     });
     modal?.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
-
-    this._updateModelBadge();
   }
 
   /** localStorage から地図OFF設定を読む（初期化で地図生成の要否判断に使う）。
@@ -322,13 +315,6 @@ class LocationFinderApp {
     if (Math.max(pW / bW, pH / bH) < 0.35) return 'auto'; // 固まってる → autoでフィット
     const padLng = bW * 0.06, padLat = bH * 0.06;         // 枠固定: 端の切れ防止
     return `[${(bbox[0] - padLng).toFixed(5)},${(bbox[1] - padLat).toFixed(5)},${(bbox[2] + padLng).toFixed(5)},${(bbox[3] + padLat).toFixed(5)}]`;
-  }
-
-  _updateModelBadge() {
-    const el = document.getElementById('model-badge');
-    if (!el) return;
-    const s = m => (m || '').replace('claude-', '').replace(/-\d{8}$/, '');
-    el.textContent = `L0:${s(this.config.L0_MODEL)} / L1-2:${s(this.config.L1_MODEL)} / L1-3:${s(this.config.L1_3_MODEL)} / L2-1:${s(this.config.L2_1_MODEL)} / L2-2:${s(this.config.L2_2_MODEL)} / L3:${s(this.config.L3_MODEL)}`;
   }
 
   /** 各役割の推奨モデル（＝既定）のオプションに「（推奨）」を付す。言語に追従。 */
@@ -524,10 +510,6 @@ class LocationFinderApp {
       },
       showProbableArea(candidates, message) { if (!self._mapActive()) return; self.showProbableArea(candidates, message); },
 
-      // ── Visualization / telemetry callbacks (always on, not debug-gated) ──
-      refreshCounts() {
-        self._updateAPICountDisplay();
-      },
       // 1次検索bbox（within到達圏で絞られていればその値）を保持。地図OFF時の静的地図の枠に使う。
       setResultBbox(bbox) { self._lastResultBbox = bbox || null; },
       // 次の計算中に「今何をしているか」を再表示（次の吹き出しで自動的に消える）
@@ -720,10 +702,6 @@ class LocationFinderApp {
           if (cap.iso) caps.push(L.capISO(self.config.ISO_MAX_PER_QUERY ?? 100));
           self.addMessage('error', `${L.capWarnHead}\n${caps.join('\n')}`);
         }
-        // header cumulative token display
-        self._tokens.input  += totIn;
-        self._tokens.output += totOut;
-        self._updateTokenDisplay();
       },
     };
   }
@@ -1079,7 +1057,6 @@ class LocationFinderApp {
 
     document.getElementById('clearChatBtn').addEventListener('click', () => this._resetChat());
 
-    document.getElementById('lang-toggle').addEventListener('click', () => this._toggleLanguage());
     document.getElementById('settingsLangBtn')?.addEventListener('click', () => this._toggleLanguage());
 
     // Thinking float widget toggle
@@ -1306,8 +1283,6 @@ class LocationFinderApp {
 
   _resetChat() {
     this.messages = [];
-    this._tokens  = { input: 0, output: 0 };
-    this._updateTokenDisplay();
     this._lastAgentCategory = null; // クリア後は次のメッセージで必ず話者ラベルを表示させる
     if (this.mapboxMCP) {
       this.mapboxMCP._sbRequests  = 0;
@@ -1326,7 +1301,6 @@ class LocationFinderApp {
     this._resetFlowState();
     this._conditionTracker = [];
     this._lastProximity    = null;
-    this._updateAPICountDisplay();
     // 保留中の待ち（デバッグ一時停止/自由入力/フィードバック/選択）をまとめて解決して解放。
     // unknown value(null) → 各フローは何もせず run() が綺麗に戻り、入力が再有効化される。
     this._resolvePendingWaits(null);
@@ -3181,9 +3155,7 @@ class LocationFinderApp {
     const t = LANG[lang];
     if (!t) return;
 
-    // Toggle button — shows current language (header + settings modal stay in sync)
-    const btn = document.getElementById('lang-toggle');
-    if (btn) btn.textContent = t.langBtn;
+    // Toggle button — shows current language
     const sBtn = document.getElementById('settingsLangBtn');
     if (sBtn) sBtn.textContent = t.langBtn;
 
@@ -3291,32 +3263,6 @@ class LocationFinderApp {
     if (mapStatus && mapStatus.textContent === LANG[lang === 'ja' ? 'en' : 'ja'].mapReady) {
       mapStatus.textContent = t.mapReady;
     }
-  }
-
-  _updateAPICountDisplay() {
-    const sb = document.getElementById('api-counter-sb');
-    const tq = document.getElementById('api-counter-tq');
-    const iso = document.getElementById('api-counter-iso');
-    if (sb) sb.textContent = `SB: ${this.mapboxMCP?._sbRequests ?? 0} req`;
-    const tqHits = this.mapboxMCP?._tqCacheHits ?? 0;
-    const tqReal = this.mapboxMCP?._tqRequests  ?? 0;
-    if (tq) tq.textContent = tqHits > 0
-      ? `TQ: ${tqReal} req (+${tqHits}↩)`
-      : `TQ: ${tqReal} req`;
-    const isoHits = this.mapboxMCP?._isoCacheHits ?? 0;
-    const isoReal = this.mapboxMCP?._isoRequests  ?? 0;
-    if (iso) iso.textContent = isoHits > 0
-      ? `ISO: ${isoReal} req (+${isoHits}↩)`
-      : `ISO: ${isoReal} req`;
-    const mx = document.getElementById('api-counter-mx');
-    if (mx) mx.textContent = `MX: ${this.mapboxMCP?._matrixRequests ?? 0} req`;
-  }
-
-  _updateTokenDisplay() {
-    const el = document.getElementById('token-display');
-    if (!el) return;
-    const fmt = n => n.toLocaleString('ja-JP');
-    el.textContent = `↑${fmt(this._tokens.input)} ↓${fmt(this._tokens.output)}`;
   }
 
   _showThinking(text) {

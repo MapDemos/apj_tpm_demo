@@ -28,18 +28,7 @@
       <span class="app-version" id="app-version" title="ビルドバージョン（キャッシュ確認用）"></span>
     </div>
     <div class="header-right">
-      <span class="header-sub">Location AI · Claude + Mapbox</span>
-      <button class="lang-toggle-btn" id="lang-toggle" title="Switch language / 言語切替">🌐 Switch to EN</button>
-      <span class="model-badge" id="model-badge">-</span>
-      <span class="api-counter" id="api-counter-sb" title="Search Box APIリクエスト回数">SB:0</span>
-      <span class="api-counter" id="api-counter-tq" title="Tilequery APIリクエスト回数">TQ:0</span>
-      <span class="api-counter" id="api-counter-iso" title="Isochrone APIリクエスト回数">ISO:0</span>
-      <span class="api-counter" id="api-counter-mx" title="Matrix APIリクエスト回数（徒歩n分の実移動時間で順位付け）">MX:0</span>
-      <span class="token-display" id="token-display" title="累計トークン（↑入力 ↓出力）">-</span>
       <button id="settingsBtn" class="control-btn" title="Settings / 設定">⚙️ 設定</button>
-      <button id="mapToggleBtn" class="control-btn" title="地図表示のON/OFF（OFFで対話パネルを中央表示）">🗺 地図表示OFF</button>
-      <button id="debugToggleBtn" class="control-btn debug-toggle-btn" title="各ツール実行後に一時停止してステップ確認できます">🔍 デバッグ OFF</button>
-      <button id="clearChatBtn" class="control-btn">チャットをクリア</button>
     </div>
   </header>
 
@@ -49,13 +38,14 @@
       <div class="settings-title" id="set-title">設定</div>
 
       <div class="settings-tabbar">
-        <button class="settings-tab active" data-stab="basic" id="set-tab-basic">基本</button>
-        <button class="settings-tab" data-stab="score" id="set-tab-score">スコア</button>
+        <button class="settings-tab active" data-stab="general" id="set-tab-general">一般</button>
+        <button class="settings-tab" data-stab="l0" id="set-tab-l0">会話エージェント</button>
+        <button class="settings-tab" data-stab="l1" id="set-tab-l1">処理エージェント</button>
         <button class="settings-tab" data-stab="judge" id="set-tab-judge">判定方式</button>
       </div>
 
-      <!-- ===== タブ: 基本（言語・モデル・L2-1 null） ===== -->
-      <div class="settings-tabpage" data-stabpage="basic">
+      <!-- ===== タブ: 一般（言語・地図・デバッグ・チャットクリア・リセット） ===== -->
+      <div class="settings-tabpage" data-stabpage="general">
 
       <!-- 表示言語 / Display language -->
       <div class="settings-subtitle" id="set-lang-title">言語 / Language</div>
@@ -66,7 +56,40 @@
 
       <div class="settings-divider"></div>
 
-      <!-- ① モデル -->
+      <div class="settings-subtitle" id="set-map-title">地図</div>
+      <label class="settings-row">
+        <span id="set-map-row">地図表示</span>
+        <button id="mapToggleBtn" class="control-btn" title="地図表示のON/OFF（OFFで対話パネルを中央表示）">🗺 地図表示OFF</button>
+      </label>
+
+      <div class="settings-divider"></div>
+
+      <div class="settings-subtitle" id="set-debug-title">デバッグ</div>
+      <label class="settings-row">
+        <span id="set-debug-row">デバッグモード</span>
+        <button id="debugToggleBtn" class="control-btn debug-toggle-btn" title="各ツール実行後に一時停止してステップ確認できます">🔍 デバッグ OFF</button>
+      </label>
+
+      <div class="settings-divider"></div>
+
+      <div class="settings-subtitle" id="set-chat-title">チャット</div>
+      <label class="settings-row">
+        <span id="set-chat-row">会話履歴</span>
+        <button id="clearChatBtn" class="control-btn">チャットをクリア</button>
+      </label>
+
+      <div class="settings-divider"></div>
+
+      <label class="settings-row">
+        <span id="set-reset-row">設定のリセット</span>
+        <button id="settingsResetBtn" class="control-btn">↺ すべてデフォルトに戻す</button>
+      </label>
+
+      </div><!-- /tabpage general -->
+
+      <!-- ===== タブ: 会話エージェント（L0） ===== -->
+      <div class="settings-tabpage" data-stabpage="l0" style="display:none">
+
       <div class="settings-subtitle" id="set-model-title">モデル</div>
       <label class="settings-row">
         <span id="set-l0-label">L0（会話マネジメント）</span>
@@ -77,6 +100,27 @@
         </select>
       </label>
       <div class="settings-modelwhy" id="set-l0-why">ユーザーとの対話全般（挨拶・雑談・ミッション外の切り分け含む）を担当。毎ターン必ず発火するが、自然な対話の質を重視してSonnet 4.6を推奨。速度優先ならHaikuへ。</div>
+
+      <div class="settings-divider"></div>
+
+      <div class="settings-subtitle" id="set-fragmax-title">断片合成の連続失敗上限 <span class="settings-hint" id="set-fragmax-hint">（複数ターンに分けた場所探し依頼を諦めるまでの回数）</span></div>
+      <label class="settings-row">
+        <span id="set-fragmax-row">連続失敗の上限</span>
+        <select id="fragmentMergeMaxTriesSelect">
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+        </select>
+      </label>
+
+      </div><!-- /tabpage l0 -->
+
+      <!-- ===== タブ: 処理エージェント（L1-1以降） ===== -->
+      <div class="settings-tabpage" data-stabpage="l1" style="display:none">
+
+      <div class="settings-subtitle" id="set-model-title2">モデル</div>
       <label class="settings-row settings-row-inactive">
         <span id="set-l1c-label">L1-1（確認文の先出し・非活性）</span>
         <select id="l1ConfirmModelSelect" disabled>
@@ -144,25 +188,10 @@
         </select>
       </label>
 
-      <div class="settings-divider"></div>
+      </div><!-- /tabpage l1 -->
 
-      <!-- L0: 断片的な発話合成の連続失敗上限 -->
-      <div class="settings-subtitle" id="set-fragmax-title">L0：断片合成の連続失敗上限 <span class="settings-hint" id="set-fragmax-hint">（複数ターンに分けた場所探し依頼を諦めるまでの回数）</span></div>
-      <label class="settings-row">
-        <span id="set-fragmax-row">連続失敗の上限</span>
-        <select id="fragmentMergeMaxTriesSelect">
-          <option value="3">3</option>
-          <option value="4">4</option>
-          <option value="5">5</option>
-          <option value="6">6</option>
-          <option value="7">7</option>
-        </select>
-      </label>
-
-      </div><!-- /tabpage basic -->
-
-      <!-- ===== タブ: スコア（条件上限・重み・結論） ===== -->
-      <div class="settings-tabpage" data-stabpage="score" style="display:none">
+      <!-- ===== タブ: 判定方式（条件上限・スコア重み・結論・hard/soft） ===== -->
+      <div class="settings-tabpage" data-stabpage="judge" style="display:none">
 
       <!-- 条件の上限 -->
       <div class="settings-subtitle" id="set-maxcond-title">条件の上限 <span class="settings-hint" id="set-maxcond-hint">（近くにあるものの数・0〜5）</span></div>
@@ -207,30 +236,28 @@
 
       <div class="settings-hint" id="set-score-note" style="margin-top:12px">※ スコアの変更は次の検索から反映されます</div>
 
-      </div><!-- /tabpage score -->
+      <div class="settings-divider"></div>
 
-      <!-- ===== タブ: 判定方式（ハード=除外 / ソフト=加点） ===== -->
-      <div class="settings-tabpage" data-stabpage="judge" style="display:none">
-        <div class="settings-subtitle" id="set-judge-title">判定方式 <span class="settings-hint" id="set-judge-hint">（ハード=候補から除外 / ソフト=スコア加点）</span></div>
-        <label class="settings-row">
-          <span id="set-samebuilding-row">同じビル（same_building）</span>
-          <select id="sameBuildingModeSelect">
-            <option id="set-sb-hard" value="hard">ハード（除外）</option>
-            <option id="set-sb-soft" value="soft">ソフト（加点）</option>
-          </select>
-        </label>
-        <label class="settings-row">
-          <span id="set-floors-row">階数（floors）</span>
-          <select id="floorsModeSelect">
-            <option id="set-fl-hard" value="hard">ハード（除外）</option>
-            <option id="set-fl-soft" value="soft">ソフト（加点）</option>
-          </select>
-        </label>
-        <div class="settings-hint" id="set-judge-note" style="margin-top:12px">※ ハードは条件を満たさない候補を除外、ソフトは満たすほど加点します。判定不能（建物データ無し等）の候補は除外しません。変更は次の検索から反映されます。</div>
+      <div class="settings-subtitle" id="set-judge-title">判定方式 <span class="settings-hint" id="set-judge-hint">（ハード=候補から除外 / ソフト=スコア加点）</span></div>
+      <label class="settings-row">
+        <span id="set-samebuilding-row">同じビル（same_building）</span>
+        <select id="sameBuildingModeSelect">
+          <option id="set-sb-hard" value="hard">ハード（除外）</option>
+          <option id="set-sb-soft" value="soft">ソフト（加点）</option>
+        </select>
+      </label>
+      <label class="settings-row">
+        <span id="set-floors-row">階数（floors）</span>
+        <select id="floorsModeSelect">
+          <option id="set-fl-hard" value="hard">ハード（除外）</option>
+          <option id="set-fl-soft" value="soft">ソフト（加点）</option>
+        </select>
+      </label>
+      <div class="settings-hint" id="set-judge-note" style="margin-top:12px">※ ハードは条件を満たさない候補を除外、ソフトは満たすほど加点します。判定不能（建物データ無し等）の候補は除外しません。変更は次の検索から反映されます。</div>
+
       </div><!-- /tabpage judge -->
 
       <div class="settings-actions">
-        <button id="settingsResetBtn" class="control-btn">↺ すべてデフォルトに戻す</button>
         <button id="settingsCloseBtn" class="control-btn">閉じる</button>
       </div>
     </div>
