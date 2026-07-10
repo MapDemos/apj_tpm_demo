@@ -1181,10 +1181,14 @@ class MapboxMCPClient {
     }
     const DEG_LNG = 1 / (111320 * Math.cos(centerLat * Math.PI / 180));
     const DEG_LAT = 1 / 110540;
-    // spacing ≤ radius×√2 for full corner coverage. Tilequery caps at 50 results
-    // per point, so radius must be small enough to stay under the cap in dense
-    // areas (otherwise nearest-50 truncation leaves gaps and drops buildings).
-    const spacingM = radius * 1.3;
+    // 隙間なし被覆を保ちつつ円（＝Tilequery発行点）を最小化するため、正方格子ではなく
+    // 六角格子（三角配置）を張る。円で平面を覆う理論最小配置で、中心間隔を最大 √3·radius
+    // まで取れる（各セル＝正六角形の頂点が最遠点＝中心から radius）。安全マージンを少し残すため
+    // HEX_SAFETY を掛ける（頂点被覆＝HEX_SAFETY·radius）。radius 自体は小さいまま維持：Tilequery
+    // は1点50件上限なので密集地で truncation しないため（間隔だけ広げても50件上限には無影響）。
+    const HEX_SAFETY = 0.95;                          // 頂点被覆 0.95·radius（≒5%マージン）
+    const dxM = Math.sqrt(3) * radius * HEX_SAFETY;   // 行内（横）の中心間隔
+    const dyM = 1.5 * radius * HEX_SAFETY;            // 行間（縦）の中心間隔
 
     // Default bbox when none provided: ±300m square around center
     if (!bbox) {
@@ -1197,53 +1201,32 @@ class MapboxMCPClient {
       ];
     }
 
-    let gridPoints;
-
-    if (bbox) {
+    // 六角格子を bbox＋縁(radius)ぶんの領域に敷き、円が bbox に少しでも掛かる点だけ残す。
+    // ＝端まで隙間なく覆う最小集合（中心が bbox 外でも、縁の被覆に必要な点は保持）。
+    // 矩形への最短距離が radius 以下＝その円は bbox 被覆に寄与。距離>radius なら不要として捨てる。
+    // 全幾何をメートルで計算し軸ごとに度変換するため、緯度経度アスペクト差の影響を受けない。
+    let gridPoints = [];
+    {
       const [minLng, minLat, maxLng, maxLat] = bbox;
-      // Inset grid points by radius so circles align with bbox edges (no overshoot)
-      const radiusLng = radius * DEG_LNG;
-      const radiusLat = radius * DEG_LAT;
-      const gMinLng = minLng + radiusLng;
-      const gMaxLng = maxLng - radiusLng;
-      const gMinLat = minLat + radiusLat;
-      const gMaxLat = maxLat - radiusLat;
-
-      // bbox が 2*radius より小さい場合：以前は「中心1点」に縮退させていたが、その1点は
-      // radius(=65m) しか届かず、到達圏内でも radius 外(66〜80m)の建物を取りこぼす＋密集地で
-      // 50件truncation。結果、条件の有無で条件bboxが広がると多点化して収集が変わる不整合の主因。
-      // → 小bboxでも bbox 全体を覆う最小グリッド（各軸最低2点・spacing≤radius で重なり被覆）を張る。
-      if (gMinLng >= gMaxLng || gMinLat >= gMaxLat) {
-        const wM = (maxLng - minLng) / DEG_LNG, hM = (maxLat - minLat) / DEG_LAT;
-        const nnx = Math.max(2, Math.ceil(wM / radius) + 1);
-        const nny = Math.max(2, Math.ceil(hM / radius) + 1);
-        gridPoints = [];
-        for (let iy = 0; iy < nny; iy++) {
-          for (let ix = 0; ix < nnx; ix++) {
-            gridPoints.push([
-              minLng + ix * (maxLng - minLng) / (nnx - 1),
-              minLat + iy * (maxLat - minLat) / (nny - 1),
-            ]);
-          }
-        }
-      } else {
-        const widthM  = (gMaxLng - gMinLng) / DEG_LNG;
-        const heightM = (gMaxLat - gMinLat) / DEG_LAT;
-        const nx = Math.max(1, Math.ceil(widthM  / spacingM) + 1);
-        const ny = Math.max(1, Math.ceil(heightM / spacingM) + 1);
-
-        gridPoints = [];
-        for (let iy = 0; iy < ny; iy++) {
-          for (let ix = 0; ix < nx; ix++) {
-            gridPoints.push([
-              nx === 1 ? (gMinLng + gMaxLng) / 2 : gMinLng + ix * (gMaxLng - gMinLng) / (nx - 1),
-              ny === 1 ? (gMinLat + gMaxLat) / 2 : gMinLat + iy * (gMaxLat - gMinLat) / (ny - 1),
-            ]);
-          }
+      const widthM  = (maxLng - minLng) / DEG_LNG;
+      const heightM = (maxLat - minLat) / DEG_LAT;
+      const jMin = Math.floor(-radius / dyM);
+      const jMax = Math.ceil((heightM + radius) / dyM);
+      for (let j = jMin; j <= jMax; j++) {
+        const py   = j * dyM;
+        const xOff = (j & 1) ? dxM / 2 : 0;           // 奇数行は半ピッチずらす（三角配置）
+        const iMin = Math.floor((-radius - xOff) / dxM);
+        const iMax = Math.ceil((widthM + radius - xOff) / dxM);
+        for (let i = iMin; i <= iMax; i++) {
+          const px  = i * dxM + xOff;
+          const ddx = px < 0 ? -px : (px > widthM  ? px - widthM  : 0); // 矩形[0,W]×[0,H]への
+          const ddy = py < 0 ? -py : (py > heightM ? py - heightM : 0); // 最短距離（内側は0）
+          if (ddx * ddx + ddy * ddy > radius * radius) continue;        // 円が bbox に掛からない
+          gridPoints.push([minLng + px * DEG_LNG, minLat + py * DEG_LAT]);
         }
       }
-    } else {
-      gridPoints = [[centerLng, centerLat]];
+      // 安全網：極小bbox等でフィルタが空になったら中心1点（無点で収集ゼロを防ぐ）。
+      if (gridPoints.length === 0) gridPoints = [[(minLng + maxLng) / 2, (minLat + maxLat) / 2]];
     }
 
     // 穴（内側isochrone内）のグリッド点はskip（proximity.within=「n分以上」のドーナツ収集のコスト削減）
