@@ -250,6 +250,32 @@ class LLMClient {
   }
 
   /**
+   * 確度ラベル＋上位候補（名前・スコア・満たしている条件）＋総件数(summaryText、JS決定的に作成)
+   * をL0の声で自然文にまとめる。将来「処理ビューOFF＝会話モード」で候補パネルが無い時にも、
+   * この発話だけで結果の内容が伝わることを見据えた実装。エンジンへの逆流は無い一方通行。
+   * @returns {Promise<string>}
+   */
+  async describeResults(summaryText, lang = 'ja', history = []) {
+    if (typeof PROMPT_L0 === 'undefined' || !summaryText) return '';
+    try {
+      const langNote = lang === 'en' ? '\nReply in English.' : '';
+      const messages = [
+        ...history.map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.text })),
+        { role: 'user', content: `[検索結果]\n${summaryText}${langNote}` },
+      ];
+      const result = await this._callClaude(
+        { system: PROMPT_L0, messages },
+        220,
+        this.config.L0_MODEL || 'claude-haiku-4-5-20251001',
+        'L0'
+      );
+      const json = this._extractJSON(result);
+      if (!json || typeof json.reply !== 'string') return '';
+      return json.reply.trim().replace(/^["「]|["」]$/g, '');
+    } catch { return ''; }
+  }
+
+  /**
    * 高速な確認文だけを生成（L1本体と並行してHaikuで実行し、真っ先に「〜を探しますね」を出す）。
    * 解析はしない＝ユーザーの依頼の丁寧な復唱のみ。場所探し以外なら空文字。L0導入後は非活性。
    * @returns {Promise<string>}

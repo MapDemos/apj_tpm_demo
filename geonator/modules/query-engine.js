@@ -514,7 +514,7 @@ class QueryEngine {
     if (this._aborted(gen)) return; // 評価後キャンセル/新クエリ→結果を描画しない
     // [4] show results
     const _t4 = this._pnow();
-    this._showResults(results, schema);
+    await this._showResults(results, schema);
     this._pf('④ 結果描画', _t4);
     this.ui.refreshCounts?.();
     // Token/time telemetry for this search cycle
@@ -2371,11 +2371,26 @@ class QueryEngine {
     return 'none';
   }
 
+  /** 確度ラベル＋上位5件（名前・スコア・満たしている条件）＋総件数をL0向けの事実リストに
+   *  テキスト化する（LLM不使用・JS決定的）。既存の_candidateReasons（候補パネルの理由表示と
+   *  同じロジック）を再利用し、パネルとL0の説明で理由の食い違いが起きないようにする。 */
+  _buildResultsSummary(full, partial, schema, confidenceLabel) {
+    const totalCount = full.length + partial.length;
+    const top5 = full.slice(0, 5);
+    const lines = [`確度: ${confidenceLabel}`, `候補総数: ${totalCount}件`];
+    top5.forEach((c, i) => {
+      const reasons = this._candidateReasons(schema, c);
+      const score = c._matchInfo?.score ?? 0;
+      lines.push(`${i + 1}. ${c.name || '(名称不明)'}（スコア${score}）${reasons.length ? reasons.join('、') : ''}`);
+    });
+    return lines.join('\n');
+  }
+
   // ─────────────────────────────────────────────
   // [4] Show results
   // ─────────────────────────────────────────────
 
-  _showResults({ full, partial, none }, schema) {
+  async _showResults({ full, partial, none }, schema) {
     const totalMain = full.length + partial.length + none.length;
 
     if (totalMain === 0) {
@@ -2408,12 +2423,19 @@ class QueryEngine {
                                 summary = M.resultNoExact(partial.length + displayNone.length);
     else                        summary = M.resultNone(hasCond);
 
-    // 確度コメント：tier分布からJSが決定的に判定したラベルをL0の声で伝える（design.md §6）。
+    // 確度コメント＋上位5件紹介：tier分布からJSが決定的に判定した確度ラベルと、上位5件の
+    // 名前・スコア・満たしている条件（JS決定的・_candidateReasons再利用）をL0に渡し、1回の
+    // LLM呼び出しで自然文にまとめてもらう（design.md §6。将来の処理ビューOFF＝会話モードで
+    // 候補パネルが無くてもL0の発話だけで内容が伝わることを見据えた実装）。
+    const confidenceLabel = this._computeConfidenceLabel(F, partial.length);
     const confidenceKey = {
       decisive: 'confidenceDecisive', ambiguous: 'confidenceAmbiguous',
       tentative: 'confidenceTentative', none: 'confidenceNone',
-    }[this._computeConfidenceLabel(F, partial.length)];
-    const confidenceText = M[confidenceKey];
+    }[confidenceLabel];
+    const resultsSummary = this._buildResultsSummary(full, partial, schema, confidenceLabel);
+    let confidenceText = '';
+    try { confidenceText = await this.llm.describeResults?.(resultsSummary, this._langCode(), this._convHistory); } catch {}
+    if (!confidenceText) confidenceText = M[confidenceKey]; // 失敗/空なら固定文言にフォールバック
     this.ui.showL0Message?.(confidenceText);
     this._recordTurn('l0', confidenceText);
 
@@ -2598,7 +2620,7 @@ class QueryEngine {
     this._previousText = `${this._previousText}\n絞り込み：${this._floorPhrase(floorValue)}`;
     this.ui.clearResults?.();
     // 選ばれた階数の候補を結果として提示（_showResults が surfaced を keep に更新する）。
-    this._showResults({ full: keep, partial: [], none: [] }, schema);
+    await this._showResults({ full: keep, partial: [], none: [] }, schema);
     this.ui.showRunStats?.({ ms: Date.now() - (this._runStart || Date.now()), llm: this.llm.stats });
     await this._handleFeedback(schema, this._previousText);
   }
@@ -2675,7 +2697,7 @@ class QueryEngine {
     const dbgRow = c => ({ name: c.name || '(名前なし)', score: c._matchInfo?.score ?? 0, tier: c._tier, rel: c._relevance, hit: c._matchInfo?.hit ?? 0, total: c._matchInfo?.total ?? 0, labels: c._matchInfo?.labels ?? [], floors: c._matchInfo?.floors ?? null });
     this._dbgReport.evaluation = { full: results.full.map(dbgRow), partial: results.partial.map(dbgRow), noneCount: results.none.length };
 
-    this._showResults(results, merged);
+    await this._showResults(results, merged);
     this.ui.showRunStats?.({ ms: Date.now() - (this._runStart || Date.now()), llm: this.llm.stats });
     this.ui.showDebugReport?.(this._dbgReport);
 
