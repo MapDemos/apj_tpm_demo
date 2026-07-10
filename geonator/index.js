@@ -1658,6 +1658,22 @@ class LocationFinderApp {
     }
     panel.appendChild(footer);
 
+    // 処理ビューOFF時は詳細（候補リスト・地図・CSV等）を折りたたむ（会話モード向け）。
+    // L0の口頭説明(describeResults)だけでは件数・スコア詳細・地図の完全な代替にはならないため、
+    // 情報自体は生成したまま初期表示だけ最小化し、ボタンで展開できるようにする。
+    // 概要行（candidate-summary）だけは常時表示に残す。機能（クリック選択・正解/違うボタン等）は無変更。
+    if (this._processingViewOff) {
+      const keepEl = panel.querySelector('.candidate-summary');
+      const details = document.createElement('details');
+      const dsum = document.createElement('summary');
+      const en = this._lang === 'en';
+      dsum.textContent = en ? `▸ View candidates (${rows.length})` : `▸ 候補を見る（${rows.length}件）`;
+      dsum.style.cssText = 'cursor:pointer;opacity:.85;margin-top:4px;user-select:none';
+      details.appendChild(dsum);
+      Array.from(panel.children).forEach(child => { if (child !== keepEl) details.appendChild(child); });
+      panel.appendChild(details);
+    }
+
     wrapper.appendChild(panel);
     container.appendChild(wrapper);
     container.scrollTop = container.scrollHeight;
