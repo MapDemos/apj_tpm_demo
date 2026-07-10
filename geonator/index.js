@@ -863,15 +863,6 @@ class LocationFinderApp {
    *   research — 〈proximity〉周辺で探し直す（条件を足して再検索）
    */
   _showFeedbackButtons(onAction, proximityLabel, opts = {}) {
-    // 候補パネルと同じ意匠の枠を持たせる（.feedback-panel）＝処理エージェント系パネルの共通言語。
-    // .message ラッパーで包んで話者ラベル(処理エージェント)を表示できるようにする。
-    const wrapper = document.createElement('div');
-    wrapper.className = 'message feedback-request';
-    const container = document.createElement('div');
-    container.className = 'feedback-panel';
-    wrapper.appendChild(container);
-    this._appendAgentLabel(wrapper, 'proc');
-
     const px = (proximityLabel || '').trim();
     let buttons = this._lang === 'en'
       ? [
@@ -890,6 +881,38 @@ class LocationFinderApp {
     // Keep the resolver so _resetChat can cancel a pending feedback wait — otherwise
     // clearing chat while awaiting feedback leaves run() hung (input stays disabled).
     this._feedbackResolve = onAction;
+
+    // 会話モード（処理ビューOFF）: ボタンパネル（処理エージェント）を出さず、L0の発話として
+    // 番号付きの選択肢を提示する（design.md §4「フィードバック」行）。回答経路は詳細モードと
+    // 同じ決定性契約——番号はJSが直接マップ、それ以外の自由文はquery-engine.js側の
+    // classifyFeedbackへ渡す。変わるのは見せ方（ボタン→テキスト）だけ。
+    if (this._processingViewOff) {
+      const lines = buttons.map((b, i) => `${i + 1}. ${b.label}`).join('\n');
+      this.addMessage('l0', `${LANG[this._lang].feedbackPrompt}\n${lines}`);
+      this._pendingInputResolver = (text) => {
+        // text==null は停止/クリア時の _resolvePendingWaits シグナル。ここでは何もしない
+        // （直後に _feedbackResolve(null) が呼ばれ、そちらが待ちの終了を処理する）。
+        if (text == null) return;
+        const idx = this._parseChoiceSelection(text, buttons.length);
+        this._feedbackResolve = null;
+        this._pendingInputResolver = null;
+        onAction(idx != null ? buttons[idx].value : { freeText: text });
+      };
+      const mainInput = document.getElementById('chatInput');
+      if (mainInput) { mainInput.disabled = false; mainInput.focus(); }
+      return;
+    }
+
+    // 詳細モード（既定）: 従来のボタンパネル。
+    // 候補パネルと同じ意匠の枠を持たせる（.feedback-panel）＝処理エージェント系パネルの共通言語。
+    // .message ラッパーで包んで話者ラベル(処理エージェント)を表示できるようにする。
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message feedback-request';
+    const container = document.createElement('div');
+    container.className = 'feedback-panel';
+    wrapper.appendChild(container);
+    this._appendAgentLabel(wrapper, 'proc');
+
     // fromClick=trueの時だけここでuserバブルを出す（番号入力は _handleSend が既に表示済み）。
     const finalize = (label, value, fromClick) => {
       wrapper.remove();
@@ -909,10 +932,8 @@ class LocationFinderApp {
     const chatMessages = document.getElementById('chatMessages');
     if (chatMessages) { chatMessages.appendChild(wrapper); chatMessages.scrollTop = chatMessages.scrollHeight; }
 
-    // 本体入力欄からの番号入力にも対応（ボタンは残したまま・番号は決定的なJS処理）。
-    // 番号/序数語に一致しない自由文＝ボタンを押させず「探し直す」の追加情報として扱う
-    // （固定的なJS決定ルール。ここにLLM分類は使わない）。query-engine.js側は
-    // action={freeText}を effectiveAction='research'・presetHint=freeText として処理する。
+    // 本体入力欄からの番号入力にも対応（ボタンは残したまま・番号は決定的なJS処理）。番号に一致
+    // しない自由文はquery-engine.js側のclassifyFeedbackがdone/narrow/researchへ振り分ける。
     const handleTyped = (text) => {
       // text==null は停止/クリア時の _resolvePendingWaits シグナル。ここでは何もしない
       // （直後に _feedbackResolve(null) が呼ばれ、そちらが待ちの終了を処理する）。
@@ -3472,6 +3493,7 @@ const LANG = {
     hintSkip:         'スキップ（このまま続ける）',
     hintDone:         '✓ 続行中',
     pickNumberHint:   '番号（例: 1）か「最初」「真ん中」「最後」などでお答えください。ボタンをクリックしてもOKです。',
+    feedbackPrompt:   'ここまでの結果でどうしますか？番号か言葉でお答えください。',
     // Processing
     connecting:       'Claude APIに接続中…',
     pausedHint:       '⏸ 追加情報を待っています...',
@@ -3602,6 +3624,7 @@ const LANG = {
     hintSkip:         'Skip',
     hintDone:         '✓ Continuing',
     pickNumberHint:   'Please reply with a number (e.g. 1) or a word like "first"/"middle"/"last" — or just click a button.',
+    feedbackPrompt:   'What would you like to do next? Reply with a number or a word.',
     connecting:       'Connecting to Claude…',
     pausedHint:       '⏸ Waiting for your input…',
     retryBtn:         '🔄 Retry',
