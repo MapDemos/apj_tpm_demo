@@ -175,6 +175,18 @@ class QueryEngine {
   /** この実行が中断されたか（キャンセル or より新しいクエリが開始）。 */
   _aborted(gen) { return gen !== this._runGen || !!this.ui.isCancelled?.(); }
 
+  /** 断片的な場所探し依頼(new_search/refine)が構造化できなかった時、次ターンの発話と合成
+   *  （既存の_awaitingClarify/_previousText機構に乗せる。JS決定的な文字列連結・LLM要約は挟まない）
+   *  対象にする。雑談/ミッション外は対象外＝無関係な発言を次の解析に混ぜない。
+   *  L0が既に自信ありげに応答済み(l0Replied)で定型フォールバックが出せない場合は、エンジンの声で
+   *  「まだ続けて」と安全網の一言を足す（L0の発話がエンジンの実態より先走るのを防ぐ）。 */
+  _markFragmentaryAttempt(l0Replied) {
+    const intent = this._dbgReport?.l0Intent;
+    if (intent !== 'new_search' && intent !== 'refine') return;
+    this._awaitingClarify = true;
+    if (l0Replied) this.ui.showProcessingNote?.(this._m().continue_hint);
+  }
+
   // ─────────────────────────────────────────────
   // [2] L1 parse + [A] structural checks + [II] validate
   // ─────────────────────────────────────────────
@@ -214,6 +226,7 @@ class QueryEngine {
         if (!l0Replied) this.ui.showL0Message?.(this._friendlyError(lastErr));
       } else {
         if (!l0Replied) this.ui.showL0Message?.(this._m().not_a_query); // 再試行しても場所依頼と取れなかった
+        this._markFragmentaryAttempt(l0Replied);
       }
       return null;
     }
@@ -228,6 +241,7 @@ class QueryEngine {
       // If it lacks the essentials, it's more likely a non-query than a comm error.
       if (!schema?.proximity?.anchors?.length || !schema?.target?.text) {
         if (!l0Replied) this.ui.showL0Message?.(this._m().not_a_query);
+        this._markFragmentaryAttempt(l0Replied);
       } else {
         if (!l0Replied) this.ui.showL0Message?.(this._m().err_understand); // 構造が崩れた＝解釈できなかった扱い
       }
@@ -2628,6 +2642,7 @@ const MESSAGES = {
     err_understand:       'うまく聞き取れませんでした。探している場所（駅・地名・施設）と、探しているものを教えていただけますか？',
     clarify_limit:        '情報が不足しています。分かる範囲で場所を教えてください。',
     not_a_query:          '場所の情報が読み取れませんでした。駅名・施設名・住所などと、探しているものを教えてください。（例：西大島駅の近くのマンション、バス停が目の前）',
+    continue_hint:        'まだ場所を特定できていません。続けて駅名・地名・施設名など教えてください。',
     anchorNotFound:  t => `${t}が見つかりませんでした。別の地名や駅名をお試しください。`,
     whichArea:       t => `「${t}」はどちらですか？`,
     whichPoi:        t => `「${t}」はどれですか？`,
@@ -2673,6 +2688,7 @@ const MESSAGES = {
     err_understand:       "I couldn't quite catch that. Could you tell me the place (station / area / facility) and what you're looking for?",
     clarify_limit:        'Not enough information. Please tell me the location as best you can.',
     not_a_query:          "I couldn't read a location. Please give a station/facility/address and what you are looking for (e.g. a condo near Nishi-ojima station with a bus stop right in front).",
+    continue_hint:        "I haven't pinned down a location yet. Please keep going — a station, area, or facility name would help.",
     anchorNotFound:  t => `Couldn't find "${t}". Please try another place or station name.`,
     whichArea:       t => `Which "${t}" do you mean?`,
     whichPoi:        t => `Which "${t}"?`,
