@@ -117,7 +117,7 @@ class QueryEngine {
     // 除外事項は表示された確認文(Haiku/Sonnet いずれか)に載らないことがあるため、JS側で決定的に
     // 注記する。透明化 A=上限超過の地理条件 / B=非地理的な特徴(壁が赤い等)。両方を1吹き出しに。
     const exNote = this._exclusionNote(schema);
-    if (exNote) this.ui.showMessage(exNote);
+    if (exNote) this.ui.showL0Message?.(exNote);
 
     // [STEP] QuerySchema — show the parsed intent early so the operator can sanity-check
     // L1's interpretation (target / conditions / distances) before any search runs.
@@ -192,9 +192,9 @@ class QueryEngine {
       if (lastErr) {
         // デバッグモードでは根本原因（打ち切り・不正JSON・HTTP等）をそのまま可視化する。
         this.ui.showDebug?.(`⚠️ L1解析エラー\n${lastErr?.message || String(lastErr)}`);
-        if (!l0Replied) this.ui.showMessage(this._friendlyError(lastErr));
+        if (!l0Replied) this.ui.showL0Message?.(this._friendlyError(lastErr));
       } else {
-        if (!l0Replied) this.ui.showMessage(this._m().not_a_query); // 再試行しても場所依頼と取れなかった
+        if (!l0Replied) this.ui.showL0Message?.(this._m().not_a_query); // 再試行しても場所依頼と取れなかった
       }
       return null;
     }
@@ -208,9 +208,9 @@ class QueryEngine {
       const l0Replied = l0Promise ? await l0Promise : false;
       // If it lacks the essentials, it's more likely a non-query than a comm error.
       if (!schema?.proximity?.anchors?.length || !schema?.target?.text) {
-        if (!l0Replied) this.ui.showMessage(this._m().not_a_query);
+        if (!l0Replied) this.ui.showL0Message?.(this._m().not_a_query);
       } else {
-        if (!l0Replied) this.ui.showMessage(this._m().err_understand); // 構造が崩れた＝解釈できなかった扱い
+        if (!l0Replied) this.ui.showL0Message?.(this._m().err_understand); // 構造が崩れた＝解釈できなかった扱い
       }
       return null;
     }
@@ -255,7 +255,7 @@ class QueryEngine {
 
   async _handleStructuralIssue(issue, schema) {
     if (this._clarifyCount >= this.config.MAX_CLARIFY_TURNS) {
-      this.ui.showMessage(this._m().clarify_limit);
+      this.ui.showL0Message?.(this._m().clarify_limit);
       return false;
     }
     this._clarifyCount++;
@@ -280,7 +280,7 @@ class QueryEngine {
       }
       case 'distance_too_far': {
         // [4] level=far → pushback
-        this.ui.showMessage(this._m().distance_too_far);
+        this.ui.showL0Message?.(this._m().distance_too_far);
         return false;
       }
       default:
@@ -302,7 +302,7 @@ class QueryEngine {
       this._applyWithinInference(schema, combined);
       return schema;
     } catch (e) {
-      this.ui.showMessage(this._friendlyError(e));
+      this.ui.showL0Message?.(this._friendlyError(e));
       return null;
     }
   }
@@ -379,7 +379,7 @@ class QueryEngine {
       if (this._targetRaw > this.config.CANDIDATE_LIMIT) {
         const tight = await this._resolveOverflow(schema, bboxes, collected);
         if (tight && tight.bbox) {
-          if (tight.note) this.ui.showMessage(tight.note);
+          if (tight.note) this.ui.showL0Message?.(tight.note);
           // note の showMessage が考え中を消す → 直後の再収集が無音になるので収集ラベルで再掲。
           this.ui.thinking?.(this._m().thinkingCollect);
           this.ui.drawNarrowBBox?.(tight.bbox); // 絞り込み後の検索bbox（debug時のみ）
@@ -485,7 +485,7 @@ class QueryEngine {
       const points = await this._resolveAnchor(anchor, scopeBbox, wantSinglePoint, schema.proximity.scope?.text || null);
       if (points === null) return null; // clarification/disambiguation in progress or aborted
       if (points.length === 0) {
-        this.ui.showMessage(this._m().anchorNotFound(anchor.text));
+        this.ui.showL0Message?.(this._m().anchorNotFound(anchor.text));
         this._awaitingClarify = true; // next answer merges with this query
         return null;
       }
@@ -764,7 +764,7 @@ class QueryEngine {
     // 2. Find intersections whose name matches (road layer, class=intersection)
     const items = await this.mcp.collectCondition({ type: 'intersection', text: anchor.text }, areaBbox);
     if (!items || items.length === 0) {
-      this.ui.showMessage(this._m().intersectionNotFound(anchor.text));
+      this.ui.showL0Message?.(this._m().intersectionNotFound(anchor.text));
       return null;
     }
 
@@ -804,7 +804,7 @@ class QueryEngine {
     }
     if (!features.length) {
       // Genuinely nothing found — tell the user instead of aborting silently.
-      this.ui.showMessage(this._m().anchorNotFound(anchor.text));
+      this.ui.showL0Message?.(this._m().anchorNotFound(anchor.text));
       this._awaitingClarify = true;
       return null;
     }
@@ -839,7 +839,7 @@ class QueryEngine {
     // Only reject genuinely huge admin areas; a place (市/区) is acceptable as a
     // broad proximity (its bbox is used when available).
     if (['region', 'country'].includes(ftype)) {
-      this.ui.showMessage(this._m().proximity_too_broad);
+      this.ui.showL0Message?.(this._m().proximity_too_broad);
       this._awaitingClarify = true;
       return null;
     }
@@ -887,11 +887,11 @@ class QueryEngine {
 
   async _clarifyGenericAnchor(anchor) {
     if (this._clarifyCount >= this.config.MAX_CLARIFY_TURNS) {
-      this.ui.showMessage(this._m().clarify_limit);
+      this.ui.showL0Message?.(this._m().clarify_limit);
       return;
     }
     this._clarifyCount++;
-    this.ui.showMessage(this._m().genericMulti(anchor.text));
+    this.ui.showL0Message?.(this._m().genericMulti(anchor.text));
     this._awaitingClarify = true; // next main-input answer merges with this query
   }
 
@@ -910,7 +910,7 @@ class QueryEngine {
     const en = this._langCode() === 'en';
     const areaText = schema.proximity?.anchors?.[0]?.text || (en ? 'this area' : 'この付近');
     if (this._clarifyCount >= this.config.MAX_CLARIFY_TURNS) {
-      this.ui.showMessage(this._m().clarify_limit);
+      this.ui.showL0Message?.(this._m().clarify_limit);
       this._awaitingClarify = true;
       return null;
     }
@@ -1689,7 +1689,7 @@ class QueryEngine {
         // ただし負条件(negate=「〜が近くに無い」)の0件は「該当POIが周辺に存在しない＝全候補が
         // 条件を満たす」＝成功なので警告しない（「見つかりませんでした/未収録」は誤解を招く）。
         if ((!items || items.length === 0) && !c.negate) {
-          this.ui.showMessage(this._m().condNotFound(key));
+          this.ui.showL0Message?.(this._m().condNotFound(key));
         }
       }));
     }
@@ -2265,7 +2265,7 @@ class QueryEngine {
 
     if (totalMain === 0) {
       // [L] main 0 → ask for more info
-      this.ui.showMessage(this._m().mainZero(schema.proximity?.anchors?.[0]?.text || '', schema.target?.text || ''));
+      this.ui.showL0Message?.(this._m().mainZero(schema.proximity?.anchors?.[0]?.text || '', schema.target?.text || ''));
       return;
     }
 
@@ -2321,7 +2321,7 @@ class QueryEngine {
     const action = await this.ui.showFeedback(proximityLabel, { canNarrow });
 
     if (action === 'done') {
-      this.ui.showMessage(this._m().confirmed);
+      this.ui.showL0Message?.(this._m().confirmed);
       this._resetCache();
       return;
     }
@@ -2404,15 +2404,15 @@ class QueryEngine {
     }
 
     const delta = await this.llm.parseRefinement(schema, hint, this._langCode());
-    if (!delta) { this.ui.showMessage(this._m().err_understand); return; }
+    if (!delta) { this.ui.showL0Message?.(this._m().err_understand); return; }
     const validTypes = SCHEMA_ENUMS.condition_type;
     const addConds = delta.add_conditions.filter(c => c && validTypes.includes(c.type));
 
     // ── narrow: filter WITHIN the already-surfaced Target candidates (pool fixed,
     // target NOT re-collected). Purely additive — only new conditions apply. ──
     if (action === 'narrow') {
-      if (!addConds.length) { this.ui.showMessage(this._m().err_understand); return; }
-      if (delta.confirmation) this.ui.showMessage(delta.confirmation);
+      if (!addConds.length) { this.ui.showL0Message?.(this._m().err_understand); return; }
+      if (delta.confirmation) this.ui.showL0Message?.(delta.confirmation);
       await this._narrowWithin(schema, addConds);
       return;
     }
@@ -2435,13 +2435,13 @@ class QueryEngine {
     merged.confirmation = delta.confirmation;
     fillSchemaDefaults(merged, this.config.DEFAULT_LEVEL, Math.max(merged.conditions.length, this.config.MAX_CONDITIONS));
 
-    if (!validateQuerySchema(merged).ok) { this.ui.showMessage(this._m().err_understand); return; }
+    if (!validateQuerySchema(merged).ok) { this.ui.showL0Message?.(this._m().err_understand); return; }
 
     this._previousText = `${this._previousText}\n追加情報：${hint}`;
     this._dbgReport.schema = merged;
-    if (delta.confirmation) this.ui.showMessage(delta.confirmation);
+    if (delta.confirmation) this.ui.showL0Message?.(delta.confirmation);
     // [④] show the FULL criteria being searched (not just the user's added input)
-    this.ui.showMessage(this._criteriaSummary(merged));
+    this.ui.showL0Message?.(this._criteriaSummary(merged));
 
     await this._executeSearch(merged, this._previousText);
   }
@@ -2456,7 +2456,7 @@ class QueryEngine {
       ? this._cache.surfaced
       : this._cache.mainCandidates;
     if (!pool || !pool.length) {
-      this.ui.showMessage(this._m().mainZero(schema.proximity?.anchors?.[0]?.text || '', schema.target?.text || ''));
+      this.ui.showL0Message?.(this._m().mainZero(schema.proximity?.anchors?.[0]?.text || '', schema.target?.text || ''));
       return;
     }
     const keep = pool.filter(c => c._floors === floorValue);
@@ -2482,7 +2482,7 @@ class QueryEngine {
     const pool = (this._cache.surfaced && this._cache.surfaced.length)
       ? this._cache.surfaced
       : this._cache.mainCandidates;
-    if (!pool || !pool.length) { this.ui.showMessage(this._m().mainZero(schema.proximity?.anchors?.[0]?.text || '', schema.target?.text || '')); return; }
+    if (!pool || !pool.length) { this.ui.showL0Message?.(this._m().mainZero(schema.proximity?.anchors?.[0]?.text || '', schema.target?.text || '')); return; }
 
     const merged = { ...schema, conditions: [...(schema.conditions || []), ...addConds] };
     fillSchemaDefaults(merged, this.config.DEFAULT_LEVEL, Math.max(merged.conditions.length, this.config.MAX_CONDITIONS));
@@ -2491,7 +2491,7 @@ class QueryEngine {
     this._dbgReport = { schema: merged, proximity: this._dbgReport.proximity, target: this._dbgReport.target, conditions: [], categoryFilter: [], evaluation: null, excludedByHardFilter: [] };
 
     // [④] show the FULL criteria being narrowed on (accumulated old + new conditions)
-    this.ui.showMessage(this._criteriaSummary(merged));
+    this.ui.showL0Message?.(this._criteriaSummary(merged));
 
     this.ui.clearResults?.();
 
