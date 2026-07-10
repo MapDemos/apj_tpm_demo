@@ -16,7 +16,8 @@ class QueryEngine {
    * @param {{ mcp: MapboxMCPClient, llm: LLMClient, ui: UICallbacks, config: object }} opts
    *
    * UICallbacks shape:
-   *   showMessage(text: string): void
+   *   showL0Message(text: string): void  ※処理エージェント発のプロースは全てこちら経由（会話エージェントの声）
+   *   showMessage(text: string): void    ※現在エンジンからは未使用（コールバック自体は温存）
    *   showChoices(question: string, choices: string[]): Promise<string>
    *   showHintInput(prompt: string): Promise<string>
    *   showSearching(text: string): void
@@ -357,7 +358,7 @@ class QueryEngine {
     if (reachDraw.length) this.ui.drawPolygons?.(reachDraw);
     this.ui.fitToBBox?.(bboxes.condBbox);
     this.ui.refreshCounts?.();
-    if (this._withinNote) this.ui.showMessage?.(this._withinNote); // 「範囲広すぎ→周辺で探索」通知
+    if (this._withinNote) this.ui.showL0Message?.(this._withinNote); // 「範囲広すぎ→周辺で探索」通知
 
     // [STEP] proximity解決
     await this._step('step-proximity', '① 一次検索: proximity解決', [
@@ -380,7 +381,7 @@ class QueryEngine {
         const tight = await this._resolveOverflow(schema, bboxes, collected);
         if (tight && tight.bbox) {
           if (tight.note) this.ui.showL0Message?.(tight.note);
-          // note の showMessage が考え中を消す → 直後の再収集が無音になるので収集ラベルで再掲。
+          // note の showL0Message が考え中を消す → 直後の再収集が無音になるので収集ラベルで再掲。
           this.ui.thinking?.(this._m().thinkingCollect);
           this.ui.drawNarrowBBox?.(tight.bbox); // 絞り込み後の検索bbox（debug時のみ）
           this.mcp._gridCircles = []; this.mcp._gridCirclesSkipped = []; // 絞込後グリッドだけ描く

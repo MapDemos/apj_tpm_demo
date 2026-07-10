@@ -1247,7 +1247,7 @@ class LocationFinderApp {
     this._hideThinking();
     this._hideTypingIndicator();
     this._hideUserTyping();
-    this.addMessage('assistant', LANG[this._lang].cancelled);
+    this.addMessage('l0', LANG[this._lang].cancelled); // キャンセルの受領も会話エージェント(L0)の声で
     this._setProcessing(false); // 停止(■)→送信(➤)へ復帰
     const input = document.getElementById('chatInput');
     if (input) { input.disabled = false; input.focus(); }
