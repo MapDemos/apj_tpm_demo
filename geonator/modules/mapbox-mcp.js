@@ -33,7 +33,8 @@ class MapboxMCPClient {
     this._isoRequests    = 0;   // Isochrone API request count (actual fetches only)
     this._isoCacheHits   = 0;   // Isochrone cache hits (within-run isoCache)
     this._siRequests     = 0;   // Static Images API request count（地図OFF時の静的地図。index.js が加算）
-    this._capHit         = { tq: 0, sb: 0, iso: 0 }; // 上限到達でスキップした回数（ユーザー通知用）
+    this._matrixRequests = 0;   // Matrix API request count（徒歩n分の実移動時間スコアリング。足切りには使わない）
+    this._capHit         = { tq: 0, sb: 0, iso: 0, matrix: 0 }; // 上限到達でスキップした回数（ユーザー通知用）
     this._tqCache        = new Map(); // url → parsed JSON (cleared on chat reset)
     this._poiGridCache      = new Map();
     this._searchResultCache = new Map();
@@ -57,7 +58,8 @@ class MapboxMCPClient {
     this._isoRequests = 0;
     this._isoCacheHits = 0;
     this._siRequests = 0;
-    this._capHit = { tq: 0, sb: 0, iso: 0 };
+    this._matrixRequests = 0;
+    this._capHit = { tq: 0, sb: 0, iso: 0, matrix: 0 };
   }
 
   /**
@@ -2133,6 +2135,59 @@ class MapboxMCPClient {
       bb = [Math.min(bb[0], b[0]), Math.min(bb[1], b[1]), Math.max(bb[2], b[2]), Math.max(bb[3], b[3])];
     }
     return { bbox: bb, polygons };
+  }
+
+  /**
+   * Matrix API: sources（駅の全出口＋中心 等）から destinations（候補）への移動時間行列を取得し、
+   * 各 destination について「いずれかの source からの最短所要時間(秒・生値／丸めない)」の配列を
+   * destinations 順で返す。用途は【スコアリングのみ】（足切りには使わない）。
+   * 1リクエスト最大25座標なので destinations を (25 - source数) ずつ分割して並列取得。
+   * @returns {Promise<(number|null)[]|null>} 各destの最短秒（不明はnull）。全滅なら null（呼び出し側は直線距離にフォールバック）。
+   */
+  async travelMatrix(sources, destinations, profile = 'walking') {
+    const prof = ['walking', 'cycling', 'driving'].includes(profile) ? profile : 'walking';
+    const src = (sources || []).filter(p => p && p.lng != null && p.lat != null).slice(0, 10);
+    const dst = destinations || [];
+    if (!src.length || !dst.length) return null;
+    const MAX_COORDS = 25;                        // walking/cycling/driving の座標上限
+    const chunkSize  = Math.max(1, MAX_COORDS - src.length);
+    const out = new Array(dst.length).fill(null);
+    const srcIdx = src.map((_, i) => i).join(';');
+    // 分割チャンクを cap まで作り並列取得（cap超過分は null のまま＝その候補は直線距離にフォールバック）。
+    const cap = this.config.MATRIX_MAX_PER_QUERY ?? 60;
+    const starts = [];
+    for (let s = 0; s < dst.length; s += chunkSize) {
+      if (this._matrixRequests >= cap) { this._capHit.matrix++; break; }
+      this._matrixRequests++;
+      starts.push(s);
+    }
+    let anyOk = false;
+    await Promise.all(starts.map(async (start) => {
+      if (this.app?._cancelled) return;
+      const chunk = dst.slice(start, start + chunkSize);
+      const coords = [...src, ...chunk].map(p => `${p.lng},${p.lat}`).join(';');
+      const dstIdx = chunk.map((_, i) => src.length + i).join(';');
+      const url =
+        `https://api.mapbox.com/directions-matrix/v1/mapbox/${prof}/${coords}` +
+        `?sources=${srcIdx}&destinations=${dstIdx}&annotations=duration&access_token=${this.token}`;
+      try {
+        const res = await this._fetchWithRetry(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        const durs = data.durations; // durs[srcIndex][dstIndex] = 秒
+        if (!durs) return;
+        for (let j = 0; j < chunk.length; j++) {
+          let min = null;
+          for (let i = 0; i < src.length; i++) {
+            const v = durs[i]?.[j];
+            if (v != null && (min === null || v < min)) min = v;
+          }
+          out[start + j] = min;
+          if (min !== null) anyOk = true;
+        }
+      } catch (_) { /* skip chunk → その候補は null */ }
+    }));
+    return anyOk ? out : null;
   }
 
   /** proximity.within のハード足切り。polygons のいずれかに内包 かつ hole の外、を満たす点だけ残す。
