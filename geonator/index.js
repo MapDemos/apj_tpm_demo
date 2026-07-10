@@ -458,7 +458,7 @@ class LocationFinderApp {
       async showChoices(question, choices) {
         self._hideCancelBtn(); // ユーザー選択待ち＝処理は一旦ユーザーに委ねる→キャンセル不要
         const answer = await new Promise(resolve => {
-          self.addMessage('assistant', question);
+          self.addMessage('l0', question);
           self._showChoicePanel(question, choices).then(resolve);
         });
         // 選択後は必ず解決処理（Search Box/Tilequery等）が続く → 無音区間を作らないよう考え中を再掲。
@@ -470,7 +470,7 @@ class LocationFinderApp {
       async showHintInput(prompt, suggestions) {
         self._hideCancelBtn(); // 入力待ち＝キャンセル不要
         const text = await new Promise(resolve => {
-          self.addMessage('assistant', prompt);
+          self.addMessage('l0', prompt);
           self._showHintPanel(prompt, (text) => resolve(text), suggestions);
         });
         // 入力があれば再解析/再検索/絞り込みが続く → 考え中を再掲（skip=nullは後段の各フロー任せ）。
@@ -854,21 +854,40 @@ class LocationFinderApp {
     // Keep the resolver so _resetChat can cancel a pending feedback wait — otherwise
     // clearing chat while awaiting feedback leaves run() hung (input stays disabled).
     this._feedbackResolve = onAction;
-    for (const { label, value } of buttons) {
+    // fromClick=trueの時だけここでuserバブルを出す（番号入力は _handleSend が既に表示済み）。
+    const finalize = (label, value, fromClick) => {
+      container.remove();
+      this._feedbackResolve = null;
+      this._pendingInputResolver = null;
+      if (fromClick) this.addMessage('user', label);
+      onAction(value);
+    };
+    buttons.forEach(({ label, value }, i) => {
       const btn = document.createElement('button');
-      btn.textContent = label;
+      btn.textContent = `${i + 1}. ${label}`;
       btn.className   = 'choice-btn';
-      btn.onclick = () => {
-        container.remove();
-        this._feedbackResolve = null;
-        this.addMessage('user', label);
-        onAction(value);
-      };
+      btn.onclick = () => finalize(label, value, true);
       container.appendChild(btn);
-    }
+    });
 
     const chatMessages = document.getElementById('chatMessages');
     if (chatMessages) chatMessages.appendChild(container);
+
+    // 本体入力欄からの番号入力にも対応（ボタンは残したまま・番号は決定的なJS処理）。
+    const handleTyped = (text) => {
+      // text==null は停止/クリア時の _resolvePendingWaits シグナル。ここでは何もしない
+      // （直後に _feedbackResolve(null) が呼ばれ、そちらが待ちの終了を処理する）。
+      if (text == null) return;
+      const idx = this._parseChoiceNumber(text, buttons.length);
+      if (idx != null) { finalize(buttons[idx].label, buttons[idx].value, false); return; }
+      this.addMessage('l0', LANG[this._lang].pickNumberHint);
+      this._pendingInputResolver = handleTyped; // 待ちを継続
+      const mi = document.getElementById('chatInput');
+      if (mi) { mi.disabled = false; mi.focus(); }
+    };
+    this._pendingInputResolver = handleTyped;
+    const mainInput = document.getElementById('chatInput');
+    if (mainInput) { mainInput.disabled = false; mainInput.focus(); }
   }
 
   /**
@@ -1173,6 +1192,15 @@ class LocationFinderApp {
       const r = this[key];
       if (r) { this[key] = null; try { r(value); } catch (_) {} }
     }
+  }
+
+  /** 番号選択（choice/feedback/提案ボタン共通）：全角数字を半角化し 1..max の整数なら0始まりの
+   *  indexを返す。それ以外（自由文・範囲外）は null（＝数字選択ではない）。JSの決定的な処理のみ。 */
+  _parseChoiceNumber(text, max) {
+    const half = (text || '').trim().replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0));
+    if (!/^\d+$/.test(half)) return null;
+    const n = parseInt(half, 10);
+    return (n >= 1 && n <= max) ? n - 1 : null;
   }
 
   /** 入力中の「・・・」アニメ（アシスタントの考え中とお揃い・右寄せのユーザー吹き出し）。 */
@@ -2835,7 +2863,7 @@ class LocationFinderApp {
     const sugTitle = this._lang === 'en' ? '💡 Agent suggestions' : '💡 エージェントからの提案';
     const sugHTML = sugList.length
       ? `<div class="hint-suggest-title">${sugTitle}</div><div class="hint-suggest" id="${uid}-sug">` +
-        sugList.map((s, i) => `<button class="choice-btn hint-suggest-btn" data-i="${i}">${_esc(s.text)}</button>`).join('') +
+        sugList.map((s, i) => `<button class="choice-btn hint-suggest-btn" data-i="${i}">${i + 1}. ${_esc(s.text)}</button>`).join('') +
         `</div>`
       : '';
     const wrapper = document.createElement('div');
@@ -2867,7 +2895,11 @@ class LocationFinderApp {
 
     // 自由入力は本体の入力欄で受ける。回答待ち中は「送信＝この回答を送る」なので送信ボタンを
     // ➤ に戻す（■のままだと押下がキャンセル扱いになり、回答を送信する手段が無くなる）。
-    this._pendingInputResolver = (text) => settle(text);
+    // 番号（提案ボタンの番号）ならJSの決定的な処理で選ぶ。それ以外は今までどおり自由記述ヒント。
+    this._pendingInputResolver = (text) => {
+      const idx = sugList.length ? this._parseChoiceNumber(text, sugList.length) : null;
+      settle(idx != null ? sugList[idx] : text);
+    };
     this._setProcessing(false);
     const mainInput = document.getElementById('chatInput');
     if (mainInput) { mainInput.disabled = false; mainInput.focus(); }
@@ -2915,7 +2947,7 @@ class LocationFinderApp {
           <div class="choice-question">${_formatMsg(question)}</div>
           <div class="choice-buttons" id="${uid}-btns">
             ${choices.map((c, i) =>
-              `<button class="choice-btn" id="${uid}-btn-${i}">${_esc(c)}</button>`
+              `<button class="choice-btn" id="${uid}-btn-${i}">${i + 1}. ${_esc(c)}</button>`
             ).join('')}
           </div>
         </div>
@@ -2923,23 +2955,40 @@ class LocationFinderApp {
       container.appendChild(wrapper);
       container.scrollTop = container.scrollHeight;
 
-      choices.forEach((choice, i) => {
-        document.getElementById(`${uid}-btn-${i}`).addEventListener('click', () => {
-          // Disable all buttons after selection
-          choices.forEach((_, j) => {
-            const btn = document.getElementById(`${uid}-btn-${j}`);
-            if (btn) {
-              btn.disabled = true;
-              btn.classList.toggle('choice-btn-selected', j === i);
-            }
-          });
-          this.addMessage('user', choice);
-          this._choiceResolve = null;
-          // Return the RAW choice string (QueryEngine matches it by index).
-          // (Old agentic loop used a "選択: " prefix; that broke index matching.)
-          resolve(choice);
+      // 選択確定（ボタンクリック／番号入力どちらの経路からも呼ぶ）。fromClick=trueの時だけ
+      // ここで自分のuserバブルを出す（番号入力は _handleSend が既に入力テキストを表示済み）。
+      const finalize = (i, fromClick) => {
+        choices.forEach((_, j) => {
+          const btn = document.getElementById(`${uid}-btn-${j}`);
+          if (btn) { btn.disabled = true; btn.classList.toggle('choice-btn-selected', j === i); }
         });
+        if (fromClick) this.addMessage('user', choices[i]);
+        this._choiceResolve = null;
+        this._pendingInputResolver = null;
+        // Return the RAW choice string (QueryEngine matches it by index).
+        // (Old agentic loop used a "選択: " prefix; that broke index matching.)
+        resolve(choices[i]);
+      };
+
+      choices.forEach((choice, i) => {
+        document.getElementById(`${uid}-btn-${i}`).addEventListener('click', () => finalize(i, true));
       });
+
+      // 本体入力欄からの番号入力にも対応（ボタンは残したまま・番号は決定的なJS処理）。
+      const handleTyped = (text) => {
+        // text==null は停止/クリア時の _resolvePendingWaits シグナル。ここでは何もしない
+        // （直後に _choiceResolve(null) が呼ばれ、そちらが待ちの終了を処理する）。
+        if (text == null) return;
+        const idx = this._parseChoiceNumber(text, choices.length);
+        if (idx != null) { finalize(idx, false); return; }
+        this.addMessage('l0', LANG[this._lang].pickNumberHint);
+        this._pendingInputResolver = handleTyped; // 待ちを継続
+        const mi = document.getElementById('chatInput');
+        if (mi) { mi.disabled = false; mi.focus(); }
+      };
+      this._pendingInputResolver = handleTyped;
+      const mainInput = document.getElementById('chatInput');
+      if (mainInput) { mainInput.disabled = false; mainInput.focus(); }
     });
   }
 
@@ -3351,6 +3400,7 @@ const LANG = {
     hintSubmit:       '▶ この情報で続ける',
     hintSkip:         'スキップ（このまま続ける）',
     hintDone:         '✓ 続行中',
+    pickNumberHint:   '番号でお答えください（例: 1）。ボタンをクリックしてもOKです。',
     // Processing
     connecting:       'Claude APIに接続中…',
     pausedHint:       '⏸ 追加情報を待っています...',
@@ -3476,6 +3526,7 @@ const LANG = {
     hintSubmit:       '▶ Continue with this info',
     hintSkip:         'Skip',
     hintDone:         '✓ Continuing',
+    pickNumberHint:   'Please reply with a number (e.g. 1) — or just click a button.',
     connecting:       'Connecting to Claude…',
     pausedHint:       '⏸ Waiting for your input…',
     retryBtn:         '🔄 Retry',
