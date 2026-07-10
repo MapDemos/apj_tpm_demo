@@ -130,10 +130,11 @@ class LocationFinderApp {
       const b = JSON.parse(localStorage.getItem('geonator_l2_1') || '{}');
       if (typeof b.keepNull === 'boolean') this.config.L2_1_KEEP_NULL_CATEGORY = b.keepNull;
     } catch (_) {}
-    // Search behavior: max conditions (0-5)
+    // Search behavior: max conditions (0-5), fragment-merge give-up threshold (3-7)
     try {
       const b = JSON.parse(localStorage.getItem('geonator_search') || '{}');
       if (Number.isFinite(b.maxConditions)) this.config.MAX_CONDITIONS = Math.max(0, Math.min(5, b.maxConditions));
+      if (Number.isFinite(b.fragmentMergeMaxTries)) this.config.FRAGMENT_MERGE_MAX_TRIES = Math.max(3, Math.min(7, b.fragmentMergeMaxTries));
     } catch (_) {}
     // Judgement mode: hard/soft for same_building & floors
     try {
@@ -151,6 +152,7 @@ class LocationFinderApp {
     const l3Sel  = document.getElementById('l3ModelSelect');
     const nullSel = document.getElementById('l2_1NullSelect');
     const maxCondSel = document.getElementById('maxConditionsSelect');
+    const fragMaxSel = document.getElementById('fragmentMergeMaxTriesSelect');
     const sbModeSel  = document.getElementById('sameBuildingModeSelect');
     const flModeSel  = document.getElementById('floorsModeSelect');
     const modal  = document.getElementById('settingsModal');
@@ -163,6 +165,7 @@ class LocationFinderApp {
     if (l3Sel)  l3Sel.value  = this.config.L3_MODEL;
     if (nullSel) nullSel.value = this.config.L2_1_KEEP_NULL_CATEGORY === false ? 'exclude' : 'include';
     if (maxCondSel) maxCondSel.value = String(this.config.MAX_CONDITIONS);
+    if (fragMaxSel) fragMaxSel.value = String(this.config.FRAGMENT_MERGE_MAX_TRIES);
     if (sbModeSel) sbModeSel.value = this.config.SAME_BUILDING_MODE ?? 'hard';
     if (flModeSel) flModeSel.value = this.config.FLOORS_MODE ?? 'hard';
     this._markRecommendedModels(); // 各役割の推奨モデルに「（推奨）」を付す
@@ -181,7 +184,7 @@ class LocationFinderApp {
       try { localStorage.setItem('geonator_l2_1', JSON.stringify({ keepNull: this.config.L2_1_KEEP_NULL_CATEGORY })); } catch (_) {}
     };
     const persistSearch = () => {
-      try { localStorage.setItem('geonator_search', JSON.stringify({ maxConditions: this.config.MAX_CONDITIONS })); } catch (_) {}
+      try { localStorage.setItem('geonator_search', JSON.stringify({ maxConditions: this.config.MAX_CONDITIONS, fragmentMergeMaxTries: this.config.FRAGMENT_MERGE_MAX_TRIES })); } catch (_) {}
     };
     const persistJudge = () => {
       try { localStorage.setItem('geonator_judge', JSON.stringify({ sameBuilding: this.config.SAME_BUILDING_MODE, floors: this.config.FLOORS_MODE })); } catch (_) {}
@@ -195,6 +198,7 @@ class LocationFinderApp {
     l3Sel?.addEventListener('change',  e => { this.config.L3_MODEL   = e.target.value; persist(); });
     nullSel?.addEventListener('change', e => { this.config.L2_1_KEEP_NULL_CATEGORY = e.target.value !== 'exclude'; persistNull(); });
     maxCondSel?.addEventListener('change', e => { this.config.MAX_CONDITIONS = parseInt(e.target.value, 10); persistSearch(); });
+    fragMaxSel?.addEventListener('change', e => { this.config.FRAGMENT_MERGE_MAX_TRIES = parseInt(e.target.value, 10); persistSearch(); });
     sbModeSel?.addEventListener('change', e => { this.config.SAME_BUILDING_MODE = e.target.value; persistJudge(); });
     flModeSel?.addEventListener('change', e => { this.config.FLOORS_MODE       = e.target.value; persistJudge(); });
 
@@ -225,6 +229,7 @@ class LocationFinderApp {
       this.config.L3_MODEL   = MODEL_DEFAULTS.L3;
       this.config.L2_1_KEEP_NULL_CATEGORY = false; // default: exclude null-category candidates (strict)
       this.config.MAX_CONDITIONS = 3;              // default condition cap
+      this.config.FRAGMENT_MERGE_MAX_TRIES = 5;    // default fragment-merge give-up threshold
       this.config.SAME_BUILDING_MODE = 'hard';     // default: hard filter
       this.config.FLOORS_MODE        = 'hard';     // default: hard filter
       if (l0Sel)  l0Sel.value  = MODEL_DEFAULTS.L0;
@@ -236,6 +241,7 @@ class LocationFinderApp {
       if (l3Sel)  l3Sel.value  = MODEL_DEFAULTS.L3;
       if (nullSel) nullSel.value = 'exclude';
       if (maxCondSel) maxCondSel.value = '3';
+      if (fragMaxSel) fragMaxSel.value = '5';
       if (sbModeSel) sbModeSel.value = 'hard';
       if (flModeSel) flModeSel.value = 'hard';
       try { localStorage.removeItem('geonator_models'); localStorage.removeItem('geonator_l2_1'); localStorage.removeItem('geonator_search'); localStorage.removeItem('geonator_judge'); } catch (_) {}

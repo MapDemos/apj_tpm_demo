@@ -144,6 +144,21 @@
         </select>
       </label>
 
+      <div class="settings-divider"></div>
+
+      <!-- L0: 断片的な発話合成の連続失敗上限 -->
+      <div class="settings-subtitle" id="set-fragmax-title">L0：断片合成の連続失敗上限 <span class="settings-hint" id="set-fragmax-hint">（複数ターンに分けた場所探し依頼を諦めるまでの回数）</span></div>
+      <label class="settings-row">
+        <span id="set-fragmax-row">連続失敗の上限</span>
+        <select id="fragmentMergeMaxTriesSelect">
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+        </select>
+      </label>
+
       </div><!-- /tabpage basic -->
 
       <!-- ===== タブ: スコア（条件上限・重み・結論） ===== -->

@@ -200,9 +200,13 @@ class QueryEngine {
   /** この実行が中断されたか（キャンセル or より新しいクエリが開始）。 */
   _aborted(gen) { return gen !== this._runGen || !!this.ui.isCancelled?.(); }
 
-  /** 断片的な場所探し依頼(new_search/refine)が構造化できなかった時、次ターンの発話と合成
-   *  （既存の_awaitingClarify/_previousText機構に乗せる。JS決定的な文字列連結・LLM要約は挟まない）
-   *  対象にする。雑談/ミッション外は対象外＝無関係な発言を次の解析に混ぜない。
+  /** 場所探しの断片が構造化できなかった時、次ターンの発話と合成（既存の_awaitingClarify/
+   *  _previousText機構に乗せる。JS決定的な文字列連結・LLM要約は挟まない）対象にする。
+   *  intentによる合成対象の絞り込みはしない（chatterも含める）——短い断片("入谷のね"等)は
+   *  L0の意図分類が毎回ブレて new_search/refine と chatter の間で揺れることがあり、
+   *  intentでゲートすると分類のブレだけで断片が静かに失われるバグを踏んだため。L1-2自身の
+   *  スキーマ検証が「情報が揃ったか」を決定的に判断するので、L0の分類に頼る必要はない。
+   *  off_missionだけは明確に無関係と分かるため除外し、ノイズを混ぜない。
    *  L0が既に自信ありげに応答済み(l0Replied)で定型フォールバックが出せない場合は、エンジンの声で
    *  「まだ続けて」と安全網の一言を足す（L0の発話がエンジンの実態より先走るのを防ぐ）。
    *  連続失敗が上限(FRAGMENT_MERGE_MAX_TRIES)に達したら、無限ループを避けて諦めてリセットする。
@@ -211,7 +215,7 @@ class QueryEngine {
    *  場合）はconfirmSchemaがまだ呼ばれていないため常にfalse——矛盾ではなく設計通り。 */
   _markFragmentaryAttempt(l0Replied) {
     const intent = this._dbgReport?.l0Intent;
-    if (intent !== 'new_search' && intent !== 'refine') return;
+    if (intent === 'off_mission') return;
     this._fragmentTries = (this._fragmentTries || 0) + 1;
     const maxTries = this.config.FRAGMENT_MERGE_MAX_TRIES ?? 3;
     if (this._fragmentTries >= maxTries) {

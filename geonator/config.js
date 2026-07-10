@@ -9,7 +9,7 @@
 const CONFIG = {
 
   // ビルド確認用バージョン（キャッシュで古いJSを読んでいないかの切り分けに使う）。変更ごとに更新。
-  APP_VERSION: '2026-07-10.1857',
+  APP_VERSION: '2026-07-10.1939',
 
   // ============================================
   // API KEYS
@@ -93,7 +93,7 @@ const CONFIG = {
 
   DEFAULT_LEVEL:       'very_close', // distance level when user gives no distance expression
   MAX_CLARIFY_TURNS:   3,            // max clarification loops before best-effort (HH)
-  FRAGMENT_MERGE_MAX_TRIES: 3,       // 断片的な発話合成(_markFragmentaryAttempt)の連続失敗上限。超えたら諦めてリセット
+  FRAGMENT_MERGE_MAX_TRIES: 5,       // 断片的な発話合成(_markFragmentaryAttempt)の連続失敗上限。超えたら諦めてリセット。設定画面で変更可(3-7)
   API_TIMEOUT_MS:      8000,         // per-API-call timeout in ms (GG)
   L1_TIMEOUT_MS:       20000,        // L1(解析)専用タイムアウト。出力が大きく生成に時間がかかるため既定より長め
   SLOW_MODEL_TIMEOUT_MS: 20000,      // 5世代/Opus4.7+/Fable5 のタイムアウト下限。1コールが重く既定8秒では足りないため
