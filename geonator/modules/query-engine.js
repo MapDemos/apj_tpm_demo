@@ -109,18 +109,26 @@ class QueryEngine {
     const gen = (this._runGen = (this._runGen || 0) + 1); // 実行世代（新クエリ/キャンセルで無効化）
     this.ui.clearResults();
 
-    // L0: 会話の入口。ユーザーの発話に自然文で必ず一言返す（検索依頼／雑談／ミッション外を問わず）。
-    // L1-2(parseQuery)と並列発行。_parseAndValidate に l0Promise を渡し、L0が既に応答済みなら
-    // not_a_query 等の定型メッセージは出さない（二重発話の防止）。confirmInput(L1-1)は非活性化
-    // （メソッド自体はllm-client.jsに温存）。
+    // L0: 会話の入口。intent分類（新規検索／絞り込み／雑談／ミッション外）はL1-2(parseQuery)と
+    // 並列発行。ただし確定的な復唱はschema確定後（下記）にL0が改めて行うため、ここではchatter/
+    // off_mission（＝この後schemaを試みない発話）だけ即座に表示する。new_search/refineの推測発言
+    // は表示・記憶しない＝L0がエンジンの実態より先走って喋り、無言停止/情報捏造につながる不具合を
+    // 今日繰り返し踏んだための設計変更（詳細はNEXT_STEPS.txt/design.md参照）。
     let confirmShown = false;
     const l0Promise = (this.llm.converse?.(merged, this._langCode(), this._convHistory) ?? Promise.resolve({ intent: 'new_search', reply: '' }))
       .then(({ intent, reply }) => {
         this._recordTurn('user', merged);
-        if (reply) this._recordTurn('l0', reply);
         this._dbgReport.l0Intent = intent; // デバッグ表示専用。制御フローの分岐にはまだ使わない
-        if (reply && !confirmShown) { confirmShown = true; this.ui.showL0Message?.(reply); this.ui.thinking?.(); }
-        return !!reply;
+        if (reply && (intent === 'chatter' || intent === 'off_mission') && !confirmShown) {
+          confirmShown = true;
+          this._recordTurn('l0', reply);
+          this.ui.showL0Message?.(reply);
+          this.ui.thinking?.();
+        }
+        // l0Replied（_parseAndValidateの二重発話防止判定）は「実際に表示したか」を意味する。
+        // reply自体の有無ではない点が重要：new_search/refineは表示しないため、ここをconfirmShownの
+        // ままにしないと not_a_query/continue_hint 等の安全網が誤って抑制され、無言停止バグが復活する。
+        return confirmShown;
       })
       .catch(() => false);
 
@@ -136,8 +144,19 @@ class QueryEngine {
 
     this._dbgReport.schema = schema;
 
-    // L0がまだ応答していなければ（失敗/解析の方が速かった等）L1の confirmation をL0の声として表示。
-    if (!confirmShown && schema.confirmation) { confirmShown = true; this.ui.showL0Message?.(schema.confirmation); }
+    // L0にschemaの決定的な事実だけを渡して自然文で復唱させる（推測ではなく確定事実の言い換え）。
+    // 失敗/空ならL1自身のconfirmationにフォールバックし、無言にはしない。
+    if (!confirmShown) {
+      const summary = this._buildSchemaSummary(schema);
+      let confirmText = '';
+      try { confirmText = await this.llm.confirmSchema?.(summary, this._langCode(), this._convHistory); } catch {}
+      if (!confirmText) confirmText = schema.confirmation || '';
+      if (confirmText) {
+        confirmShown = true;
+        this._recordTurn('l0', confirmText);
+        this.ui.showL0Message?.(confirmText);
+      }
+    }
 
     // 除外事項は表示された確認文(Haiku/Sonnet いずれか)に載らないことがあるため、JS側で決定的に
     // 注記する。透明化 A=上限超過の地理条件 / B=非地理的な特徴(壁が赤い等)。両方を1吹き出しに。
@@ -186,7 +205,10 @@ class QueryEngine {
    *  対象にする。雑談/ミッション外は対象外＝無関係な発言を次の解析に混ぜない。
    *  L0が既に自信ありげに応答済み(l0Replied)で定型フォールバックが出せない場合は、エンジンの声で
    *  「まだ続けて」と安全網の一言を足す（L0の発話がエンジンの実態より先走るのを防ぐ）。
-   *  連続失敗が上限(FRAGMENT_MERGE_MAX_TRIES)に達したら、無限ループを避けて諦めてリセットする。 */
+   *  連続失敗が上限(FRAGMENT_MERGE_MAX_TRIES)に達したら、無限ループを避けて諦めてリセットする。
+   *  ※ L0の復唱をschema確定後に回す設計変更により、l0Replied は「今回のターンでL0が実際に
+   *  何か表示したか」を意味する。new_search/refineでschema構築が失敗する場合（＝ここに到達する
+   *  場合）はconfirmSchemaがまだ呼ばれていないため常にfalse——矛盾ではなく設計通り。 */
   _markFragmentaryAttempt(l0Replied) {
     const intent = this._dbgReport?.l0Intent;
     if (intent !== 'new_search' && intent !== 'refine') return;
@@ -1244,6 +1266,35 @@ class QueryEngine {
       || (schema?.conditions || []).some(c => c.distance?.profile_inferred === true);
     if (walkAssumed) parts.push(M.walkAssumed());
     return parts.join('\n');
+  }
+
+  /** schemaの決定的なフィールドをL0向けの事実リストにテキスト化する（LLM不使用・JS決定的）。
+   *  L0(confirmSchema)はこれを見て自然文に言い換えるだけ＝エンジンが確定した内容だけを話す
+   *  設計にするための入力。除外事項(droppedConditionTexts等)は_exclusionNote側の役割のまま含めない。 */
+  _buildSchemaSummary(schema) {
+    const lines = [];
+    const anchors = (schema.proximity?.anchors || []).map(a => a.text).join('・');
+    if (anchors) lines.push(`基準地点: ${anchors}`);
+    const w = schema.proximity?.within;
+    if (w?.level) {
+      lines.push(`範囲: ${({ adjacent: '目の前', very_close: 'すぐ隣' })[w.level] || w.level}`);
+    } else if (w) {
+      const mn = w.minMinutes ?? null, mx = w.maxMinutes ?? w.minutes ?? null, prof = w.profile || 'walking';
+      if (mn != null && mx != null) lines.push(`範囲: ${prof} ${mn}〜${mx}分`);
+      else if (mn != null) lines.push(`範囲: ${prof} ${mn}分以上`);
+      else if (mx != null) lines.push(`範囲: ${prof} ${mx}分以内`);
+      else { const met = w.maxMeters ?? w.meters ?? null; if (met != null) lines.push(`範囲: ${met}m以内`); }
+    }
+    if (schema.proximity?.bearing_filter) lines.push(`方角: ${schema.proximity.bearing_filter}`);
+    if (schema.proximity?.scope?.text) lines.push(`エリア: ${schema.proximity.scope.text}`);
+    if (schema.target?.text) lines.push(`探すもの: ${schema.target.text}`);
+    if (schema.target?.floors) lines.push(`階数: ${this._floorReasonLabel(schema.target.floors)}`);
+    (schema.conditions || []).forEach((c, i) => {
+      const d = c.distance || {};
+      const distLabel = d.level ? (({ adjacent: '目の前', very_close: 'すぐ隣' })[d.level] || d.level) : (d.minutes ? `${d.minutes}分以内` : '');
+      lines.push(`条件${i + 1}: ${c.text ?? c.type}${distLabel ? '（' + distLabel + '）' : ''}`);
+    });
+    return lines.join('\n');
   }
 
   /** Basis pool for narrow suggestions = full-match candidates (else partial). */

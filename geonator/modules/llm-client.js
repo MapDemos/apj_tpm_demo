@@ -225,6 +225,31 @@ class LLMClient {
   }
 
   /**
+   * L1-2が確定したschemaの事実(summaryText)をL0の声で自然文に言い換える（振り分けは行わない、
+   * schema成功時のみ呼ばれる）。エンジンへの逆流は無い一方通行（この結果はUI表示・会話履歴にのみ使う）。
+   * @returns {Promise<string>}
+   */
+  async confirmSchema(summaryText, lang = 'ja', history = []) {
+    if (typeof PROMPT_L0 === 'undefined' || !summaryText) return '';
+    try {
+      const langNote = lang === 'en' ? '\nReply in English.' : '';
+      const messages = [
+        ...history.map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.text })),
+        { role: 'user', content: `[確定した検索内容]\n${summaryText}${langNote}` },
+      ];
+      const result = await this._callClaude(
+        { system: PROMPT_L0, messages },
+        220,
+        this.config.L0_MODEL || 'claude-haiku-4-5-20251001',
+        'L0'
+      );
+      const json = this._extractJSON(result);
+      if (!json || typeof json.reply !== 'string') return '';
+      return json.reply.trim().replace(/^["「]|["」]$/g, '');
+    } catch { return ''; }
+  }
+
+  /**
    * 高速な確認文だけを生成（L1本体と並行してHaikuで実行し、真っ先に「〜を探しますね」を出す）。
    * 解析はしない＝ユーザーの依頼の丁寧な復唱のみ。場所探し以外なら空文字。L0導入後は非活性。
    * @returns {Promise<string>}
