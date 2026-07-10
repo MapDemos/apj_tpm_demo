@@ -2842,29 +2842,36 @@ class LocationFinderApp {
     const disableAll = () => wrapper.querySelectorAll('.hint-suggest-btn, .hint-skip-btn')
       .forEach(b => { b.disabled = true; });
 
-    // 自由入力は本体の入力欄で受ける。回答（テキスト）が来たら _handleSend がこのルータを呼ぶ。
-    this._pendingInputResolver = (text) => { disableAll(); onResponse(text); };
+    // 回答が来たら待ちを解除し、送信ボタンを処理中(■)へ戻してから onResponse を呼ぶ
+    // （回答待ち中は _setProcessing(false) で➤にしているため、resolve時に必ず■へ戻す）。
+    const settle = (value) => {
+      this._pendingInputResolver = null;
+      disableAll();
+      this._setProcessing(true);
+      onResponse(value);
+    };
+
+    // 自由入力は本体の入力欄で受ける。回答待ち中は「送信＝この回答を送る」なので送信ボタンを
+    // ➤ に戻す（■のままだと押下がキャンセル扱いになり、回答を送信する手段が無くなる）。
+    this._pendingInputResolver = (text) => settle(text);
+    this._setProcessing(false);
     const mainInput = document.getElementById('chatInput');
     if (mainInput) { mainInput.disabled = false; mainInput.focus(); }
 
-    // Suggestion click = submit that suggestion object (自由入力ルータは解除)。
+    // Suggestion click = submit that suggestion object.
     if (sugList.length) {
       wrapper.querySelectorAll('.hint-suggest-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const s = sugList[+btn.dataset.i];
-          this._pendingInputResolver = null;
-          disableAll();
           this.addMessage('user', s.text);
-          onResponse(s); // resolve with the suggestion object (carries resolved items)
+          settle(s); // resolve with the suggestion object (carries resolved items)
         });
       });
     }
 
     document.getElementById(`${uid}-skip`).addEventListener('click', () => {
-      this._pendingInputResolver = null;
       wrapper.querySelector('.hint-bubble').style.opacity = '0.5';
-      disableAll();
-      onResponse(null);
+      settle(null);
     });
   }
 
