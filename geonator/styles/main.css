@@ -775,10 +775,11 @@ body { display: flex; flex-direction: column; }
 .chat-input:disabled { opacity: .5; }
 
 .send-btn {
-  background: none;             /* 青背景をやめて他UIと調和（背景なし・矢印のみ） */
+  background: none;             /* 普段は背景なし・矢印のみ（他UIと調和） */
   border: none;
-  color: var(--text-1);        /* 白矢印。resting は他のUIの文字色に合わせる */
-  font-size: 18px;             /* 背景が無いぶん矢印を少し大きく */
+  border-radius: 50%;          /* 丸み（ホバー時の円背景用） */
+  color: var(--text-1);        /* 白矢印 */
+  font-size: 22px;             /* 約1.2倍に拡大 */
   width: 48px;
   height: 48px;    /* 入力欄の最小高(48px)に合わせる＝1行時に上下が揃う */
   cursor: pointer;
@@ -786,9 +787,10 @@ body { display: flex; flex-direction: column; }
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: color .15s, transform .1s;
+  transition: color .15s, background .15s, transform .1s;
 }
-.send-btn:hover:not(:disabled) { color: var(--accent); } /* ホバーでアクセント色に変化 */
+/* ホバー：アクセント色＋薄い円背景をふわっと（丸みを演出） */
+.send-btn:hover:not(:disabled) { color: var(--accent); background: rgba(59,130,246,.12); }
 .send-btn:active:not(:disabled) { transform: translateY(1px); }
 .send-btn:disabled { opacity: .35; cursor: not-allowed; }
 
