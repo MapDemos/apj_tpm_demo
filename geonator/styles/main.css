@@ -742,8 +742,8 @@ body { display: flex; flex-direction: column; }
 
 .input-area {
   flex-shrink: 0;
-  /* 下部にゆとり＋スマホのホームバー領域(safe-area)を全ビューポートで確保（画面ギリギリ回避） */
-  padding: 16px 16px calc(28px + env(safe-area-inset-bottom, 0px));
+  /* 上下左右を 16px で対称に（下だけ広いのを詰める）。スマホのホームバー領域(safe-area)は加算。 */
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border);
   background: var(--bg-panel);
 }
@@ -780,8 +780,8 @@ body { display: flex; flex-direction: column; }
   border-radius: 10px;
   color: #fff;
   font-size: 16px;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;    /* 入力欄の最小高(48px)に合わせる＝1行時に上下が揃う */
   cursor: pointer;
   display: flex;
   align-items: center;
