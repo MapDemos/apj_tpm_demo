@@ -275,8 +275,16 @@ class LLMClient {
         { cacheSystem: true } // 不変な L0 システムプロンプトをプロンプトキャッシュ（同一セッション内で複数回呼ばれる）
       );
       const json = this._extractJSON(result);
-      if (!json || typeof json.reply !== 'string') return '';
-      return json.reply.trim().replace(/^["「]|["」]$/g, '');
+      if (json && typeof json.reply === 'string') {
+        return json.reply.trim().replace(/^["「]|["」]$/g, '');
+      }
+      // JSON化を忘れて生の自然文のまま返してくることがある（Haikuで時々発生・中身自体は正しい
+      // ことが多い）。JSONを書こうとした形跡（{ を含む）が無ければ、その生テキストをそのまま
+      // 使う（壊れたJSONっぽい時は安全側で固定文言フォールバックのまま）。
+      if (!json && result && !result.includes('{')) {
+        return result.trim().replace(/^["「]|["」]$/g, '');
+      }
+      return '';
     } catch { return ''; }
   }
 
