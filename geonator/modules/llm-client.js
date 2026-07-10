@@ -278,6 +278,39 @@ class LLMClient {
   }
 
   /**
+   * フィードバックパネル（終了する/更に絞り込む/探し直す）でボタン番号に一致しない自由文が
+   * 来た時、その自由文がどの操作を意味するかをL0に振り分けさせる（意味の確定ではなく
+   * ルーティング＝非決定でよい。実際の絞り込み・検索処理は既存の決定的なエンジンロジックが担う）。
+   * canNarrow=falseの時は"narrow"という選択肢自体が存在しないため、返っても呼び出し側で
+   * 'research'に補正すること。呼び出し失敗時は呼び出し側で'research'にフォールバックする想定。
+   * @returns {Promise<'done'|'narrow'|'research'|''>} 空文字は分類失敗（呼び出し側でフォールバック）
+   */
+  async classifyFeedback(freeText, context = {}, lang = 'ja', history = []) {
+    if (typeof PROMPT_L0 === 'undefined' || !freeText) return '';
+    try {
+      const langNote = lang === 'en' ? '\nReply in English.' : '';
+      const ctxLines = [
+        `絞り込み可能: ${context.canNarrow ? 'はい' : 'いいえ'}`,
+        context.proximityLabel ? `検索基準: ${context.proximityLabel}` : null,
+        `発話: 「${freeText}」`,
+      ].filter(Boolean).join('\n');
+      const messages = [
+        ...history.map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.text })),
+        { role: 'user', content: `[絞り込みの回答]\n${ctxLines}${langNote}` },
+      ];
+      const result = await this._callClaude(
+        { system: PROMPT_L0, messages },
+        150,
+        this.config.L0_MODEL || 'claude-haiku-4-5-20251001',
+        'L0'
+      );
+      const json = this._extractJSON(result);
+      if (!json || !['done', 'narrow', 'research'].includes(json.action)) return '';
+      return json.action;
+    } catch { return ''; }
+  }
+
+  /**
    * 高速な確認文だけを生成（L1本体と並行してHaikuで実行し、真っ先に「〜を探しますね」を出す）。
    * 解析はしない＝ユーザーの依頼の丁寧な復唱のみ。場所探し以外なら空文字。L0導入後は非活性。
    * @returns {Promise<string>}

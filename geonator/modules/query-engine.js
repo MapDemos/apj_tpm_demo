@@ -2466,12 +2466,23 @@ class QueryEngine {
     const canNarrow = (this._cache.surfaced?.length || 0) > 1;
     const action = await this.ui.showFeedback(proximityLabel, { canNarrow });
 
-    // ボタンではなく自由文で答えた場合（{freeText}形）＝ボタンを押させず「探し直す」の追加情報
-    // として扱う（固定的なJS決定ルール。番号/序数語に一致しない自由文は常にこの意味、という
-    // ルーターの最小の一歩。意味解釈のLLM分類はしない）。既に得た文言を後段のヒントに使うので
-    // showHintInputで二度聞きしない。
+    // ボタンではなく自由文で答えた場合（{freeText}形）＝L0にdone/narrow/researchのどれを
+    // 意味するか振り分けさせる（intent振り分け＝非決定でよい。実際の絞り込み・検索処理は
+    // 以降の決定的なエンジンロジックが担う）。呼び出し失敗/不正な値ならresearchにフォールバック
+    // （既存の固定ルールと同じ安全側動作）。既に得た文言を後段のヒントに使うのでshowHintInputで
+    // 二度聞きしない。
     const isFreeText = action && typeof action === 'object' && action.freeText != null;
-    const effectiveAction = isFreeText ? 'research' : action;
+    let effectiveAction = action;
+    if (isFreeText) {
+      let classified = '';
+      try {
+        classified = await this.llm.classifyFeedback?.(
+          action.freeText, { proximityLabel, canNarrow }, this._langCode(), this._convHistory
+        );
+      } catch {}
+      if (classified === 'narrow' && !canNarrow) classified = 'research'; // 存在しない選択肢への補正
+      effectiveAction = classified || 'research';
+    }
     const presetHint = isFreeText ? action.freeText : null;
 
     if (effectiveAction === 'done') {
