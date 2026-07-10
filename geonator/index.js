@@ -878,7 +878,7 @@ class LocationFinderApp {
       // text==null は停止/クリア時の _resolvePendingWaits シグナル。ここでは何もしない
       // （直後に _feedbackResolve(null) が呼ばれ、そちらが待ちの終了を処理する）。
       if (text == null) return;
-      const idx = this._parseChoiceNumber(text, buttons.length);
+      const idx = this._parseChoiceSelection(text, buttons.length);
       if (idx != null) { finalize(buttons[idx].label, buttons[idx].value, false); return; }
       this.addMessage('l0', LANG[this._lang].pickNumberHint);
       this._pendingInputResolver = handleTyped; // 待ちを継続
@@ -1201,6 +1201,28 @@ class LocationFinderApp {
     if (!/^\d+$/.test(half)) return null;
     const n = parseInt(half, 10);
     return (n >= 1 && n <= max) ? n - 1 : null;
+  }
+
+  /** 曖昧な序数表現（最初/真ん中/最後 等）を固定語彙で拾う。意味解釈ではなく辞書引きなので
+   *  決定的（LLM不使用）。部分一致でOK（「最初のでお願い」等の言い回しも拾う）。 */
+  _parseChoiceOrdinal(text, max) {
+    const t = (text || '').trim().toLowerCase();
+    if (!t || max < 1) return null;
+    const FIRST = ['最初', '一番上', '一番目', '先頭', 'いちばん上', 'はじめ', 'first', 'top'];
+    const LAST  = ['最後', '一番下', '一番したの', 'いちばん下', 'last', 'bottom'];
+    const MID   = ['真ん中', 'まんなか', '中間', 'middle'];
+    if (FIRST.some(w => t.includes(w))) return 0;
+    if (LAST.some(w => t.includes(w)))  return max - 1;
+    if (max >= 2 && MID.some(w => t.includes(w))) return Math.floor((max - 1) / 2);
+    return null;
+  }
+
+  /** choice/feedback/提案ボタン共通の選択解釈：番号 → 曖昧な序数表現、の順で試す。
+   *  どちらも該当しなければ null（自由文として別途扱う、または「番号でお答えください」案内）。 */
+  _parseChoiceSelection(text, max) {
+    const byNumber = this._parseChoiceNumber(text, max);
+    if (byNumber != null) return byNumber;
+    return this._parseChoiceOrdinal(text, max);
   }
 
   /** 入力中の「・・・」アニメ（アシスタントの考え中とお揃い・右寄せのユーザー吹き出し）。 */
@@ -2871,7 +2893,6 @@ class LocationFinderApp {
     wrapper.innerHTML = `
       <div class="msg-label">${ht.hintTitle(this.config.HINT_EXTRA_TURNS)}</div>
       <div class="hint-bubble">
-        <div class="hint-question">${_formatMsg(claudeMessage)}</div>
         ${sugHTML}
         <div class="hint-actions">
           <button class="hint-skip-btn" id="${uid}-skip">${ht.hintSkip}</button>
@@ -2897,7 +2918,7 @@ class LocationFinderApp {
     // ➤ に戻す（■のままだと押下がキャンセル扱いになり、回答を送信する手段が無くなる）。
     // 番号（提案ボタンの番号）ならJSの決定的な処理で選ぶ。それ以外は今までどおり自由記述ヒント。
     this._pendingInputResolver = (text) => {
-      const idx = sugList.length ? this._parseChoiceNumber(text, sugList.length) : null;
+      const idx = sugList.length ? this._parseChoiceSelection(text, sugList.length) : null;
       settle(idx != null ? sugList[idx] : text);
     };
     this._setProcessing(false);
@@ -2944,7 +2965,6 @@ class LocationFinderApp {
       wrapper.innerHTML = `
         <div class="msg-label">🔀 選択</div>
         <div class="choice-bubble">
-          <div class="choice-question">${_formatMsg(question)}</div>
           <div class="choice-buttons" id="${uid}-btns">
             ${choices.map((c, i) =>
               `<button class="choice-btn" id="${uid}-btn-${i}">${i + 1}. ${_esc(c)}</button>`
@@ -2979,7 +2999,7 @@ class LocationFinderApp {
         // text==null は停止/クリア時の _resolvePendingWaits シグナル。ここでは何もしない
         // （直後に _choiceResolve(null) が呼ばれ、そちらが待ちの終了を処理する）。
         if (text == null) return;
-        const idx = this._parseChoiceNumber(text, choices.length);
+        const idx = this._parseChoiceSelection(text, choices.length);
         if (idx != null) { finalize(idx, false); return; }
         this.addMessage('l0', LANG[this._lang].pickNumberHint);
         this._pendingInputResolver = handleTyped; // 待ちを継続
@@ -3400,7 +3420,7 @@ const LANG = {
     hintSubmit:       '▶ この情報で続ける',
     hintSkip:         'スキップ（このまま続ける）',
     hintDone:         '✓ 続行中',
-    pickNumberHint:   '番号でお答えください（例: 1）。ボタンをクリックしてもOKです。',
+    pickNumberHint:   '番号（例: 1）か「最初」「真ん中」「最後」などでお答えください。ボタンをクリックしてもOKです。',
     // Processing
     connecting:       'Claude APIに接続中…',
     pausedHint:       '⏸ 追加情報を待っています...',
@@ -3526,7 +3546,7 @@ const LANG = {
     hintSubmit:       '▶ Continue with this info',
     hintSkip:         'Skip',
     hintDone:         '✓ Continuing',
-    pickNumberHint:   'Please reply with a number (e.g. 1) — or just click a button.',
+    pickNumberHint:   'Please reply with a number (e.g. 1) or a word like "first"/"middle"/"last" — or just click a button.',
     connecting:       'Connecting to Claude…',
     pausedHint:       '⏸ Waiting for your input…',
     retryBtn:         '🔄 Retry',
