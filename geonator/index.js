@@ -441,17 +441,25 @@ class LocationFinderApp {
       },
       async showChoices(question, choices) {
         self._hideCancelBtn(); // ユーザー選択待ち＝処理は一旦ユーザーに委ねる→キャンセル不要
-        return new Promise(resolve => {
+        const answer = await new Promise(resolve => {
           self.addMessage('assistant', question);
           self._showChoicePanel(question, choices).then(resolve);
         });
+        // 選択後は必ず解決処理（Search Box/Tilequery等）が続く → 無音区間を作らないよう考え中を再掲。
+        // 直後に本流側の thinking(場所特定/収集…) が具体ラベルへ上書きする。結果描画で自動的に消える。
+        self._showCancelBtn();
+        self._showTypingIndicator();
+        return answer;
       },
       async showHintInput(prompt, suggestions) {
         self._hideCancelBtn(); // 入力待ち＝キャンセル不要
-        return new Promise(resolve => {
+        const text = await new Promise(resolve => {
           self.addMessage('assistant', prompt);
           self._showHintPanel(prompt, (text) => resolve(text), suggestions);
         });
+        // 入力があれば再解析/再検索/絞り込みが続く → 考え中を再掲（skip=nullは後段の各フロー任せ）。
+        if (text) { self._showCancelBtn(); self._showTypingIndicator(); }
+        return text;
       },
       getLang() { return self._lang; },
       isDebug() { return self._debugMode; },
@@ -469,9 +477,12 @@ class LocationFinderApp {
       },
       async showFeedback(proximityLabel, opts) {
         self._hideCancelBtn(); // フィードバック待ち＝キャンセル不要
-        return new Promise(resolve => {
+        const action = await new Promise(resolve => {
           self._showFeedbackButtons(resolve, proximityLabel, opts);
         });
+        // 「探し直す/更に絞る」は再処理が続く → 考え中を再掲。「終了(done)」は処理無しなので出さない。
+        if (action && action !== 'done') { self._showCancelBtn(); self._showTypingIndicator(); }
+        return action;
       },
       clearResults() {
         if (!self._mapActive()) return; // 地図OFF: 消すべき地図要素が無い
