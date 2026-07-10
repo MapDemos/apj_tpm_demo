@@ -120,6 +120,26 @@ html, body {
   color: var(--amber);
 }
 
+/* 汎用コントロールボタン（⚙️設定 / 🗺地図表示 / チャットクリア / 設定内の言語切替）。
+   以前は base スタイルが無くブラウザ既定の見た目で浮いていた。lang/debug ボタンと統一。 */
+.control-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+  white-space: nowrap;
+}
+.control-btn:hover {
+  background: #1e3050;
+  color: var(--text-1);
+  border-color: var(--accent);
+}
+.control-btn:active { transform: translateY(1px); }
+
 /* Hint request panel */
 .message.hint-request { align-self: flex-start; align-items: flex-start; max-width: 98%; }
 .hint-bubble {
@@ -717,14 +737,14 @@ html, body {
 
 .input-area {
   flex-shrink: 0;
-  padding: 12px 13px 20px;
+  padding: 16px 16px 28px;
   border-top: 1px solid var(--border);
   background: var(--bg-panel);
 }
 
 .input-container {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: flex-end;
 }
 
@@ -732,14 +752,14 @@ html, body {
   flex: 1;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--text-1);
   font-size: 13.5px;
-  padding: 9px 12px;
+  padding: 11px 14px;
   font-family: inherit;
-  line-height: 1.4;
-  min-height: 42px;
-  max-height: 120px;
+  line-height: 1.5;
+  min-height: 48px;
+  max-height: 130px;
   resize: none;
   overflow-y: auto;
   transition: border-color .15s;
@@ -751,11 +771,11 @@ html, body {
 .send-btn {
   background: var(--accent);
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   color: #fff;
   font-size: 16px;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   cursor: pointer;
   display: flex;
   align-items: center;
