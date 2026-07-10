@@ -372,6 +372,8 @@ class QueryEngine {
         const tight = await this._resolveOverflow(schema, bboxes, collected);
         if (tight && tight.bbox) {
           if (tight.note) this.ui.showMessage(tight.note);
+          // note の showMessage が考え中を消す → 直後の再収集が無音になるので収集ラベルで再掲。
+          this.ui.thinking?.(this._m().thinkingCollect);
           this.ui.drawNarrowBBox?.(tight.bbox); // 絞り込み後の検索bbox（debug時のみ）
           this.mcp._gridCircles = []; this.mcp._gridCirclesSkipped = []; // 絞込後グリッドだけ描く
           const re = await this._collectCandidates(schema, { targetBbox: tight.bbox, condBbox: bboxes.condBbox });
