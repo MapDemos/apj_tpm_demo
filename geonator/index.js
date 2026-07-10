@@ -452,6 +452,11 @@ class LocationFinderApp {
       showL0Message(text) {
         self.addMessage('l0', text);
       },
+      // 処理エージェント発の申し送り事項（除外条件・rail/地下鉄の扱い等）。会話ではなく
+      // エンジンの決定的な注記なので、L0とは別の処理エージェント系スタイル(アンバー)で表示する。
+      showProcessingNote(text) {
+        self.addMessage('proc-note', text);
+      },
       showSearching(text) {
         self._updateThinking(text);
       },
@@ -2772,6 +2777,7 @@ class LocationFinderApp {
       user:           t.roleUser,
       assistant:      t.roleAssistant,
       l0:             t.roleL0,
+      'proc-note':    t.roleNote,
       'thinking-msg': t.roleThinking,
       'tool-status':  t.roleTool,
       error:          t.roleError,
@@ -3405,6 +3411,7 @@ const LANG = {
     roleUser:      'オペレーター',
     roleAssistant: 'AI エージェント',
     roleL0:        'ジオネーター',
+    roleNote:      '📋 補足事項',
     roleThinking:  'AI 思考',
     roleTool:      'ツール実行',
     roleError:     'エラー',
@@ -3533,6 +3540,7 @@ const LANG = {
     roleUser:      'Caller',
     roleAssistant: 'AI Agent',
     roleL0:        'Geonator',
+    roleNote:      '📋 Note',
     roleThinking:  'AI Thinking',
     roleTool:      'Tool',
     roleError:     'Error',

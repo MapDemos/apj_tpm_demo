@@ -16,8 +16,9 @@ class QueryEngine {
    * @param {{ mcp: MapboxMCPClient, llm: LLMClient, ui: UICallbacks, config: object }} opts
    *
    * UICallbacks shape:
-   *   showL0Message(text: string): void  ※処理エージェント発のプロースは全てこちら経由（会話エージェントの声）
-   *   showMessage(text: string): void    ※現在エンジンからは未使用（コールバック自体は温存）
+   *   showL0Message(text: string): void      ※会話エージェント(L0)の声。プロース全般はこちら
+   *   showProcessingNote(text: string): void ※処理エージェント発の申し送り事項（除外条件・rail等の注記）
+   *   showMessage(text: string): void        ※現在エンジンからは未使用（コールバック自体は温存）
    *   showChoices(question: string, choices: string[]): Promise<string>
    *   showHintInput(prompt: string): Promise<string>
    *   showSearching(text: string): void
@@ -118,7 +119,7 @@ class QueryEngine {
     // 除外事項は表示された確認文(Haiku/Sonnet いずれか)に載らないことがあるため、JS側で決定的に
     // 注記する。透明化 A=上限超過の地理条件 / B=非地理的な特徴(壁が赤い等)。両方を1吹き出しに。
     const exNote = this._exclusionNote(schema);
-    if (exNote) this.ui.showL0Message?.(exNote);
+    if (exNote) this.ui.showProcessingNote?.(exNote);
 
     // [STEP] QuerySchema — show the parsed intent early so the operator can sanity-check
     // L1's interpretation (target / conditions / distances) before any search runs.

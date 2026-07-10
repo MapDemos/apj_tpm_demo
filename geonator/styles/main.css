@@ -368,11 +368,20 @@ body { display: flex; flex-direction: column; }
   font-style: italic;
 }
 .message.tool-status .message-bubble {
-  background: linear-gradient(rgba(59,130,246,.06), rgba(59,130,246,.06)), var(--bg-card);
-  border: 1px dashed rgba(59,130,246,.3);
-  color: #7aa9f7;
+  /* 処理エージェント発の統計（処理時間ログ等）。候補パネルと同じアンバー系に統一 */
+  background: linear-gradient(rgba(245,158,11,.06), rgba(245,158,11,.06)), var(--bg-card);
+  border: 1px dashed rgba(245,158,11,.3);
+  color: #fcd34d;
   font-size: 12px;
   padding: 5px 10px;
+}
+/* 処理エージェント発の申し送り事項（除外条件・線路/地下鉄の扱い等の注記）。candidate-panelと同系色 */
+.message.proc-note { align-self: flex-start; align-items: flex-start; max-width: 94%; }
+.message.proc-note .message-bubble {
+  background: linear-gradient(rgba(245,158,11,.06), rgba(245,158,11,.06)), var(--bg-card);
+  border: 1px solid rgba(245,158,11,.3);
+  color: #fcd34d;
+  font-size: 13px;
 }
 .message.error .message-bubble {
   background: rgba(239,68,68,.1);
