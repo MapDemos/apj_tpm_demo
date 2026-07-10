@@ -2536,34 +2536,34 @@ class QueryEngine {
     }
 
     // 自由文で既にヒントを得ている場合はshowHintInputを呼ばない（二度聞き防止）。
-    const hint = presetHint ?? await this.ui.showHintInput(this._m().ask_hint, suggestions);
+    let hint = presetHint ?? await this.ui.showHintInput(this._m().ask_hint, suggestions);
+    const usedPresetHint = presetHint != null;
     // スキップ＝もう情報を出さない＝「終了する」と同義。無言で終わらせず、doneと同じ一言＋
     // キャッシュリセットをする（以前は何も表示せず会話が唐突に途切れるバグだった）。
     if (!hint) { this.ui.showL0Message?.(this._m().confirmed); this._resetCache(); return; }
     this.ui.thinking?.(this._m().thinkingNarrow); // 絞り込み計算中も考え中表示
 
-    // 階数サジェスト選択 → その階数の候補だけに絞る（再検索せず表示中の候補をフィルタ）。
-    if (hint && typeof hint === 'object' && hint.floors != null) {
-      await this._narrowByFloors(schema, hint.floors);
-      return;
-    }
-
-    // Chosen agent suggestion → use the KNOWN poi items directly (no parse, no re-query).
-    if (hint && typeof hint === 'object' && hint.landmark) {
-      const cond = {
-        type: 'poi', text: hint.landmark, query_intent: 'specific', queries: [hint.landmark],
-        direction: null,
-        // 探索・文言と同じレベルで条件化（ズレ防止。既定 very_close=150m）
-        distance: { method: 'radius', level: hint.level || 'very_close', profile: null, minutes: null, meters: null },
-      };
-      await this._narrowWithin(schema, [cond], { [hint.landmark]: hint.items });
-      return;
-    }
-
-    const delta = await this.llm.parseRefinement(schema, hint, this._langCode());
-    if (!delta) { this.ui.showL0Message?.(this._m().err_understand); return; }
     const validTypes = SCHEMA_ENUMS.condition_type;
-    const addConds = delta.add_conditions.filter(c => c && validTypes.includes(c.type));
+    let result = await this._applyOrParseHint(schema, hint, validTypes);
+    if (result.handled) return;
+    let { delta, addConds } = result;
+
+    // 自由文が「絞り込む」等の意図表明だけ（ボタンを押したのと同内容）で、具体的な絞り込み
+    // 内容を伴わない場合：parseRefinementは何も抽出できずここに来る。以前はそのまま
+    // err_understandで終わっていたが、それはボタンを押した場合の体験（ask_hintで聞き直す）
+    // と食い違うバグだった。presetHintを使った1回目に限り、聞き直しを一度だけ挟む。
+    const isEmptyDelta = !delta ||
+      (!addConds.length && !delta.remove_condition_texts.length && !delta.new_target && !delta.new_proximity);
+    if (usedPresetHint && isEmptyDelta) {
+      hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
+      if (!hint) { this.ui.showL0Message?.(this._m().confirmed); this._resetCache(); return; }
+      this.ui.thinking?.(this._m().thinkingNarrow);
+      result = await this._applyOrParseHint(schema, hint, validTypes);
+      if (result.handled) return;
+      ({ delta, addConds } = result);
+    }
+
+    if (!delta) { this.ui.showL0Message?.(this._m().err_understand); return; }
 
     // ── narrow: filter WITHIN the already-surfaced Target candidates (pool fixed,
     // target NOT re-collected). Purely additive — only new conditions apply. ──
@@ -2601,6 +2601,33 @@ class QueryEngine {
     this.ui.showL0Message?.(this._criteriaSummary(merged));
 
     await this._executeSearch(merged, this._previousText);
+  }
+
+  /**
+   * ヒント1件を解決する。階数/目印サジェスト（オブジェクト）なら即座に処理して
+   * { handled: true } を返す（呼び出し元は続けてreturnする）。通常の自由文なら
+   * parseRefinementしてdelta/addConds（未処理）を { handled: false, delta, addConds } で返す。
+   */
+  async _applyOrParseHint(schema, hint, validTypes) {
+    // 階数サジェスト選択 → その階数の候補だけに絞る（再検索せず表示中の候補をフィルタ）。
+    if (hint && typeof hint === 'object' && hint.floors != null) {
+      await this._narrowByFloors(schema, hint.floors);
+      return { handled: true };
+    }
+    // Chosen agent suggestion → use the KNOWN poi items directly (no parse, no re-query).
+    if (hint && typeof hint === 'object' && hint.landmark) {
+      const cond = {
+        type: 'poi', text: hint.landmark, query_intent: 'specific', queries: [hint.landmark],
+        direction: null,
+        // 探索・文言と同じレベルで条件化（ズレ防止。既定 very_close=150m）
+        distance: { method: 'radius', level: hint.level || 'very_close', profile: null, minutes: null, meters: null },
+      };
+      await this._narrowWithin(schema, [cond], { [hint.landmark]: hint.items });
+      return { handled: true };
+    }
+    const delta = await this.llm.parseRefinement(schema, hint, this._langCode());
+    const addConds = delta ? delta.add_conditions.filter(c => c && validTypes.includes(c.type)) : [];
+    return { handled: false, delta, addConds };
   }
 
   /**
