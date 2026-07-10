@@ -2384,7 +2384,9 @@ class QueryEngine {
     }
 
     const hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
-    if (!hint) return;
+    // スキップ＝もう情報を出さない＝「終了する」と同義。無言で終わらせず、doneと同じ一言＋
+    // キャッシュリセットをする（以前は何も表示せず会話が唐突に途切れるバグだった）。
+    if (!hint) { this.ui.showL0Message?.(this._m().confirmed); this._resetCache(); return; }
     this.ui.thinking?.(this._m().thinkingNarrow); // 絞り込み計算中も考え中表示
 
     // 階数サジェスト選択 → その階数の候補だけに絞る（再検索せず表示中の候補をフィルタ）。
