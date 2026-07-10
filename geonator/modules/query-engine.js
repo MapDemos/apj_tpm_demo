@@ -501,6 +501,9 @@ class QueryEngine {
     this._reachHole     = null;
     this._withinReachM  = null;
     this._withinNote    = null;
+    this._reachSources  = null; // Matrix順位付け用の起点（駅なら出口＋中心）。収集・ゲートには使わない
+    this._reachMinutes  = null; // 徒歩n分の n（スコアスケール用）
+    this._reachProfile  = null;
     let bbox = null;
     // NOTE: 以前は within指定時に複数点（駅の出入口）を重心1点へ集約していたが、これだと
     // 「入谷駅から徒歩1分」の到達圏が駅中心1個からのisochroneになり、出口寄りの候補を
@@ -521,7 +524,11 @@ class QueryEngine {
         if (reach.tooLarge) this._withinNote = this._m().reachTooLarge(minMin, prof, schema.proximity.anchors?.[0]?.text || '');
       }
     } else if (maxMin != null) {
-      // n分以内: isochrone内に絞る
+      // n分以内: isochrone内に絞る（収集・ゲートは従来どおり）。
+      // ＋Matrix順位付け用に起点(出口＋中心)・分・profileを保持（収集/bbox/ゲートは変えない・純粋な追加）。
+      this._reachSources = resolvedPoints.map(p => ({ lng: p.lng, lat: p.lat })).filter(p => p.lng != null && p.lat != null);
+      this._reachMinutes = maxMin;
+      this._reachProfile = prof;
       const reach = await this.mcp.isochroneReach(resolvedPoints, maxMin, prof);
       if (reach.bbox) { bbox = reach.bbox; this._reachPolygons = reach.polygons; }
       else { const rm = maxMin * (SPEED[prof] || SPEED.walking); resolvedPoints.forEach(p => { p.radiusM = rm; }); this._withinReachM = Math.round(rm); }
@@ -1910,6 +1917,22 @@ class QueryEngine {
     }
   }
 
+  /** proximity.within=徒歩n分 の候補に、Matrix API の実移動時間(秒・生値/丸めない)を _reachSec へ注記する。
+   *  【足切りはしない】＝候補の集合は変えず、anchorScore の順位付けにのみ使う。
+   *  travelMatrix が null（全滅/cap/座標無し）を返したら何も注記しない → 全候補が直線距離にフォールバック
+   *  （基準を混ぜない）。部分取得できた候補だけ _reachSec が入る。 */
+  async _annotateMatrixTimes(items, sources, profile) {
+    const idx = [], dests = [];
+    items.forEach((it, i) => {
+      const lng = it.longitude ?? it.lng, lat = it.latitude ?? it.lat;
+      if (lng != null && lat != null) { idx.push(i); dests.push({ lng, lat }); }
+    });
+    if (!dests.length) return;
+    const durs = await this.mcp.travelMatrix(sources, dests, profile);
+    if (!durs) return; // 全滅 → 注記なし＝全員直線距離で統一
+    idx.forEach((itemIdx, k) => { if (durs[k] != null) items[itemIdx]._reachSec = durs[k]; });
+  }
+
   // ─────────────────────────────────────────────
   // [3-C] Step2: evaluate distances
   // ─────────────────────────────────────────────
@@ -1989,6 +2012,12 @@ class QueryEngine {
       if (mainCandidates.length === 0) return { full: [], partial: [], none: [] };
     }
 
+    // [Matrix scoring] 徒歩n分の候補に実移動時間(秒)を注記（足切りせず順位付けのみ）。mainCandidates は
+    // ここでハード条件・floors 適用後の最終集合＝Matrixコール数が最小。失敗時は直線距離にフォールバック。
+    if (this._reachMinutes != null && this._reachSources?.length) {
+      await this._annotateMatrixTimes(mainCandidates, this._reachSources, this._reachProfile);
+    }
+
     // conditionTracker: candidateId → { total, hit, closenessSum }
     const tracker = new Map();
     for (const c of mainCandidates) {
@@ -2011,6 +2040,12 @@ class QueryEngine {
     // anchorScore = proximityアンカーからの近さ。c.distance(アンカー中心からの距離) と
     // this._anchorRefM(target収集bbox半径) から算出。距離不明なら null（重みから除外）。
     const anchorScore = c => {
+      // 徒歩n分：Matrix実移動時間(秒・生値/丸めない)があればそれで近さを測る。線形スケール
+      // 1 - reachSec/(n分×60)（0秒=1.0, 上限=0, 範囲外clamp）。無ければ従来の直線距離。
+      if (c._reachSec != null && this._reachMinutes != null) {
+        const limitSec = Math.max(1, this._reachMinutes * 60);
+        return Math.max(0, Math.min(1, 1 - c._reachSec / limitSec));
+      }
       const d = c.distance;
       if (d == null || !this._anchorRefM) return null;
       return Math.max(0, Math.min(1, 1 - d / this._anchorRefM));
