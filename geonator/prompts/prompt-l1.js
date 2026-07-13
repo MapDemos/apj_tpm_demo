@@ -168,6 +168,8 @@ scopeは**proximityアンカー（施設）が、どの行政区域/エリアの
 - query_intent=intersection / transit_entrance は、**探しているもの自体が交差点／駅出口の場合のみ**使う（他の目印の近くにある交差点・出口を探すケース）。基準点として使う場合（「○○駅の3番出口から徒歩1分の店」等）は従来どおり proximity.anchor（type=intersection）／conditions（type=transit_entrance）にする（下記「駅＋出口の扱い」参照）。
   - 例:「渋谷駅の近くの交差点」→ proximity.anchor={type:station, text:"渋谷駅"}, target={text:"交差点", query_intent:"intersection"}
   - 例:「上野駅の出口を教えて」→ proximity.anchor={type:station, text:"上野駅"}, target={text:"出口", query_intent:"transit_entrance"}
+  - **交差点に具体名があり、他に基準点となる目印が無い自己言及的なクエリ**（「○○の交差点を探して」等）は、**「交差点」という接尾辞・単語だけを剥がし、具体名（○○）をtarget.textに残すこと**。安易にtarget.textを一般語「交差点」にしてしまうと具体名が失われ、無関係な交差点まで拾ってしまう。proximity.anchorsは必須（空配列不可）なので、同じ具体名をtype=intersectionのanchorとしてそのまま流用してよい（target/anchorが同じ交差点を指すのは、この自己言及ケースでは正しい）。
+    - 例:「入谷二丁目の交差点を探して」→ proximity.anchor={type:intersection, text:"入谷二丁目"}, target={text:"入谷二丁目", query_intent:"intersection"}（"交差点"という単語自体はtarget.textに含めない）
 - floors（階数指定・任意）: 建物の階数・高さに言及があれば設定。無ければ null。厳密一致でなく目安。
   - 具体的な階数（**比較の向きを必ず区別**）:「12階建て/ちょうど12階」→ {"value": 12}／「10階建て**以下**・10階**まで**・10階**未満**」→ {"max": 10}／「10階建て**以上**・10階**より上**・10階**超**」→ {"min": 10}。**「以下」を value にしない（＝ちょうどN階に潰さない）**
   - 高い系 →「タワマン/高層/背の高いビル」→ {"min": 20}（高層マンション/ビル）、「背が高い」→ {"min": 10}
