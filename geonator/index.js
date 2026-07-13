@@ -81,6 +81,9 @@ class LocationFinderApp {
       // 2b. 処理ビュー（tool-status/proc-note吹き出し）ON/OFF。既定ON（詳細モード）。
       this._processingViewOff = this._readUIPref('processingViewOff', false);
 
+      // 2c. 会話エージェント(L0)の音声読み上げ（ブラウザTTS）。既定OFF。
+      this._voiceOn = this._readUIPref('voiceOn', false);
+
       // 3. Wire up UI event listeners
       this._setupEventListeners();
 
@@ -331,6 +334,38 @@ class LocationFinderApp {
     this._persistUIPref({ processingViewOff: this._processingViewOff });
   }
 
+  /** トグル。会話エージェント(L0)の吹き出しをブラウザのText-to-Speechで読み上げるか。
+   *  既定OFF。純粋な表示層の追加機能で、エンジンの判定・検索ロジックには一切触れない。 */
+  _toggleVoice() {
+    this._setVoiceOn(!this._voiceOn);
+  }
+
+  _setVoiceOn(on) {
+    this._voiceOn = !!on;
+    const btn = document.getElementById('voiceToggleBtn');
+    if (btn) btn.textContent = this._voiceOn ? LANG[this._lang].voiceOn : LANG[this._lang].voiceOff;
+    this._persistUIPref({ voiceOn: this._voiceOn });
+    if (!this._voiceOn) { try { window.speechSynthesis?.cancel(); } catch (_) {} }
+  }
+
+  /** L0の発話テキストをブラウザTTSで読み上げる（_voiceOn時のみ・失敗しても無視＝会話フローに影響なし）。
+   *  会話吹き出し用のMarkdown軽量記法(**太字**・`code`・改行)を読み上げ前に平文化する。 */
+  _speak(text) {
+    if (!this._voiceOn || !text || typeof window.speechSynthesis === 'undefined') return;
+    try {
+      const plain = String(text)
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/`(.*?)`/g, '$1')
+        .replace(/\n+/g, ' ')
+        .trim();
+      if (!plain) return;
+      window.speechSynthesis.cancel(); // 前の発話が残っていれば打ち切って新しい発話を優先
+      const u = new SpeechSynthesisUtterance(plain);
+      u.lang = this._lang === 'en' ? 'en-US' : 'ja-JP';
+      window.speechSynthesis.speak(u);
+    } catch (_) {}
+  }
+
   /** 地図OFF時に候補パネルへ差し込む静的地図URL（Static Images API）。上位5件をティア色ピンで。
    *  色は共有 TIER_STYLE、bbox は1次検索の _lastResultBbox を使い、interactive と表示を揃える。 */
   _buildStaticMapUrl(candidates) {
@@ -494,6 +529,7 @@ class LocationFinderApp {
       // L0（会話マネジメント）の発話。既存の assistant とは別ロール・別スタイルで表示する。
       showL0Message(text) {
         self.addMessage('l0', text);
+        self._speak(text);
       },
       // 処理エージェント発の申し送り事項（除外条件・rail/地下鉄の扱い等）。会話ではなく
       // エンジンの決定的な注記なので、L0とは別の処理エージェント系スタイル(アンバー)で表示する。
@@ -1162,6 +1198,9 @@ class LocationFinderApp {
     // 処理ビュー ON/OFF（OFFでtool-status/proc-note吹き出しを隠す）。設定は localStorage に永続化。
     document.getElementById('processingViewToggleBtn')?.addEventListener('click', () => this._toggleProcessingView());
     this._setProcessingViewOff(this._processingViewOff); // 起動時のDOM反映（bool は initialize() で確定済み）
+
+    document.getElementById('voiceToggleBtn')?.addEventListener('click', () => this._toggleVoice());
+    this._setVoiceOn(this._voiceOn); // 起動時のDOM反映（bool は initialize() で確定済み）
 
     // Example chips
     document.querySelectorAll('.example-chip').forEach(btn => {
@@ -2892,6 +2931,9 @@ class LocationFinderApp {
     if (mapBtn) mapBtn.textContent = this._mapOff ? t.mapShow : t.mapHide;
     const procViewBtn = document.getElementById('processingViewToggleBtn');
     if (procViewBtn) procViewBtn.textContent = this._processingViewOff ? t.procViewOff : t.procViewOn;
+
+    const voiceBtn = document.getElementById('voiceToggleBtn');
+    if (voiceBtn) voiceBtn.textContent = this._voiceOn ? t.voiceOn : t.voiceOff;
     // （キャンセルボタンは処理中に動的生成する吹き出しなのでここでは扱わない）
 
     // Examples label
@@ -3061,6 +3103,8 @@ const LANG = {
     mapShow:       '🗺 地図表示ON',
     procViewOn:    '🔧 処理ビュー ON',
     procViewOff:   '🔧 処理ビュー OFF',
+    voiceOn:       '🔊 音声読み上げ ON',
+    voiceOff:      '🔊 音声読み上げ OFF',
     staticMapCap:  '上位5件まで表示',
     staticMapAlt:  '検索結果の地図（上位5件）',
     staticMapLoading: '地図を読み込み中…',
@@ -3193,6 +3237,8 @@ const LANG = {
     mapShow:       '🗺 Map ON',
     procViewOn:    '🔧 Processing View ON',
     procViewOff:   '🔧 Processing View OFF',
+    voiceOn:       '🔊 Voice ON',
+    voiceOff:      '🔊 Voice OFF',
     staticMapCap:  'Showing up to top 5',
     staticMapAlt:  'Result map (top 5)',
     staticMapLoading: 'Loading map…',

@@ -149,16 +149,21 @@ class QueryEngine {
 
     // L0にschemaの決定的な事実だけを渡して自然文で復唱させる（推測ではなく確定事実の言い換え）。
     // 失敗/空ならL1自身のconfirmationにフォールバックし、無言にはしない。
+    // このLLM呼び出し(Sonnet既定)は復唱を表示するだけで後続の検索処理は内容を参照しないため、
+    // await で検索開始をブロックしない（実際の検索=Search Box/Tilequery/L2等の方が大抵長くかかり、
+    // その裏に隠れる。schema確定"後"にしか呼ばない点は維持＝先走り発話バグの再発防止はそのまま）。
     if (!confirmShown) {
+      confirmShown = true;
       const summary = this._buildSchemaSummary(schema);
-      let confirmText = '';
-      try { confirmText = await this.llm.confirmSchema?.(summary, this._langCode(), this._convHistory); } catch {}
-      if (!confirmText) confirmText = schema.confirmation || '';
-      if (confirmText) {
-        confirmShown = true;
-        this._recordTurn('l0', confirmText);
-        this.ui.showL0Message?.(confirmText);
-      }
+      (async () => {
+        let confirmText = '';
+        try { confirmText = await this.llm.confirmSchema?.(summary, this._langCode(), this._convHistory); } catch {}
+        if (!confirmText) confirmText = schema.confirmation || '';
+        if (confirmText) {
+          this._recordTurn('l0', confirmText);
+          this.ui.showL0Message?.(confirmText);
+        }
+      })();
     }
 
     // 除外事項は表示された確認文(Haiku/Sonnet いずれか)に載らないことがあるため、JS側で決定的に
