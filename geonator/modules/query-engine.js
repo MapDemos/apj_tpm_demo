@@ -608,7 +608,7 @@ class QueryEngine {
     } else if (minMin != null) {
       // n分以上（m分以内）: 内側isoの外を残す。外側は iso(m).bbox / 拡張bbox / 広すぎなら既定bbox。
       const defaultBbox = this.mcp.resolveBBox({ points: resolvedPoints, marginM: 0 });
-      const reach = await this.mcp.computeWithinReach(resolvedPoints[0], { minMinutes: minMin, maxMinutes: maxMin, profile: prof }, defaultBbox);
+      const reach = await this.mcp.computeWithinReach(resolvedPoints[0], { minMinutes: minMin, maxMinutes: maxMin, profile: prof }, defaultBbox, this.config.useIsochrone !== false);
       if (reach?.bbox) {
         bbox = reach.bbox; this._reachHole = reach.hole;
         // 外側(m分)polygon があれば候補も「リング内」に絞る（bbox矩形の隅漏れ防止）。無ければ従来通りbboxのみ。
@@ -621,7 +621,7 @@ class QueryEngine {
       this._reachSources = resolvedPoints.map(p => ({ lng: p.lng, lat: p.lat })).filter(p => p.lng != null && p.lat != null);
       this._reachMinutes = maxMin;
       this._reachProfile = prof;
-      const reach = await this.mcp.isochroneReach(resolvedPoints, maxMin, prof);
+      const reach = await this.mcp.isochroneReach(resolvedPoints, maxMin, prof, this.config.useIsochrone !== false);
       if (reach.bbox) { bbox = reach.bbox; this._reachPolygons = reach.polygons; }
       else { const rm = maxMin * (SPEED[prof] || SPEED.walking); resolvedPoints.forEach(p => { p.radiusM = rm; }); this._withinReachM = Math.round(rm); }
     } else if (maxMet != null) {

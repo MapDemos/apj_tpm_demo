@@ -13,6 +13,9 @@
  * Requires: spatial-utils.js, config.js already loaded.
  */
 
+// useIsochrone=false時のturf.circle近似で使う速度換算（m/min）。
+const REACH_SPEED_M_PER_MIN = { walking: 80, cycling: 250, driving: 500 };
+
 class MapboxMCPClient {
 
   /**
@@ -2129,14 +2132,23 @@ class MapboxMCPClient {
 
   /**
    * 複数アンカー点の等時間ポリゴンをまとめ、外接bboxと各ポリゴンを返す。
+   * useIsochrone=false時は実APIを呼ばず、turf.circle近似（速度換算）を使う。
    * @returns {Promise<{ bbox: number[]|null, polygons: object[] }>}
    */
-  async isochroneReach(points, minutes, profile = 'walking') {
-    // 各点（駅の複数出口など）のisochroneを並列取得して union（出口ごとに1コール・cacheあり）。
-    const polys = await Promise.all(
-      (points || []).map(p => this.getIsochronePolygon(p.lat, p.lng, minutes, profile))
-    );
-    const polygons = polys.filter(Boolean);
+  async isochroneReach(points, minutes, profile = 'walking', useIsochrone = true) {
+    let polygons;
+    if (!useIsochrone) {
+      const radiusKm = (minutes * (REACH_SPEED_M_PER_MIN[profile] || REACH_SPEED_M_PER_MIN.walking)) / 1000;
+      polygons = (points || [])
+        .filter(p => p && p.lng != null && p.lat != null)
+        .map(p => turf.circle(turf.point([p.lng, p.lat]), radiusKm, { units: 'kilometers', steps: 32 }));
+    } else {
+      // 各点（駅の複数出口など）のisochroneを並列取得して union（出口ごとに1コール・cacheあり）。
+      const polys = await Promise.all(
+        (points || []).map(p => this.getIsochronePolygon(p.lat, p.lng, minutes, profile))
+      );
+      polygons = polys.filter(Boolean);
+    }
     if (!polygons.length) return { bbox: null, polygons: [] };
     let bb = turf.bbox(polygons[0]);
     for (let i = 1; i < polygons.length; i++) {
@@ -2221,14 +2233,23 @@ class MapboxMCPClient {
 
   /** within の「n分以上(m分以内)」用の探索範囲を計算。
    *  戻り値 { bbox, hole, tooLarge }：bbox=収集範囲、hole=内側iso(この外を残す)、
-   *  tooLarge=内側isoが既定bboxを覆うほど大きい（=範囲広すぎ→既定bboxで探索）。 */
-  async computeWithinReach(point, spec, defaultBbox) {
+   *  tooLarge=内側isoが既定bboxを覆うほど大きい（=範囲広すぎ→既定bboxで探索）。
+   *  useIsochrone=false時は実APIを呼ばず、turf.circle近似（速度換算）を使う。 */
+  async computeWithinReach(point, spec, defaultBbox, useIsochrone = true) {
     const { minMinutes, maxMinutes, profile = 'walking' } = spec || {};
     if (!point || minMinutes == null) return null;
-    const inner = await this.getIsochronePolygon(point.lat, point.lng, minMinutes, profile);
+    const circleFor = (minutes) => {
+      const radiusKm = (minutes * (REACH_SPEED_M_PER_MIN[profile] || REACH_SPEED_M_PER_MIN.walking)) / 1000;
+      return turf.circle(turf.point([point.lng, point.lat]), radiusKm, { units: 'kilometers', steps: 32 });
+    };
+    const inner = useIsochrone
+      ? await this.getIsochronePolygon(point.lat, point.lng, minMinutes, profile)
+      : circleFor(minMinutes);
     if (!inner) return null;
     if (maxMinutes != null) { // ドーナツ: 外側=iso(m)、内側=iso(n)で除外
-      const outer = await this.getIsochronePolygon(point.lat, point.lng, maxMinutes, profile);
+      const outer = useIsochrone
+        ? await this.getIsochronePolygon(point.lat, point.lng, maxMinutes, profile)
+        : circleFor(maxMinutes);
       if (!outer) return null;
       // outer polygon も返す：候補を「外側(m分)内 ∧ 内側(n分)外」＝リングに絞るため（bbox矩形だけだと隅が漏れる）
       return { bbox: turf.bbox(outer), hole: inner, outer, tooLarge: false };
