@@ -463,7 +463,10 @@ class QueryEngine {
           this.ui.thinking?.(this._m().thinkingCollect);
           this.ui.drawNarrowBBox?.(tight.bbox); // 絞り込み後の検索bbox（debug時のみ）
           this.mcp._gridCircles = []; this.mcp._gridCirclesSkipped = []; // 絞込後グリッドだけ描く
-          const re = await this._collectCandidates(schema, { targetBbox: tight.bbox, condBbox: bboxes.condBbox });
+          // condBboxも絞込後のtargetBboxから再計算する（絞込前の広いbboxのままだと、条件収集が
+          // 不要に広い範囲までTilequery/SearchBoxを叩いてしまう＝効率のみの問題で正しさには影響しない）。
+          const tightBboxes = this._computeDualBbox({ bbox: tight.bbox }, schema);
+          const re = await this._collectCandidates(schema, { targetBbox: tight.bbox, condBbox: tightBboxes.condBbox });
           if (re) collected = re;
         }
         // no resolution (user skipped / nothing found) → proceed with the capped set.

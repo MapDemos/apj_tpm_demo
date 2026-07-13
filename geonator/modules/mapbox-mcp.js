@@ -1783,7 +1783,9 @@ class MapboxMCPClient {
       `?access_token=${this.token}&steps=false&overview=false&alternatives=false`;
 
     try {
-      const res  = await this._fetchTilequeryWithCache(url);
+      // Directions APIはTilequeryではないため、TQリクエスト数の計測(_tqRequests等)を
+      // 汚染しないよう_fetchTilequeryWithCacheではなく素のリトライ付きfetchを使う。
+      const res  = await this._fetchWithRetry(url);
       if (!res.ok) return JSON.stringify({ error: `Directions API ${res.status}` });
       const data = await res.json();
 
