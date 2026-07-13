@@ -141,6 +141,11 @@ class LocationFinderApp {
       if (b.sameBuilding === 'hard' || b.sameBuilding === 'soft') this.config.SAME_BUILDING_MODE = b.sameBuilding;
       if (b.floors === 'hard' || b.floors === 'soft')             this.config.FLOORS_MODE       = b.floors;
     } catch (_) {}
+    // Distance judgement mode: isochrone(既定・正確) or circle approximation(高速)
+    try {
+      const b = JSON.parse(localStorage.getItem('geonator_distance') || '{}');
+      if (typeof b.useIsochrone === 'boolean') this.config.useIsochrone = b.useIsochrone;
+    } catch (_) {}
 
     const l0Sel  = document.getElementById('l0ModelSelect');
     const l1Sel  = document.getElementById('l1ModelSelect');
@@ -154,6 +159,7 @@ class LocationFinderApp {
     const fragMaxSel = document.getElementById('fragmentMergeMaxTriesSelect');
     const sbModeSel  = document.getElementById('sameBuildingModeSelect');
     const flModeSel  = document.getElementById('floorsModeSelect');
+    const isoSel     = document.getElementById('useIsochroneSelect');
     const modal  = document.getElementById('settingsModal');
     if (l0Sel)  l0Sel.value  = this.config.L0_MODEL;
     if (l1Sel)  l1Sel.value  = this.config.L1_MODEL;
@@ -167,6 +173,7 @@ class LocationFinderApp {
     if (fragMaxSel) fragMaxSel.value = String(this.config.FRAGMENT_MERGE_MAX_TRIES);
     if (sbModeSel) sbModeSel.value = this.config.SAME_BUILDING_MODE ?? 'hard';
     if (flModeSel) flModeSel.value = this.config.FLOORS_MODE ?? 'hard';
+    if (isoSel) isoSel.value = this.config.useIsochrone === false ? 'off' : 'on';
     this._markRecommendedModels(); // 各役割の推奨モデルに「（推奨）」を付す
 
     const persist = () => {
@@ -187,6 +194,9 @@ class LocationFinderApp {
     const persistJudge = () => {
       try { localStorage.setItem('geonator_judge', JSON.stringify({ sameBuilding: this.config.SAME_BUILDING_MODE, floors: this.config.FLOORS_MODE })); } catch (_) {}
     };
+    const persistDistance = () => {
+      try { localStorage.setItem('geonator_distance', JSON.stringify({ useIsochrone: this.config.useIsochrone })); } catch (_) {}
+    };
     l0Sel?.addEventListener('change',  e => { this.config.L0_MODEL   = e.target.value; persist(); });
     l1Sel?.addEventListener('change',  e => { this.config.L1_MODEL   = e.target.value; persist(); });
     l1cSel?.addEventListener('change', e => { this.config.L1_CONFIRM_MODEL = e.target.value; persist(); });
@@ -199,6 +209,7 @@ class LocationFinderApp {
     fragMaxSel?.addEventListener('change', e => { this.config.FRAGMENT_MERGE_MAX_TRIES = parseInt(e.target.value, 10); persistSearch(); });
     sbModeSel?.addEventListener('change', e => { this.config.SAME_BUILDING_MODE = e.target.value; persistJudge(); });
     flModeSel?.addEventListener('change', e => { this.config.FLOORS_MODE       = e.target.value; persistJudge(); });
+    isoSel?.addEventListener('change', e => { this.config.useIsochrone = e.target.value !== 'off'; persistDistance(); });
 
     // Tab switching (基本 / スコア / 判定方式)
     const tabs  = Array.from(document.querySelectorAll('.settings-tab'));
@@ -230,6 +241,7 @@ class LocationFinderApp {
       this.config.FRAGMENT_MERGE_MAX_TRIES = 5;    // default fragment-merge give-up threshold
       this.config.SAME_BUILDING_MODE = 'hard';     // default: hard filter
       this.config.FLOORS_MODE        = 'hard';     // default: hard filter
+      this.config.useIsochrone       = true;       // default: isochrone(正確)
       if (l0Sel)  l0Sel.value  = MODEL_DEFAULTS.L0;
       if (l1Sel)  l1Sel.value  = MODEL_DEFAULTS.L1;
       if (l1cSel) l1cSel.value = MODEL_DEFAULTS.L1c;
@@ -242,7 +254,8 @@ class LocationFinderApp {
       if (fragMaxSel) fragMaxSel.value = '5';
       if (sbModeSel) sbModeSel.value = 'hard';
       if (flModeSel) flModeSel.value = 'hard';
-      try { localStorage.removeItem('geonator_models'); localStorage.removeItem('geonator_l2_1'); localStorage.removeItem('geonator_search'); localStorage.removeItem('geonator_judge'); } catch (_) {}
+      if (isoSel) isoSel.value = 'on';
+      try { localStorage.removeItem('geonator_models'); localStorage.removeItem('geonator_l2_1'); localStorage.removeItem('geonator_search'); localStorage.removeItem('geonator_judge'); localStorage.removeItem('geonator_distance'); } catch (_) {}
       this._resetScoring?.(); // weights + decisiveness (defined in _initScoringSettings)
     });
 

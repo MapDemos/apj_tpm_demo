@@ -2239,6 +2239,9 @@ class QueryEngine {
       }
 
       const distParams = resolveDistanceParams(cond.distance, this.config.DEFAULT_LEVEL);
+      // ユーザー設定でisochroneをOFFにしている場合、円近似(turf.circle)に強制フォールバック
+      // （既定はON=現状維持。config.useIsochroneが明示的にfalseの時だけ上書き）。
+      if (this.config.useIsochrone === false) distParams.useIsochrone = false;
       const refM = distParams.radiusM
         ?? (distParams.minutes ? distParams.minutes * (speed[distParams.profile] || 80) : 250);
 
@@ -2538,13 +2541,17 @@ class QueryEngine {
       }
     }
 
+    // 「探し直す」と「絞り込む」で聞き方・考え中表示の文言を変える（以前は共通文言で、探し直す
+    // を選んでも「絞り込んでいます」と出るバグだった）。
+    const askHintKey = effectiveAction === 'narrow' ? 'ask_hint' : 'ask_hint_research';
+    const thinkingKey = effectiveAction === 'narrow' ? 'thinkingNarrow' : 'thinkingResearch';
     // 自由文で既にヒントを得ている場合はshowHintInputを呼ばない（二度聞き防止）。
-    let hint = presetHint ?? await this.ui.showHintInput(this._m().ask_hint, suggestions);
+    let hint = presetHint ?? await this.ui.showHintInput(this._m()[askHintKey], suggestions);
     const usedPresetHint = presetHint != null;
     // スキップ＝もう情報を出さない＝「終了する」と同義。無言で終わらせず、doneと同じ一言＋
     // キャッシュリセットをする（以前は何も表示せず会話が唐突に途切れるバグだった）。
     if (!hint) { this.ui.showL0Message?.(this._m().confirmed); this._resetCache(); return; }
-    this.ui.thinking?.(this._m().thinkingNarrow); // 絞り込み計算中も考え中表示
+    this.ui.thinking?.(this._m()[thinkingKey]); // 絞り込み/探し直し計算中も考え中表示
 
     const validTypes = SCHEMA_ENUMS.condition_type;
     let result = await this._applyOrParseHint(schema, hint, validTypes);
@@ -2558,9 +2565,9 @@ class QueryEngine {
     const isEmptyDelta = !delta ||
       (!addConds.length && !delta.remove_condition_texts.length && !delta.new_target && !delta.new_proximity);
     if (usedPresetHint && isEmptyDelta) {
-      hint = await this.ui.showHintInput(this._m().ask_hint, suggestions);
+      hint = await this.ui.showHintInput(this._m()[askHintKey], suggestions);
       if (!hint) { this.ui.showL0Message?.(this._m().confirmed); this._resetCache(); return; }
-      this.ui.thinking?.(this._m().thinkingNarrow);
+      this.ui.thinking?.(this._m()[thinkingKey]);
       result = await this._applyOrParseHint(schema, hint, validTypes);
       if (result.handled) return;
       ({ delta, addConds } = result);
@@ -2770,6 +2777,7 @@ const MESSAGES = {
     ask_target:           '何をお探しですか？',
     which_interpretation: 'どの意図に近いですか？下から選ぶか、言い方を変えて教えてください。',
     ask_hint:             'さらに絞り込む情報を教えてください（例：出口番号、近くの交差点名、建物の特徴など）。',
+    ask_hint_research:    'どんな場所を探し直しますか？別の地点や条件を教えてください。',
     confirmed:            'ありがとうございました。またお気軽にご相談ください。',
     welcome:              '探している場所を教えてください。近くの駅名・施設名・住所と、条件（近くのお店・道路など）を一緒に伝えていただくと絞り込めます。',
     no_condition_match:   '条件に完全一致する候補はありませんでしたが、候補を参考として地図に表示しています。',
@@ -2804,6 +2812,7 @@ const MESSAGES = {
     thinkingCollect: '候補を集めています',
     thinkingEval:    '条件との距離を評価しています',
     thinkingNarrow:  '絞り込んでいます',
+    thinkingResearch:'探し直しています',
     droppedConditions: list => `なお、条件が多いため「${list}」は今回の検索には含めていません。`,
     unsupportedFeatures: list => `「${list}」は地図データから判定できないため条件に含めず、それ以外の分かる範囲で探索します。`,
     railSubwayNote: () => `「線路沿い」は地下鉄など地下を通る路線も線路とみなして検索します（地上の線路だけには限定できません）。`,
@@ -2815,6 +2824,7 @@ const MESSAGES = {
     ask_target:           'What are you looking for?',
     which_interpretation: 'Which did you mean? Pick one below, or rephrase it.',
     ask_hint:             'Add details to narrow it down (e.g. exit number, nearby intersection, building features).',
+    ask_hint_research:    'What would you like to search for instead? Tell me a different place or condition.',
     confirmed:            'Thank you. Feel free to ask anytime.',
     welcome:              'Tell me the location you are looking for. Share a nearby station, facility, or address, plus conditions (nearby stores, roads, etc.).',
     no_condition_match:   'No candidate fully matched the conditions, but candidates are shown on the map for reference.',
@@ -2849,6 +2859,7 @@ const MESSAGES = {
     thinkingCollect: 'Gathering candidates',
     thinkingEval:    'Evaluating distances & conditions',
     thinkingNarrow:  'Narrowing down',
+    thinkingResearch:'Searching again',
     droppedConditions: list => `Note: to keep the search focused, "${list}" ${/,/.test(list) ? 'are' : 'is'} not included in this search.`,
     unsupportedFeatures: list => `"${list}" cannot be determined from map data, so ${/,/.test(list) ? 'they are' : 'it is'} excluded — I search using the rest of what you gave.`,
     railSubwayNote: () => `For "along a railway", underground lines such as subways are also treated as railways (surface-only lines cannot be isolated).`,

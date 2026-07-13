@@ -263,6 +263,17 @@
       </label>
       <div class="settings-hint" id="set-judge-note" style="margin-top:12px">※ ハードは条件を満たさない候補を除外、ソフトは満たすほど加点します。判定不能（建物データ無し等）の候補は除外しません。変更は次の検索から反映されます。</div>
 
+      <div class="settings-divider"></div>
+
+      <label class="settings-row">
+        <span id="set-isochrone-row">徒歩/自転車/車のn分判定</span>
+        <select id="useIsochroneSelect">
+          <option id="set-iso-on" value="on">等時線（isochrone・正確）</option>
+          <option id="set-iso-off" value="off">円近似（circle・高速）</option>
+        </select>
+      </label>
+      <div class="settings-hint" id="set-isochrone-note" style="margin-top:12px">※ 円近似は道路形状を無視した直線距離ベースの概算。API呼び出しが減り高速だが、川や線路で迂回が必要な場所では精度が落ちます。変更は次の検索から反映されます。</div>
+
       </div><!-- /tabpage judge -->
 
       <div class="settings-actions">

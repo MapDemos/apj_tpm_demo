@@ -9,7 +9,7 @@
 const CONFIG = {
 
   // ビルド確認用バージョン（キャッシュで古いJSを読んでいないかの切り分けに使う）。変更ごとに更新。
-  APP_VERSION: '2026-07-13.1446',
+  APP_VERSION: '2026-07-13.1457',
 
   // ============================================
   // API KEYS
@@ -92,6 +92,7 @@ const CONFIG = {
   // ============================================
 
   DEFAULT_LEVEL:       'very_close', // distance level when user gives no distance expression
+  useIsochrone:        true,         // false時は徒歩/自転車/車のn分判定をturf.circle近似に強制フォールバック（⚙️設定画面でON/OFF切替可）
   MAX_CLARIFY_TURNS:   3,            // max clarification loops before best-effort (HH)
   FRAGMENT_MERGE_MAX_TRIES: 5,       // 断片的な発話合成(_markFragmentaryAttempt)の連続失敗上限。超えたら諦めてリセット。設定画面で変更可(3-7)
   API_TIMEOUT_MS:      8000,         // per-API-call timeout in ms (GG)
