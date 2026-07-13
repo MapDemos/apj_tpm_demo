@@ -435,6 +435,48 @@ class LLMClient {
   }
 
   // ─────────────────────────────────────────────
+  // L2-DEDUP: name-based duplicate consolidation for coordinate-clustered candidates
+  // (座標が至近距離のクラスタだけをJS側で作り、ここでは名前の意味判定のみ行う)
+  // ─────────────────────────────────────────────
+
+  /**
+   * For each cluster of candidates that are already known to be within a few meters of
+   * each other (JS-side geometric filter — this function does NOT see coordinates),
+   * decide which ones are the same real-world place by name. Conservative: on any
+   * failure, returns null and the caller must keep all candidates as distinct
+   * (same fail-safe convention as filterCategories/rateCandidates).
+   * @param {Array<{key:string, names:string[]}>} clusters
+   * @returns {Promise<Object|null>} { [key]: number[][] } merge groups (indices into names), or null on failure
+   */
+  async dedupCandidateClusters(clusters) {
+    if (!clusters || clusters.length === 0) return {};
+    if (typeof PROMPT_L2_DEDUP === 'undefined') return null;
+    try {
+      const payload = clusters.map(c => ({ key: c.key, names: c.names }));
+      const result = await this._callClaude(
+        {
+          system: PROMPT_L2_DEDUP,
+          user: `グループ:\n${JSON.stringify(payload, null, 0)}\n\n各グループについて、同一の実在場所を指すとみなせる名前の組だけを merge に入れて {"<key>":{"merge":[[i,j],...]}, ...} 形式で返してください。迷ったら統合しない。JSONのみ。`,
+        },
+        400,
+        this.config.L2_1_MODEL, // カテゴリ判定と同程度の軽量な意味判定のためL2-1と同じモデルを流用
+        'L2_1',
+        { cacheSystem: true }
+      );
+      const json = this._extractJSON(result);
+      if (!json) return null;
+      const out = {};
+      for (const c of clusters) {
+        const r = json[c.key];
+        out[c.key] = Array.isArray(r?.merge) ? r.merge : [];
+      }
+      return out;
+    } catch {
+      return null; // parse/call failure → caller keeps all candidates distinct
+    }
+  }
+
+  // ─────────────────────────────────────────────
   // L2-2: target relevance check on candidates (name-based, 4-level)
   // ─────────────────────────────────────────────
 

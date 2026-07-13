@@ -1187,8 +1187,12 @@ class QueryEngine {
    *  2) proximity dedup: when a candidate WITH a store suffix (…店) and one WITHOUT are
    *     within ~30m and share the brand (storeless name is a prefix), drop the storeless
    *     one — it's the same physical place with a less specific entry.
+   *  3) pass1/2で漏れる「無関係/欠損名」（例:「コーヒー」だけの重複エントリ）向け。座標が10m以内
+   *     (=ほぼ同一地点)のクラスタだけをJSで決定的に作り、そのクラスタ内の名前の同一性判定だけを
+   *     LLMに委ねる（幾何=決定的・意味=LLM、の二段構成）。LLM呼び出し失敗時は統合せず全件残す
+   *     （誤って別の店舗を1件に統合するのを避ける・L2-1/L2-2と同じfail-safe）。
    */
-  _dedupTargets(cands) {
+  async _dedupTargets(cands) {
     if (!cands || cands.length <= 1) return cands;
     const norm     = s => (s || '').normalize('NFKC').replace(/[\s　]+/g, '').toLowerCase();
     const hasStore = s => /店$/.test((s || '').trim());
@@ -1231,7 +1235,47 @@ class QueryEngine {
         }
       }
     }
-    const out = kept.filter(c => !removed.has(c.id));
+    let out = kept.filter(c => !removed.has(c.id));
+
+    // pass 3: 10m以内クラスタの名前同一性をLLMに判定させる（残存候補が対象・座標クラスタ化はJS決定的）。
+    const DEDUP_LLM_M = 10;
+    const clusters = []; // { key, items:[candidate,...] }
+    const clustered = new Set();
+    for (let i = 0; i < out.length; i++) {
+      if (clustered.has(out[i].id)) continue;
+      const group = [out[i]];
+      for (let j = i + 1; j < out.length; j++) {
+        if (clustered.has(out[j].id)) continue;
+        if (distM(out[i], out[j]) <= DEDUP_LLM_M) group.push(out[j]);
+      }
+      if (group.length >= 2) {
+        group.forEach(c => clustered.add(c.id));
+        clusters.push({ key: `g${clusters.length}`, items: group });
+      }
+    }
+    if (clusters.length > 0 && this.llm?.dedupCandidateClusters) {
+      const resp = await this.llm.dedupCandidateClusters(
+        clusters.map(c => ({ key: c.key, names: c.items.map(it => it.name || '') }))
+      );
+      if (resp) {
+        const removed3 = new Set();
+        for (const c of clusters) {
+          const merges = resp[c.key] || [];
+          for (const pair of merges) {
+            const [ia, ib] = pair;
+            const a = c.items[ia], b = c.items[ib];
+            if (!a || !b || removed3.has(a.id) || removed3.has(b.id)) continue;
+            // 名前が長い(より具体的な)方を残す。同点ならアンカーからの距離が近い方。
+            const na = (a.name || '').length, nb = (b.name || '').length;
+            const drop = na === nb ? ((a.distance ?? 9e9) <= (b.distance ?? 9e9) ? b : a) : (na >= nb ? b : a);
+            removed3.add(drop.id);
+          }
+        }
+        if (removed3.size) out = out.filter(c => !removed3.has(c.id));
+      }
+      // resp === null（LLM失敗）は何もしない＝全件残す（fail-safe）。
+    }
+
     if (this.config.DEBUG && out.length < cands.length) {
       console.log(`[QueryEngine] target dedup: ${cands.length} → ${out.length}`);
     }
@@ -1759,7 +1803,7 @@ class QueryEngine {
     let mainRaw = await this.mcp.collectTarget(target, targetBbox, sharedGrid);
     this._pf('　└ target収集（Search Box＋TQ）', _tt);
     mainRaw = this._applyBuildingNameRules(target, mainRaw);
-    mainRaw = this._dedupTargets(mainRaw); // [pre-scoring] drop duplicate candidates (see method)
+    mainRaw = await this._dedupTargets(mainRaw); // [pre-scoring] drop duplicate candidates (see method)
 
     // proximity.within=isochrone: hard-limit targets to the reachable polygon ("徒歩n分以内")。
     // reachRaw: 到達圏内に絞ったあとの生件数。過密(overflow)判定はこの数で行う（膨らんだ

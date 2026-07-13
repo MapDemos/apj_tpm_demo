@@ -9,7 +9,7 @@
 const CONFIG = {
 
   // ビルド確認用バージョン（キャッシュで古いJSを読んでいないかの切り分けに使う）。変更ごとに更新。
-  APP_VERSION: '2026-07-13.1501',
+  APP_VERSION: '2026-07-13.1517',
 
   // ============================================
   // API KEYS
@@ -36,7 +36,7 @@ const CONFIG = {
   L1_MODEL:        'claude-haiku-4-5-20251001', // query parsing（proximity/target切り分け・intent等）
   L1_CONFIRM_MODEL:'claude-haiku-4-5-20251001', // 高速確認文（L1と並行・真っ先に「〜を探しますね」）※L0導入後は非活性
   // L2-1 = category妥当性チェック（poi_category/class）／L2-2 = Target関連性（名前ベース4段階）
-  L2_1_MODEL:      'claude-haiku-4-5-20251001', // category validity
+  L2_1_MODEL:      'claude-haiku-4-5-20251001', // category validity。同モデルで座標10m以内クラスタの重複統合(_dedupTargets pass3)も行う
   L2_2_MODEL:      'claude-sonnet-4-6',         // target relevance（名前ニュアンス判定→Sonnet既定）
   L3_MODEL:        'claude-haiku-4-5-20251001', // 絞り込み提案（近傍ランドマークから目印提案）
   // L1-3 = 広域proximityの絞り込み提案（例:「鎌倉市」→ 鎌倉駅/北鎌倉/材木座…を世界知識から列挙）。

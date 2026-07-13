@@ -157,14 +157,14 @@
       </label>
       <div class="settings-modelwhy" id="set-l1_3-why">proximityが広すぎる時（例:「鎌倉市」）に、その中の知名度が高い駅・エリアを世界知識から列挙して絞り込み候補を提案。実在検証はJSが行うので、実在する地名を精度良く挙げる力が要る → Sonnet推奨。</div>
       <label class="settings-row">
-        <span id="set-l2_1-label">L2-1（通常クエリの関連性・カテゴリ）</span>
+        <span id="set-l2_1-label">L2-1（通常クエリの関連性・カテゴリ / 重複統合）</span>
         <select id="l2_1ModelSelect">
           <option value="claude-sonnet-4-6">Sonnet 4.6</option>
           <option value="claude-sonnet-5">Sonnet 5</option>
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
         </select>
       </label>
-      <div class="settings-modelwhy" id="set-l2_1-why">カテゴリの分野判断（ラーメン屋＝「レストラン>和食」を残す等）にニュアンスが要る → Sonnet推奨。</div>
+      <div class="settings-modelwhy" id="set-l2_1-why">カテゴリの分野判断（ラーメン屋＝「レストラン>和食」を残す等）にニュアンスが要る → Sonnet推奨。同じモデルで、座標が10m以内の候補クラスタの名前重複統合（Search Box/Tilequery由来の表記ゆれ「コーヒー」等）も行う。</div>
       <label class="settings-row">
         <span id="set-l2_2-label">L2-2（Targetの関連性）</span>
         <select id="l2_2ModelSelect">
