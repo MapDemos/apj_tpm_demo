@@ -1187,29 +1187,32 @@ class QueryEngine {
 
   /**
    * Pre-scoring dedup of Target candidates (too many dups inflate ties / hurt scoring).
+   * JS-only, no LLM (cheap) — runs early on the full raw collection, before CANDIDATE_LIMIT
+   * slicing, so obvious duplicates don't waste slots in the cap.
    *  1) same normalized name (NFKC + strip spaces, case-insensitive) → keep one
    *     (prefer a 店-suffixed/branch name, else the one closer to the anchor).
    *  2) proximity dedup: when a candidate WITH a store suffix (…店) and one WITHOUT are
    *     within ~30m and share the brand (storeless name is a prefix), drop the storeless
    *     one — it's the same physical place with a less specific entry.
-   *  3) pass1/2で漏れる「無関係/欠損名」（例:「コーヒー」だけの重複エントリ）向け。座標が10m以内
-   *     (=ほぼ同一地点)のクラスタだけをJSで決定的に作り、そのクラスタ内の名前の同一性判定だけを
-   *     LLMに委ねる（幾何=決定的・意味=LLM、の二段構成）。LLM呼び出し失敗時は統合せず全件残す
-   *     （誤って別の店舗を1件に統合するのを避ける・L2-1/L2-2と同じfail-safe）。
+   * The fuzzy LLM-based pass (3) that used to run here now runs later, on the much
+   * smaller L2-2 kept set — see _dedupTargetClusters.
    */
-  async _dedupTargets(cands) {
+  /** Haversine distance in meters between two candidates (lat/lng or latitude/longitude). */
+  _distM(a, b) {
+    const la = a.latitude ?? a.lat, lna = a.longitude ?? a.lng;
+    const lb = b.latitude ?? b.lat, lnb = b.longitude ?? b.lng;
+    if (la == null || lna == null || lb == null || lnb == null) return Infinity;
+    const R = 6371000, toRad = d => d * Math.PI / 180;
+    const dLat = toRad(lb - la), dLng = toRad(lnb - lna);
+    const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(la)) * Math.cos(toRad(lb)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+  }
+
+  _dedupTargets(cands) {
     if (!cands || cands.length <= 1) return cands;
     const norm     = s => (s || '').normalize('NFKC').replace(/[\s　]+/g, '').toLowerCase();
     const hasStore = s => /店$/.test((s || '').trim());
-    const distM = (a, b) => {
-      const la = a.latitude ?? a.lat, lna = a.longitude ?? a.lng;
-      const lb = b.latitude ?? b.lat, lnb = b.longitude ?? b.lng;
-      if (la == null || lna == null || lb == null || lnb == null) return Infinity;
-      const R = 6371000, toRad = d => d * Math.PI / 180;
-      const dLat = toRad(lb - la), dLng = toRad(lnb - lna);
-      const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(la)) * Math.cos(toRad(lb)) * Math.sin(dLng / 2) ** 2;
-      return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
-    };
+    const distM = (a, b) => this._distM(a, b);
 
     // pass 1: exact normalized-name dedup
     const byName = new Map();
@@ -1240,49 +1243,65 @@ class QueryEngine {
         }
       }
     }
-    let out = kept.filter(c => !removed.has(c.id));
+    const out = kept.filter(c => !removed.has(c.id));
 
-    // pass 3: 10m以内クラスタの名前同一性をLLMに判定させる（残存候補が対象・座標クラスタ化はJS決定的）。
+    if (this.config.DEBUG && out.length < cands.length) {
+      console.log(`[QueryEngine] target dedup (JS pass1/2): ${cands.length} → ${out.length}`);
+    }
+    return out;
+  }
+
+  /**
+   * pass 3（旧_dedupTargets内）: 10m以内クラスタの名前同一性をLLMに判定させる
+   * （座標クラスタ化はJS決定的・意味判定だけLLMに委ねる）。pass1/2で漏れる「無関係/欠損名」
+   * （例:「コーヒー」だけの重複エントリ）向け。LLM呼び出し失敗時は統合せず全件残す
+   * （誤って別の店舗を1件に統合するのを避ける・L2-1と同じfail-safe）。
+   * L2-2(名前関連性)完了後のkept（既にカテゴリ・関連性で絞られた小さい母集団）に対して
+   * 呼ぶ設計——生の全収集件数に対してだと母集団が大きくクラスタも増え、呼び出しが重くなる上
+   * ほとんどのクラスタはどのみち関連性フィルタで片方が落ちて解消するため無駄が多かった。
+   */
+  async _dedupTargetClusters(cands) {
+    if (!cands || cands.length <= 1) return cands;
     const DEDUP_LLM_M = 10;
     const clusters = []; // { key, items:[candidate,...] }
     const clustered = new Set();
-    for (let i = 0; i < out.length; i++) {
-      if (clustered.has(out[i].id)) continue;
-      const group = [out[i]];
-      for (let j = i + 1; j < out.length; j++) {
-        if (clustered.has(out[j].id)) continue;
-        if (distM(out[i], out[j]) <= DEDUP_LLM_M) group.push(out[j]);
+    for (let i = 0; i < cands.length; i++) {
+      if (clustered.has(cands[i].id)) continue;
+      const group = [cands[i]];
+      for (let j = i + 1; j < cands.length; j++) {
+        if (clustered.has(cands[j].id)) continue;
+        if (this._distM(cands[i], cands[j]) <= DEDUP_LLM_M) group.push(cands[j]);
       }
       if (group.length >= 2) {
         group.forEach(c => clustered.add(c.id));
         clusters.push({ key: `g${clusters.length}`, items: group });
       }
     }
-    if (clusters.length > 0 && this.llm?.dedupCandidateClusters) {
-      const resp = await this.llm.dedupCandidateClusters(
-        clusters.map(c => ({ key: c.key, names: c.items.map(it => it.name || '') }))
-      );
-      if (resp) {
-        const removed3 = new Set();
-        for (const c of clusters) {
-          const merges = resp[c.key] || [];
-          for (const pair of merges) {
-            const [ia, ib] = pair;
-            const a = c.items[ia], b = c.items[ib];
-            if (!a || !b || removed3.has(a.id) || removed3.has(b.id)) continue;
-            // 名前が長い(より具体的な)方を残す。同点ならアンカーからの距離が近い方。
-            const na = (a.name || '').length, nb = (b.name || '').length;
-            const drop = na === nb ? ((a.distance ?? 9e9) <= (b.distance ?? 9e9) ? b : a) : (na >= nb ? b : a);
-            removed3.add(drop.id);
-          }
-        }
-        if (removed3.size) out = out.filter(c => !removed3.has(c.id));
-      }
-      // resp === null（LLM失敗）は何もしない＝全件残す（fail-safe）。
-    }
+    if (clusters.length === 0 || !this.llm?.dedupCandidateClusters) return cands;
 
+    let out = cands;
+    const resp = await this.llm.dedupCandidateClusters(
+      clusters.map(c => ({ key: c.key, names: c.items.map(it => it.name || '') }))
+    );
+    if (resp) {
+      const removed3 = new Set();
+      for (const c of clusters) {
+        const merges = resp[c.key] || [];
+        for (const pair of merges) {
+          const [ia, ib] = pair;
+          const a = c.items[ia], b = c.items[ib];
+          if (!a || !b || removed3.has(a.id) || removed3.has(b.id)) continue;
+          // 名前が長い(より具体的な)方を残す。同点ならアンカーからの距離が近い方。
+          const na = (a.name || '').length, nb = (b.name || '').length;
+          const drop = na === nb ? ((a.distance ?? 9e9) <= (b.distance ?? 9e9) ? b : a) : (na >= nb ? b : a);
+          removed3.add(drop.id);
+        }
+      }
+      if (removed3.size) out = out.filter(c => !removed3.has(c.id));
+    }
+    // resp === null（LLM失敗）は何もしない＝全件残す（fail-safe）。
     if (this.config.DEBUG && out.length < cands.length) {
-      console.log(`[QueryEngine] target dedup: ${cands.length} → ${out.length}`);
+      console.log(`[QueryEngine] target dedup (LLM pass3, post-L2-2): ${cands.length} → ${out.length}`);
     }
     return out;
   }
@@ -1808,7 +1827,7 @@ class QueryEngine {
     let mainRaw = await this.mcp.collectTarget(target, targetBbox, sharedGrid);
     this._pf('　└ target収集（Search Box＋TQ）', _tt);
     mainRaw = this._applyBuildingNameRules(target, mainRaw);
-    mainRaw = await this._dedupTargets(mainRaw); // [pre-scoring] drop duplicate candidates (see method)
+    mainRaw = this._dedupTargets(mainRaw); // [pre-scoring] cheap JS-only dedup (see method). LLM-based pass3 runs later, after L2-2.
 
     // proximity.within=isochrone: hard-limit targets to the reachable polygon ("徒歩n分以内")。
     // reachRaw: 到達圏内に絞ったあとの生件数。過密(overflow)判定はこの数で行う（膨らんだ
@@ -1881,8 +1900,14 @@ class QueryEngine {
         condResults[key] = keptCond;
       }),
     ]);
-    const { kept, excludedNames } = mainRated;
+    let { kept, excludedNames } = mainRated;
     this._pf('　└ L2-2 名前関連性・target＋条件（並列/LLM）', _t22);
+
+    // 重複統合（pass3・LLM意味判定）: 生収集直後ではなく、L2-2で関連性フィルタ済みの小さい
+    // 母集団に対して行う（母集団が小さいほどクラスタも減り軽い・モデルもL2_2_MODELを流用）。
+    const _t2dedup = this._pnow();
+    kept = await this._dedupTargetClusters(kept);
+    this._pf('　└ L2-2 重複統合（座標クラスタ+LLM意味判定）', _t2dedup);
 
     // Debug: target + condition collection breakdown
     const tdbg = this.mcp._lastTargetDebug || null;

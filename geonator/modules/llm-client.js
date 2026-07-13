@@ -435,8 +435,9 @@ class LLMClient {
   }
 
   // ─────────────────────────────────────────────
-  // L2-DEDUP: name-based duplicate consolidation for coordinate-clustered candidates
+  // L2-2 DEDUP: name-based duplicate consolidation for coordinate-clustered candidates
   // (座標が至近距離のクラスタだけをJS側で作り、ここでは名前の意味判定のみ行う)
+  // L2-2(名前関連性)完了後の絞られた母集団に対して呼ばれる想定（呼び出し元コメント参照）。
   // ─────────────────────────────────────────────
 
   /**
@@ -459,8 +460,8 @@ class LLMClient {
           user: `グループ:\n${JSON.stringify(payload, null, 0)}\n\n各グループについて、同一の実在場所を指すとみなせる名前の組だけを merge に入れて {"<key>":{"merge":[[i,j],...]}, ...} 形式で返してください。迷ったら統合しない。JSONのみ。`,
         },
         400,
-        this.config.L2_1_MODEL, // カテゴリ判定と同程度の軽量な意味判定のためL2-1と同じモデルを流用
-        'L2_1',
+        this.config.L2_2_MODEL, // 「同一店舗か」の名前ニュアンス判定はL2-2(名前関連性)と同種のタスク→同モデルを流用
+        'L2_2',
         { cacheSystem: true }
       );
       const json = this._extractJSON(result);
