@@ -125,7 +125,6 @@ body { display: flex; flex-direction: column; }
   flex-direction: column;
   gap: 8px;
 }
-.hint-question { font-size: 13px; color: var(--text-1); line-height: 1.55; }
 /* 「💭 追加情報のお願い（n回）」: 旧・話者ラベル位置から本文先頭行へ移設 */
 .hint-title { font-weight: 700; font-size: 12px; color: var(--text-1); margin-bottom: 2px; }
 .hint-input {

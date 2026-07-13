@@ -37,7 +37,6 @@ class LocationFinderApp {
     // Debug step mode
     this._debugMode       = false;
     this._debugStepResolve = null;
-    this._debugPauseCount = 0;
 
     // 吹き出しラベルのLINE風グルーピング：直前の話者カテゴリ('user'|'l0'|'proc'|'error')。
     // 同じカテゴリが連続する時はラベルを省略する（_appendAgentLabel参照）。
@@ -599,8 +598,8 @@ class LocationFinderApp {
       // Tilequeryグリッド（各収集点の半径円）をデバッグ地図に描画。デバッグモード時のみ。
       // skipped = 穴skip等で問い合わせなかった点（別スタイルで表示）。
       drawGrid(circles, skipped) {
-        console.log('[drawGrid] called', { debug: self._debugMode, mapActive: self._mapActive(), hasDbg: !!self._dbg, circles: circles?.length, skipped: skipped?.length });
         if (!self._debugMode || !self._mapActive() || !self._dbg) return;
+        console.log('[drawGrid] called', { debug: self._debugMode, mapActive: self._mapActive(), hasDbg: !!self._dbg, circles: circles?.length, skipped: skipped?.length });
         self._drawGridCircles(circles, skipped);
       },
       drawPolygons(features) {
@@ -1821,85 +1820,6 @@ class LocationFinderApp {
   }
 
   /**
-   * add_candidate_markers
-   * Plots pins for each candidate POI. match_level determined mechanically from
-   * _conditionTracker. Sorted by proximity distance (no arbitrary LLM ranking).
-   */
-  addCandidateMarkers(places) {
-    this.candidateMarkers.forEach(m => m.remove());
-    this.candidateMarkers = [];
-
-    const totalConditions = this._conditionTracker.length;
-
-    // Mechanical match_level + distance from proximity
-    const processed = places.map(place => {
-      let matchLevel = place.match_level || 'partial';
-      if (totalConditions > 0) {
-        const passed = this._conditionTracker.filter(s => s.has(place.name)).length;
-        matchLevel = passed === totalConditions ? 'full' : 'partial';
-      }
-      return { ...place, match_level: matchLevel };
-    }).sort((a, b) => {
-      // full before partial, same-level order preserved
-      if (a.match_level === 'full' && b.match_level !== 'full') return -1;
-      if (a.match_level !== 'full' && b.match_level === 'full') return 1;
-      return 0;
-    });
-
-    processed.forEach((place) => {
-      const isFull = place.match_level === 'full';
-      const badgeClass = isFull ? 'match-full' : 'match-partial';
-      const badgeLabel = isFull ? '🟢 条件合致' : '🟡 一部合致';
-
-      const el = document.createElement('div');
-      el.className = `candidate-marker ${isFull ? 'priority-1' : 'priority-2'}`;
-      // 番号なし - バッジのみ
-      el.title = place.name;
-
-      const popupHTML =
-        `<div class="${badgeClass}">${badgeLabel}</div>` +
-        `<strong>${_esc(place.name)}</strong>` +
-        (place.address ? `<div class="popup-address">${_esc(place.address)}</div>` : '') +
-        (place.reason  ? `<div class="popup-reason">💡 ${_esc(place.reason)}</div>` : '');
-
-      const popup = new mapboxgl.Popup({ offset: 30, closeButton: false })
-        .setHTML(popupHTML);
-
-      const marker = new mapboxgl.Marker({ element: el })
-        .setLngLat(_safeLL(place.longitude, place.latitude))
-        .setPopup(popup)
-        .addTo(this.map);
-
-      el.addEventListener('click', () => marker.togglePopup());
-      this.candidateMarkers.push(marker);
-    });
-
-    if (processed.length === 1) {
-      this.map.flyTo({ center: [processed[0].longitude, processed[0].latitude], zoom: 16, duration: 1000 });
-    } else if (processed.length > 1) {
-      const bounds = processed.reduce(
-        (b, p) => b.extend([p.longitude, p.latitude]),
-        new mapboxgl.LngLatBounds(
-          [processed[0].longitude, processed[0].latitude],
-          [processed[0].longitude, processed[0].latitude]
-        )
-      );
-      this.map.fitBounds(bounds, { padding: 90, maxZoom: 17, duration: 1200 });
-    }
-
-    // Auto-open first full-match candidate
-    const firstFull = processed.findIndex(p => p.match_level === 'full');
-    const autoOpen = firstFull >= 0 ? firstFull : 0;
-    if (processed.length >= 2 && this.candidateMarkers[autoOpen]) {
-      setTimeout(() => this.candidateMarkers[autoOpen].togglePopup(), 1400);
-    }
-
-    const fullCount    = processed.filter(p => p.match_level === 'full').length;
-    const partialCount = processed.filter(p => p.match_level === 'partial').length;
-    return `条件合致${fullCount}件、一部合致${partialCount}件を地図にプロット`;
-  }
-
-  /**
    * clear_map_elements
    * Removes all search-boundary polygons and candidate markers.
    */
@@ -1945,54 +1865,6 @@ class LocationFinderApp {
 
     this._finalizedDuringLoop = true; // ループ終了後にパネルを表示するフラグ
     return `確定: ${address} [${lat}, ${lng}]`;
-  }
-
-  _showResolutionPanel() {
-    document.getElementById('resolutionPanel')?.remove();
-
-    const container = document.getElementById('chatMessages');
-    const wrapper = document.createElement('div');
-    wrapper.id = 'resolutionPanel';
-    wrapper.className = 'message resolution-panel';
-    wrapper.innerHTML = `
-      <div class="resolution-buttons">
-        <button class="resolution-btn ok" id="resBtn-ok">✅ OK確定</button>
-        <button class="resolution-btn retry" id="resBtn-retry">🔄 やり直し</button>
-        <button class="resolution-btn give-up" id="resBtn-giveup">⏹ 諦める</button>
-      </div>
-    `;
-    container.appendChild(wrapper);
-    container.scrollTop = container.scrollHeight;
-
-    document.getElementById('resBtn-ok').addEventListener('click', () => {
-      wrapper.remove();
-      document.getElementById('mapStatus').textContent = '✅ 捜索完了';
-      this._disableInput();
-    });
-
-    document.getElementById('resBtn-retry').addEventListener('click', () => {
-      wrapper.remove();
-      if (this.finalMarker) { this.finalMarker.remove(); this.finalMarker = null; }
-      document.getElementById('mapStatus').textContent = '地図の準備ができました';
-      this._enableInput();
-    });
-
-    document.getElementById('resBtn-giveup').addEventListener('click', () => {
-      wrapper.remove();
-      document.getElementById('mapStatus').textContent = '⏹ 未解決';
-      this._disableInput();
-    });
-  }
-
-  _disableInput() {
-    document.getElementById('chatInput').disabled = true;
-    document.getElementById('sendBtn').disabled = true;
-  }
-
-  _enableInput() {
-    document.getElementById('chatInput').disabled = false;
-    document.getElementById('sendBtn').disabled = false;
-    document.getElementById('chatInput').focus();
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -2508,36 +2380,6 @@ class LocationFinderApp {
     return `エリアをポリゴンで表示しました（${candidates.length}候補を包含）`;
   }
 
-  _drawIsochroneLayer({ polygon, anchorLat, anchorLng, minutes, radiusMeters, profile }) {
-    const idx = this._mapLayerRegistry.length;
-    const p   = `iso-${idx}`;
-
-    this.map.addSource(`${p}-poly`, { type: 'geojson', data: polygon });
-    this.map.addLayer({ id: `${p}-fill`, type: 'fill', source: `${p}-poly`,
-      paint: { 'fill-color': '#8b5cf6', 'fill-opacity': 0.12 } });
-    this.map.addLayer({ id: `${p}-line`, type: 'line', source: `${p}-poly`,
-      paint: { 'line-color': '#a78bfa', 'line-width': 2, 'line-dasharray': [4, 2] } });
-
-    const center = turf.centroid(polygon);
-    const [cLng, cLat] = center.geometry.coordinates;
-    this.map.addSource(`${p}-lbl`, { type: 'geojson', data: {
-      type: 'FeatureCollection',
-      features: [{ type: 'Feature',
-        geometry: { type: 'Point', coordinates: [cLng, cLat] },
-        properties: { label: radiusMeters != null ? `${radiusMeters}m圏内` : `${minutes}分 (${profile === 'driving' ? '車' : '徒歩'})` } }],
-    }});
-    this.map.addLayer({ id: `${p}-sym`, type: 'symbol', source: `${p}-lbl`,
-      layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-anchor': 'center',
-                'text-allow-overlap': true, 'text-ignore-placement': true },
-      paint: { 'text-color': '#a78bfa', 'text-halo-color': 'rgba(8,13,26,0.9)', 'text-halo-width': 1.5 } });
-
-    this._mapLayerRegistry.push({
-      layers:  [{ id: `${p}-fill`, type: 'fill' }, { id: `${p}-line`, type: 'line' }, { id: `${p}-sym`, type: 'symbol' }],
-      sources: [`${p}-poly`, `${p}-lbl`],
-      gen:     this._mapGen,
-    });
-  }
-
   _removeProbableArea() {
     ['probable-area-label', 'probable-area-fill', 'probable-area-line'].forEach(id => {
       try { this.map.removeLayer(id); } catch(_) {}
@@ -2546,109 +2388,6 @@ class LocationFinderApp {
       try { this.map.removeSource(id); } catch(_) {}
     });
     this._probableAreaActive = false;
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Map computation visualization
-  // ─────────────────────────────────────────────────────────────
-
-  /** Show map-side feedback while a tool is executing. */
-  _showMapComputing(toolName, args) {
-    const overlay = document.getElementById('mapComputing');
-    const text    = document.getElementById('mapComputingText');
-    const status  = document.getElementById('mapStatus');
-
-    const labels = {
-      get_midpoint_area:        `🗺 中間地点を計算中… (${args.placeA} ↔ ${args.placeB})`,
-      search_nearby_poi:        `🔍 POI検索中… (${(Array.isArray(args.queries) ? args.queries : [args.queries].filter(Boolean)).slice(0,2).join(' / ')})`,
-      scan_street_features:     `📡 半径 ${args.radius}m をスキャン中…`,
-      draw_search_boundary:     '📐 検索範囲を描画中…',
-      add_candidate_markers:    '📌 候補ピンを配置中…',
-      clear_map_elements:       '🧹 マップをクリア中…',
-      finalize_location_marker: '✅ 確定地点をマーク中…',
-    };
-
-    const msg = labels[toolName] || `${toolName} 実行中…`;
-    if (text)   text.textContent   = msg;
-    if (status) status.textContent = msg;
-    if (overlay) overlay.style.display = 'flex';
-
-    // Draw Tilequery radius circles on the map
-    if (toolName === 'scan_street_features' && args.lat && args.lng) {
-      const meta = { tool: toolName, turn: this._currentTurn, params: `r=${args.radius}m | target=${args.target || 'both'}` };
-      this._drawScanCircle(args.lat, args.lng, args.radius, 'amber', meta);
-      this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 14), duration: 800 });
-    }
-
-    if (toolName === 'scan_natural_features' && args.lat && args.lng) {
-      const meta = { tool: toolName, turn: this._currentTurn, params: `r=${args.radius}m` };
-      this._drawScanCircle(args.lat, args.lng, args.radius, 'amber', meta);
-      this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
-    }
-
-    if (toolName === 'get_facing_road' && args.lat && args.lng) {
-      const meta = { tool: toolName, turn: this._currentTurn, params: 'r=50m (自動拡張)' };
-      this._drawScanCircle(args.lat, args.lng, 50, 'amber', meta);
-      this.map.flyTo({ center: [args.lng, args.lat], zoom: Math.max(this.map.getZoom(), 16), duration: 600 });
-    }
-
-    if (toolName === 'evaluate_distance' && args.anchor_lat && args.anchor_lng) {
-      this.map.flyTo({ center: [args.anchor_lng, args.anchor_lat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
-    }
-
-    // search_nearby_poi: fly to proximity, draw all Tilequery grid circles
-    if (toolName === 'search_nearby_poi' && args.proximity?.length >= 2) {
-      const [pLng, pLat] = args.proximity;
-      this._lastProximity = [pLng, pLat]; // track for distance sorting
-      this.map.flyTo({ center: [pLng, pLat], zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
-      // radius_metersからbboxを計算（MCP側と同じロジック）
-      let vizBbox = args.bbox;
-      if (args.radius_meters != null && !vizBbox) {
-        const r    = Math.min(args.radius_meters, 400);
-        const dLng = r / (111320 * Math.cos(pLat * Math.PI / 180));
-        const dLat = r / 110540;
-        vizBbox = [pLng - dLng, pLat - dLat, pLng + dLng, pLat + dLat];
-        // radius_meters使用時はClaudeがdraw_search_boundaryを呼べないため自動描画
-        this.drawSearchBoundary(vizBbox);
-      }
-
-      if (vizBbox?.length === 4) {
-        // Replicate _gridTilequeryPOI grid logic (with inset) to show actual scan circles
-        const [minX, minY, maxX, maxY] = vizBbox;
-        const gridRadius = 200;
-        const spacingM   = gridRadius * 1.5;
-        const DEG_LNG    = 1 / (111320 * Math.cos(pLat * Math.PI / 180));
-        const DEG_LAT    = 1 / 110540;
-        const radiusLng  = gridRadius * DEG_LNG;
-        const radiusLat  = gridRadius * DEG_LAT;
-        const gMinX = minX + radiusLng, gMaxX = maxX - radiusLng;
-        const gMinY = minY + radiusLat, gMaxY = maxY - radiusLat;
-        const qs = Array.isArray(args.queries) ? args.queries.slice(0, 2).join(', ') + (args.queries.length > 2 ? '…' : '') : '';
-        const gridMeta = { tool: toolName, turn: this._currentTurn, params: `r=200m${qs ? ` | ${qs}` : ''}` };
-
-        if (gMinX >= gMaxX || gMinY >= gMaxY) {
-          this._drawScanCircle((minY + maxY) / 2, (minX + maxX) / 2, gridRadius, 'cyan', gridMeta);
-        } else {
-          const widthM  = (gMaxX - gMinX) / DEG_LNG;
-          const heightM = (gMaxY - gMinY) / DEG_LAT;
-          const nx = Math.max(1, Math.ceil(widthM  / spacingM) + 1);
-          const ny = Math.max(1, Math.ceil(heightM / spacingM) + 1);
-          for (let iy = 0; iy < ny; iy++) {
-            for (let ix = 0; ix < nx; ix++) {
-              const gLng = nx === 1 ? (gMinX + gMaxX) / 2 : gMinX + ix * (gMaxX - gMinX) / (nx - 1);
-              const gLat = ny === 1 ? (gMinY + gMaxY) / 2 : gMinY + iy * (gMaxY - gMinY) / (ny - 1);
-              this._drawScanCircle(gLat, gLng, gridRadius, 'cyan', gridMeta);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  /** Remove map computation visuals after a tool completes. */
-  _hideMapComputing() {
-    const overlay = document.getElementById('mapComputing');
-    if (overlay) overlay.style.display = 'none';
   }
 
   /** Show a popup with layer metadata (tool, turn, params). */
@@ -3106,118 +2845,6 @@ class LocationFinderApp {
     });
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Debug step mode
-  // ─────────────────────────────────────────────────────────────
-
-  /**
-   * Pause the agentic loop until the user clicks "▶ 次のステップへ".
-   * Shows a summary of the tool call + result in the chat.
-   */
-  _debugPause(toolName, toolInput, resultStr) {
-    return new Promise(resolve => {
-      this._debugStepResolve = resolve;
-
-      // Build result summary for display
-      let summary = '';
-      try {
-        const r = JSON.parse(resultStr);
-        if (typeof r === 'string') {
-          summary = r.slice(0, 60);
-        } else if (r.count != null) {
-          summary = `${r.count}件取得（${r.source || ''}）`;
-        } else if (r.found != null) {
-          summary = r.found
-            ? `検出: ${r.primary_road?.name || r.road_classes || '不明'}`
-            : '未検出';
-        } else if (r.matching_count != null) {
-          summary = `経路沿い ${r.matching_count}件 / 除外 ${(r.excluded_pois||[]).length}件`;
-        } else if (r.error) {
-          summary = `エラー: ${r.error}`;
-        } else {
-          summary = JSON.stringify(r).slice(0, 80);
-        }
-      } catch(_) { summary = String(resultStr).slice(0, 80); }
-
-      // Build input summary
-      let inputSummary = '';
-      try {
-        const inp = toolInput || {};
-        if (inp.queries)  inputSummary = `queries: [${(inp.queries || []).slice(0,2).join(', ')}…]`;
-        else if (inp.lat) inputSummary = `lat=${inp.lat?.toFixed(4)}, lng=${inp.lng?.toFixed(4)}, r=${inp.radius}m`;
-        else if (inp.placeA) inputSummary = `${inp.placeA} ↔ ${inp.placeB}`;
-        else if (inp.from_lat) inputSummary = `from→to, profile=${inp.profile}`;
-        else if (inp.bbox) inputSummary = `bbox=[${(inp.bbox||[]).map(v=>v.toFixed(3)).join(',')}]`;
-      } catch(_) {}
-
-      // Create pause message element
-      const pauseId = `debug-next-${this._debugPauseCount++}`;
-
-      // Build tabs HTML for search_nearby_poi
-      let tabsHtml = '';
-      if (toolName === 'search_nearby_poi') {
-        try {
-          const r = JSON.parse(resultStr);
-          const dbg = r._debug;
-          if (dbg) {
-            const renderList = (items) => (items || []).length
-              ? (items || []).map(i => `<div class="debug-poi-item"><span class="debug-poi-name">${_esc(i.name)}</span><span class="debug-poi-dist">${i.distance ?? '-'}m</span></div>`).join('')
-              : '<div class="debug-poi-empty">0件</div>';
-
-            tabsHtml = `
-              <div class="debug-tabs">
-                <div class="debug-tab-bar">
-                  <button class="debug-tab active" data-tab="sb">Search Box (${dbg.sb_count})</button>
-                  <button class="debug-tab" data-tab="tq">Tilequery (${dbg.tq_count})</button>
-                  <button class="debug-tab" data-tab="all">合計 (${r.count})</button>
-                </div>
-                <div class="debug-tab-content" id="${pauseId}-tab-sb">${renderList(dbg.sb_items)}</div>
-                <div class="debug-tab-content" id="${pauseId}-tab-tq" style="display:none">${renderList(dbg.tq_items)}</div>
-                <div class="debug-tab-content" id="${pauseId}-tab-all" style="display:none">${renderList([...(dbg.sb_items||[]), ...(dbg.tq_items||[])])}</div>
-              </div>
-            `;
-          }
-        } catch(_) {}
-      }
-      const container = document.getElementById('chatMessages');
-      const wrapper = document.createElement('div');
-      wrapper.className = 'message debug-pause';
-      wrapper.innerHTML = `
-        <div class="msg-label">⏸ デバッグ停止</div>
-        <div class="debug-pause-bubble">
-          <div class="debug-tool-name">${getToolLabel(toolName, this._lang)}</div>
-          ${inputSummary ? `<div class="debug-input-summary">入力: ${_esc(inputSummary)}</div>` : ''}
-          <div class="debug-result-summary">結果: ${_esc(summary)}</div>
-          ${tabsHtml}
-          <button class="debug-next-btn" id="${pauseId}">▶ 次のステップへ</button>
-        </div>
-      `;
-      container.appendChild(wrapper);
-      container.scrollTop = container.scrollHeight;
-
-      // Update thinking bar
-      this._updateThinking('⏸ デバッグ一時停止 — 地図を確認してから「次のステップへ」をクリック');
-
-      document.getElementById(pauseId).addEventListener('click', () => {
-        document.getElementById(pauseId).disabled = true;
-        document.getElementById(pauseId).textContent = '✓ 続行';
-        this._debugStepResolve = null;
-        resolve();
-      });
-
-      wrapper.querySelectorAll('.debug-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-          wrapper.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
-          tab.classList.add('active');
-          const target = tab.dataset.tab;
-          wrapper.querySelectorAll('.debug-tab-content').forEach(c => c.style.display = 'none');
-          const content = document.getElementById(`${pauseId}-tab-${target}`);
-          if (content) content.style.display = 'block';
-        });
-      });
-    });
-  }
-
   _toggleLanguage() {
     this._lang = this._lang === 'ja' ? 'en' : 'ja';
     this._applyLanguage(this._lang);
@@ -3381,47 +3008,6 @@ class LocationFinderApp {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Performance Logger
-// ═══════════════════════════════════════════════════════════════
-
-const PerfLogger = {
-  _sessionStart: null,
-  _queryLabel:   null,
-
-  /** Call at the start of each user query. */
-  startQuery(label) {
-    this._sessionStart = performance.now();
-    this._queryLabel   = label;
-    console.group(`🚀 [LocationFinder] "${label.slice(0, 60)}"  — ${new Date().toLocaleTimeString()}`);
-  },
-
-  /** Returns a timer handle. Call end(handle) when the operation finishes. */
-  startOp(label) {
-    const t = performance.now();
-    const total = ((t - this._sessionStart) / 1000).toFixed(2);
-    console.log(`  ⏳ [+${total}s] ${label}`);
-    return { label, t };
-  },
-
-  /** Logs completion and returns elapsed seconds as string. */
-  endOp(handle, extra = '') {
-    const elapsed = ((performance.now() - handle.t) / 1000).toFixed(2);
-    const total   = ((performance.now() - this._sessionStart) / 1000).toFixed(2);
-    const suffix  = extra ? `  │  ${extra}` : '';
-    console.log(`  ✅ [+${total}s] ${handle.label} → \x1b[32m${elapsed}s\x1b[0m${suffix}`);
-    return elapsed;
-  },
-
-  /** Print a summary and close the console group. */
-  endQuery(turnCount) {
-    const total = ((performance.now() - this._sessionStart) / 1000).toFixed(2);
-    console.log(`📊 合計: ${total}s  |  API ターン数: ${turnCount}`);
-    console.groupEnd();
-    return total;
-  },
-};
-
-// ═══════════════════════════════════════════════════════════════
 // Tool status labels (displayed in thinking indicator)
 // ═══════════════════════════════════════════════════════════════
 
@@ -3476,9 +3062,7 @@ const LANG = {
     roleAssistant: 'AI エージェント',
     roleL0:        '会話エージェント',
     roleProcessing:'処理エージェント',
-    roleNote:      '📋 補足事項',
     roleThinking:  'AI 思考',
-    roleTool:      'ツール実行',
     roleError:     'エラー',
     roleDebug:     'デバッグ停止',
     roleHint:      '💭 追加情報のお願い',
@@ -3609,9 +3193,7 @@ const LANG = {
     roleAssistant: 'AI Agent',
     roleL0:        'Conversation Agent',
     roleProcessing:'Processing Agent',
-    roleNote:      '📋 Note',
     roleThinking:  'AI Thinking',
-    roleTool:      'Tool',
     roleError:     'Error',
     roleDebug:     'Debug Pause',
     roleHint:      '💭 More info needed',
