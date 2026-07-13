@@ -217,11 +217,18 @@ class LLMClient {
         { cacheSystem: true } // 不変な L0 システムプロンプトをプロンプトキャッシュ（同一セッション内で複数回呼ばれる）
       );
       const json = this._extractJSON(result);
-      if (!json || typeof json.reply !== 'string') return fallback;
-      return {
-        intent: ['new_search', 'refine', 'chatter', 'off_mission'].includes(json.intent) ? json.intent : 'new_search',
-        reply: json.reply.trim().replace(/^["「]|["」]$/g, ''),
-      };
+      if (json && typeof json.reply === 'string') {
+        return {
+          intent: ['new_search', 'refine', 'chatter', 'off_mission'].includes(json.intent) ? json.intent : 'new_search',
+          reply: json.reply.trim().replace(/^["「]|["」]$/g, ''),
+        };
+      }
+      // JSON化を忘れて生の自然文のまま返すことがある（describeResultsと同じフォールバック）。
+      // { を含まなければ、その生テキストをそのままreplyとして使う（intentはnew_searchに固定）。
+      if (!json && result && !result.includes('{')) {
+        return { intent: 'new_search', reply: result.trim().replace(/^["「]|["」]$/g, '') };
+      }
+      return fallback;
     } catch { return fallback; }
   }
 
@@ -246,8 +253,14 @@ class LLMClient {
         { cacheSystem: true } // 不変な L0 システムプロンプトをプロンプトキャッシュ（同一セッション内で複数回呼ばれる）
       );
       const json = this._extractJSON(result);
-      if (!json || typeof json.reply !== 'string') return '';
-      return json.reply.trim().replace(/^["「]|["」]$/g, '');
+      if (json && typeof json.reply === 'string') {
+        return json.reply.trim().replace(/^["「]|["」]$/g, '');
+      }
+      // JSON化を忘れて生の自然文のまま返すことがある（describeResultsと同じフォールバック）。
+      if (!json && result && !result.includes('{')) {
+        return result.trim().replace(/^["「]|["」]$/g, '');
+      }
+      return '';
     } catch { return ''; }
   }
 

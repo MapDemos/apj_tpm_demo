@@ -11,6 +11,9 @@
 const LINE_COND_TYPES = new Set(['road', 'water', 'rail']);
 const isLineCond = (type) => LINE_COND_TYPES.has(type);
 
+// 地名ホモニム（同名の別市区町村）解決時、選択ボタンに出す上限件数。
+const HOMONYM_CHOICE_LIMIT = 4;
+
 class QueryEngine {
   /**
    * @param {{ mcp: MapboxMCPClient, llm: LLMClient, ui: UICallbacks, config: object }} opts
@@ -723,7 +726,7 @@ class QueryEngine {
     if (reps.length > 1 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
       this._clarifyCount++;
       const choices = reps.map(f => f.properties.full_address || f.properties.name);
-      const chosen = await this.ui.showChoices(this._m().whichArea(anchor.text), choices.slice(0, 4));
+      const chosen = await this.ui.showChoices(this._m().whichArea(anchor.text), choices.slice(0, HOMONYM_CHOICE_LIMIT));
       const idx = choices.indexOf(chosen);
       chosenFeat = reps[idx >= 0 ? idx : 0];
     }
@@ -817,7 +820,7 @@ class QueryEngine {
     if (reps.length > 1 && this._clarifyCount < this.config.MAX_CLARIFY_TURNS) {
       this._clarifyCount++;
       const choices = reps.map(f => f.properties.full_address || f.properties.name);
-      const chosen = await this.ui.showChoices(this._m().whichArea(anchor.text), choices.slice(0, 4));
+      const chosen = await this.ui.showChoices(this._m().whichArea(anchor.text), choices.slice(0, HOMONYM_CHOICE_LIMIT));
       const idx = choices.indexOf(chosen);
       return [this._featureToBboxPoint(reps[idx >= 0 ? idx : 0])];
     }
