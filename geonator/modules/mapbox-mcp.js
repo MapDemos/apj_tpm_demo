@@ -16,6 +16,15 @@
 // useIsochrone=false時のturf.circle近似で使う速度換算（m/min）。
 const REACH_SPEED_M_PER_MIN = { walking: 80, cycling: 250, driving: 500 };
 
+// 交差点/信号/駅出口/バス停等、Tilequery専用レイヤーだけを引く検索で、名前フィルタとして
+// 渡してはいけない一般語（「交差点」自体を名前フィルタにすると実データ（地名ベースの名前）に
+// マッチせず全件除外されてしまう）。collectCondition・collectTarget（target.query_intentが
+// これらの型の時）の双方で使う。
+const GENERIC_WORDS = [
+  '交差点', '信号', '信号機', 'バス停', 'バス停留所', '停留所',
+  '川', '海', '運河', '橋', '道', '道路', '通り', '大通り', '駅出口', '出口',
+];
+
 class MapboxMCPClient {
 
   /**
@@ -2795,7 +2804,13 @@ class MapboxMCPClient {
   async collectTarget(target, bbox, sharedGrid = null) {
     const proximity = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
     // Query Expansion: general-POI targets carry synonyms (寿司屋→寿司/鮨/すし).
-    const queries   = (target.queries?.length ? target.queries : [target.text]);
+    let queries = (target.queries?.length ? target.queries : [target.text]);
+    // 交差点/信号/駅出口/バス停位置をtarget自体として探す時（「近くの交差点」等、具体名なし）は、
+    // collectConditionと同じく一般語を名前フィルタから除去する（さもないと全件マッチ0件になる）。
+    const GENERIC_INTENTS = ['intersection', 'signal', 'transit_entrance', 'category_busstop_location'];
+    if (GENERIC_INTENTS.includes(target.query_intent)) {
+      queries = queries.filter(q => !GENERIC_WORDS.includes(q.trim()));
+    }
     const resultStr = await this._searchNearbyPOI(
       queries, proximity, bbox, target.query_intent, null, false, sharedGrid
     );
@@ -2823,10 +2838,6 @@ class MapboxMCPClient {
     // Generic category words ("交差点"/"信号"/"バス停" etc.) must NOT be used as a
     // name filter / search query — they would filter everything out. Only pass a
     // query when the text is a SPECIFIC name (e.g. "○○交差点", "ローソン").
-    const GENERIC_WORDS = [
-      '交差点', '信号', '信号機', 'バス停', 'バス停留所', '停留所',
-      '川', '海', '運河', '橋', '道', '道路', '通り', '大通り', '駅出口', '出口',
-    ];
     let text = condition.text || null;
     if (text && GENERIC_WORDS.includes(text.trim())) text = null;
 
