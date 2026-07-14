@@ -248,7 +248,7 @@ body { display: flex; flex-direction: column; }
   /* LINE風の壁紙を対話パネル全体に敷く（入力欄は .input-area が不透明なので自然に除外される）。
      元画像が暗いのでスクリムは重ねない。壁紙は固定・メッセージだけスクロール。 */
   background-color: var(--bg-panel);
-  background-image: url('../images/normal_background.webp');
+  background-image: url('../images/naruto_bridge_night.webp');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
