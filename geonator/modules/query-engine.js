@@ -2534,12 +2534,12 @@ class QueryEngine {
     // 確度コメントのL0生成は表示専用（結果パネルの内容を参照しないコメント）なので、confirmSchemaと
     // 同じパターンでawaitせず並行実行する（結果パネル表示をL0往復ぶんブロックしない）。到着まで
     // プレースホルダーを出し、確定ボタン等より後にコメントが浮くのを「読み込み中」感で自然に見せる。
-    this.ui.showL0Typing?.();
+    const l0TypingToken = this.ui.showL0Typing?.();
     (async () => {
       let confidenceText = '';
       try { confidenceText = await this.llm.describeResults?.(resultsSummary, this._langCode(), this._convHistory); } catch {}
       if (!confidenceText) confidenceText = M[confidenceKey]; // 失敗/空なら固定文言にフォールバック
-      this.ui.resolveL0Message?.(confidenceText);
+      this.ui.resolveL0Message?.(confidenceText, l0TypingToken);
       this._recordTurn('l0', confidenceText);
     })();
 

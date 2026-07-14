@@ -544,14 +544,16 @@ class LocationFinderApp {
         self.addMessage('l0', text);
         self._speak(text);
       },
-      // L0の自然文コメントが非同期で後追い到着するまでの「入力中…」プレースホルダー。
+      // L0の自然文コメントが非同期で後追い到着するまでの「入力中…」プレースホルダー。呼び出し元は
+      // 戻り値のtokenを保持し、resolveL0Messageに渡すこと(次クエリの「考え中」と取り違えないため)。
       showL0Typing() {
-        self._showTypingIndicator(null, 'l0');
+        return self._showL0TypingPlaceholder();
       },
       // showL0Typing()のプレースホルダーを同じ位置で実文言に差し替える(末尾追加のshowL0Messageと違い、
-      // 間に挟まった候補パネル/確定ボタンより後ろに飛ばない)。
-      resolveL0Message(text) {
-        self._resolveL0Typing(text);
+      // 間に挟まった候補パネル/確定ボタンより後ろに飛ばない)。tokenが一致しなければ(次のクエリの
+      // 「考え中」に置き換わっている等)そのプレースホルダーには触れず通常のaddMessageにフォールバック。
+      resolveL0Message(text, token) {
+        self._resolveL0Typing(text, token);
         self._speak(text);
       },
       // 処理エージェント発の申し送り事項（除外条件・rail/地下鉄の扱い等）。会話ではなく
@@ -2674,11 +2676,22 @@ class LocationFinderApp {
     tick();
     this._typingTimer = setInterval(tick, 1000);
   }
-  /** プレースホルダー(#typingIndicator)を同じ位置で実メッセージに差し替える。無ければ通常のaddMessageにフォールバック
-   *  (末尾追加＝addMessageだとDOM順序が崩れ、間に挟まった候補パネル/確定ボタンより後ろに出てしまうため)。 */
-  _resolveL0Typing(text) {
+  /** L0確度コメント用プレースホルダーを表示し、以後の照合用トークンを発行する
+   *  (id='typingIndicator'は使い回されるため、tokenで「自分が出したものか」を確認できるようにする)。 */
+  _showL0TypingPlaceholder() {
+    const token = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    this._showTypingIndicator(null, 'l0');
     const wrapper = document.getElementById('typingIndicator');
-    if (!wrapper) { this.addMessage('l0', text); return; }
+    if (wrapper) wrapper.dataset.l0Token = token;
+    return token;
+  }
+  /** プレースホルダー(#typingIndicator)を同じ位置で実メッセージに差し替える。tokenが不一致
+   *  (別クエリの「考え中」に既に置き換わっている等)なら触らず、通常のaddMessageにフォールバック
+   *  (末尾追加＝addMessageだとDOM順序が崩れるが、無関係な表示中インジケータを誤って上書きするよりまし)。 */
+  _resolveL0Typing(text, token) {
+    const wrapper = document.getElementById('typingIndicator');
+    const isOurs = wrapper && (!token || wrapper.dataset.l0Token === token);
+    if (!isOurs) { this.addMessage('l0', text); return; }
     if (this._typingTimer) { clearInterval(this._typingTimer); this._typingTimer = null; }
     wrapper.removeAttribute('id');
     wrapper.className = 'message l0';
