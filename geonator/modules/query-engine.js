@@ -2525,16 +2525,23 @@ class QueryEngine {
       tentative: 'confidenceTentative', none: 'confidenceNone',
     }[confidenceLabel];
     const resultsSummary = this._buildResultsSummary(full, partial, schema, confidenceLabel);
-    let confidenceText = '';
-    try { confidenceText = await this.llm.describeResults?.(resultsSummary, this._langCode(), this._convHistory); } catch {}
-    if (!confidenceText) confidenceText = M[confidenceKey]; // 失敗/空なら固定文言にフォールバック
-    this.ui.showL0Message?.(confidenceText);
-    this._recordTurn('l0', confidenceText);
 
     const conditionLabels = (schema.conditions ?? []).map(c => c.text ?? c.type);
     // 除外事項(A:上限超過の地理条件 / B:非地理的な特徴)を結果の場所でも透明化（早出し吹き出しに加えパネルにも併記）。
     const droppedNote = this._exclusionNote(schema);
     this.ui.showResults(full, partial, displayNone, conditionLabels, droppedNote);
+
+    // 確度コメントのL0生成は表示専用（結果パネルの内容を参照しないコメント）なので、confirmSchemaと
+    // 同じパターンでawaitせず並行実行する（結果パネル表示をL0往復ぶんブロックしない）。到着まで
+    // プレースホルダーを出し、確定ボタン等より後にコメントが浮くのを「読み込み中」感で自然に見せる。
+    this.ui.showL0Typing?.();
+    (async () => {
+      let confidenceText = '';
+      try { confidenceText = await this.llm.describeResults?.(resultsSummary, this._langCode(), this._convHistory); } catch {}
+      if (!confidenceText) confidenceText = M[confidenceKey]; // 失敗/空なら固定文言にフォールバック
+      this.ui.showL0Message?.(confidenceText);
+      this._recordTurn('l0', confidenceText);
+    })();
 
     // [大体の位置] area result: draw an approximate area (convex hull) around the
     // surfaced candidates when the query asked for a rough location, not a pinpoint.

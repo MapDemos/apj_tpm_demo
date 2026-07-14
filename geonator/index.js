@@ -544,6 +544,11 @@ class LocationFinderApp {
         self.addMessage('l0', text);
         self._speak(text);
       },
+      // L0の自然文コメントが非同期で後追い到着するまでの「入力中…」プレースホルダー。
+      // 実メッセージ(addMessage)が来ると自動的に消える(既存の_hideTypingIndicator呼び出しに乗る)。
+      showL0Typing() {
+        self._showTypingIndicator(null, 'l0');
+      },
       // 処理エージェント発の申し送り事項（除外条件・rail/地下鉄の扱い等）。会話ではなく
       // エンジンの決定的な注記なので、L0とは別の処理エージェント系スタイル(アンバー)で表示する。
       // 処理ビューOFF時は非表示（会話モード向け・エンジンの判断自体には影響しない）。
@@ -2634,16 +2639,16 @@ class LocationFinderApp {
    * @param {string} text
    */
   /** チャット内「考えています…」タイピング吹き出し（送信〜最初の応答の間の“間”を埋める）。 */
-  _showTypingIndicator(label) {
+  _showTypingIndicator(label, category = 'assistant') {
     this._hideTypingIndicator(); // 重複防止（タイマーもクリア）
     const container = document.getElementById('chatMessages');
     if (!container) return;
     const wrapper = document.createElement('div');
-    wrapper.className = 'message assistant typing-indicator';
+    wrapper.className = `message ${category} typing-indicator`;
     wrapper.id = 'typingIndicator';
     const lbl = document.createElement('div');
     lbl.className = 'msg-label';
-    lbl.textContent = LANG[this._lang].roleAssistant;
+    lbl.textContent = category === 'l0' ? LANG[this._lang].roleL0 : LANG[this._lang].roleAssistant;
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
     bubble.innerHTML =
