@@ -545,9 +545,14 @@ class LocationFinderApp {
         self._speak(text);
       },
       // L0の自然文コメントが非同期で後追い到着するまでの「入力中…」プレースホルダー。
-      // 実メッセージ(addMessage)が来ると自動的に消える(既存の_hideTypingIndicator呼び出しに乗る)。
       showL0Typing() {
         self._showTypingIndicator(null, 'l0');
+      },
+      // showL0Typing()のプレースホルダーを同じ位置で実文言に差し替える(末尾追加のshowL0Messageと違い、
+      // 間に挟まった候補パネル/確定ボタンより後ろに飛ばない)。
+      resolveL0Message(text) {
+        self._resolveL0Typing(text);
+        self._speak(text);
       },
       // 処理エージェント発の申し送り事項（除外条件・rail/地下鉄の扱い等）。会話ではなく
       // エンジンの決定的な注記なので、L0とは別の処理エージェント系スタイル(アンバー)で表示する。
@@ -2668,6 +2673,20 @@ class LocationFinderApp {
     const tick = () => { if (elEl) elEl.textContent = ` ${Math.round((Date.now() - t0) / 1000)}${en ? 's' : '秒'}`; };
     tick();
     this._typingTimer = setInterval(tick, 1000);
+  }
+  /** プレースホルダー(#typingIndicator)を同じ位置で実メッセージに差し替える。無ければ通常のaddMessageにフォールバック
+   *  (末尾追加＝addMessageだとDOM順序が崩れ、間に挟まった候補パネル/確定ボタンより後ろに出てしまうため)。 */
+  _resolveL0Typing(text) {
+    const wrapper = document.getElementById('typingIndicator');
+    if (!wrapper) { this.addMessage('l0', text); return; }
+    if (this._typingTimer) { clearInterval(this._typingTimer); this._typingTimer = null; }
+    wrapper.removeAttribute('id');
+    wrapper.className = 'message l0';
+    this._lastAgentCategory = 'l0';
+    const bubble = wrapper.querySelector('.message-bubble');
+    if (bubble) bubble.innerHTML = _formatMsg(text);
+    const container = document.getElementById('chatMessages');
+    if (container) container.scrollTop = container.scrollHeight;
   }
   _hideTypingIndicator() {
     if (this._typingTimer) { clearInterval(this._typingTimer); this._typingTimer = null; }

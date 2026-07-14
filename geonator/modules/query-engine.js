@@ -2539,7 +2539,7 @@ class QueryEngine {
       let confidenceText = '';
       try { confidenceText = await this.llm.describeResults?.(resultsSummary, this._langCode(), this._convHistory); } catch {}
       if (!confidenceText) confidenceText = M[confidenceKey]; // 失敗/空なら固定文言にフォールバック
-      this.ui.showL0Message?.(confidenceText);
+      this.ui.resolveL0Message?.(confidenceText);
       this._recordTurn('l0', confidenceText);
     })();
 
