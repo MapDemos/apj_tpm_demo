@@ -1798,6 +1798,23 @@ class QueryEngine {
     return halfM > this.config.BBOX_MAX_HALF_M;
   }
 
+  /**
+   * poi_category(canonical_id)解決: JS辞書(mcp._resolveCategoryTag、即時) → ミス時のみ
+   * LLMフォールバック(llm.resolveCategoryTag)。呼び出し側は返り値のPromiseをawaitせず
+   * そのまま collectTarget/collectCondition に渡すこと — _searchNearbyPOI 内で他の
+   * Search Box/Tilequeryリクエストと並行してawaitされるため、ここでawaitすると
+   * LLMフォールバックが走るミス時だけ直列にレイテンシが乗ってしまう。
+   * @param {string[]} queries
+   * @returns {Promise<string|null>}
+   */
+  async _resolveCategoryTag(queries) {
+    if (!queries?.length) return null;
+    const jsTag = this.mcp._resolveCategoryTag(queries);
+    if (jsTag) return jsTag;
+    if (!this.config.useCategorySearch) return null;
+    return await this.llm.resolveCategoryTag(queries);
+  }
+
   // ─────────────────────────────────────────────
   // [3-B] Step1: collect candidates
   // ─────────────────────────────────────────────
@@ -1824,7 +1841,8 @@ class QueryEngine {
 
     // Target collection (partition shared grid to the tight target bbox)
     const _tt = this._pnow();
-    let mainRaw = await this.mcp.collectTarget(target, targetBbox, sharedGrid);
+    const targetCategoryTag = this._resolveCategoryTag(target.queries?.length ? target.queries : [target.text]); // Promise, not awaited here
+    let mainRaw = await this.mcp.collectTarget(target, targetBbox, sharedGrid, targetCategoryTag);
     this._pf('　└ target収集（Search Box＋TQ）', _tt);
     mainRaw = this._applyBuildingNameRules(target, mainRaw);
     mainRaw = this._dedupTargets(mainRaw); // [pre-scoring] cheap JS-only dedup (see method). LLM-based pass3 runs later, after L2-2.
@@ -1861,7 +1879,9 @@ class QueryEngine {
           condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: '候補ごと評価' });
           return;
         }
-        const items = await this.mcp.collectCondition(c, condBbox, sharedGrid);
+        const condQueries = (c.type === 'poi' && c.queries?.length) ? c.queries : (c.text ? [c.text] : []);
+        const condCategoryTag = condQueries.length ? this._resolveCategoryTag(condQueries) : null;
+        const items = await this.mcp.collectCondition(c, condBbox, sharedGrid, condCategoryTag);
         condResults[key] = items;
         condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
         // [S] note if condition returned 0 items.
@@ -2779,7 +2799,9 @@ class QueryEngine {
       if (preItems && preItems[key]) { condResults[key] = preItems[key]; continue; } // known poi → no query, no L2-1
       newKeys.add(key);
       if (isLineCond(c.type)) continue; // per-candidate eval, no collection
-      condResults[key] = await this.mcp.collectCondition(c, bboxes.condBbox, null);
+      const condQueries = (c.type === 'poi' && c.queries?.length) ? c.queries : (c.text ? [c.text] : []);
+      const condCategoryTag = condQueries.length ? this._resolveCategoryTag(condQueries) : null;
+      condResults[key] = await this.mcp.collectCondition(c, bboxes.condBbox, null, condCategoryTag);
     }
     // L2-1 category validity ONLY on the new poi conditions (target pool is fixed;
     // old conditions are already filtered — don't re-filter/shrink them).

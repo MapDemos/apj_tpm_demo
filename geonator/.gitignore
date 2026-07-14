@@ -1,6 +1,7 @@
 # Local-only files (not committed)
 memory/
 issue/
+config.local.js
 
 # macOS
 .DS_Store

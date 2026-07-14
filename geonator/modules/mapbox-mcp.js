@@ -568,9 +568,10 @@ class MapboxMCPClient {
    * @param {string}      types     - Comma-separated types (e.g. 'poi' or 'place,district,locality')
    * @param {number[]|null} proximity - [lng, lat]
    * @param {number[]|null} bbox     - [minX, minY, maxX, maxY]
+   * @param {string|null} poiCategory - canonical_id（カンマ区切り複数可）。指定時はpoi_categoryでも絞り込む
    * @returns {Promise<object[]>}
    */
-  async _searchBoxRequest(q, types, proximity, bbox) {
+  async _searchBoxRequest(q, types, proximity, bbox, poiCategory = null) {
     let url =
       `${this.config.SEARCH_BOX_API}` +
       `?q=${encodeURIComponent(q)}` +
@@ -580,6 +581,9 @@ class MapboxMCPClient {
       `&types=${types}` +
       `&limit=30`;
 
+    if (poiCategory) {
+      url += `&poi_category=${encodeURIComponent(poiCategory)}`;
+    }
     if (proximity && proximity.length >= 2) {
       url += `&proximity=${proximity[0]},${proximity[1]}`;
     }
@@ -832,6 +836,52 @@ class MapboxMCPClient {
     return null;
   }
 
+  // ── Search Box poi_category 解決（決定的マッチ、JS辞書のみ・LLM不使用）──
+  // canonical_id の sub-part（">"以降）名の完全一致・CATEGORY_SYNONYMS辞書の順で試す。
+  // 「コンビニ」のように canonical_id 自体と文字列一致するケースも sub-part 完全一致で拾える。
+  // 複数の異なる canonical_id に同時ヒットした場合は曖昧と判断し null（=素のtext検索にフォールバック）。
+  static _CATEGORY_SUBNAME_MAP = null; // lazy build: sub-part名 → canonical_id[]（重複sub名があり得るため配列）
+  static _buildCategorySubnameMap() {
+    const map = new Map();
+    if (typeof CATEGORY_TAXONOMY === 'undefined') return map;
+    for (const id of CATEGORY_TAXONOMY) {
+      const sub = id.includes('>') ? id.split('>')[1] : id;
+      if (!map.has(sub)) map.set(sub, []);
+      map.get(sub).push(id);
+    }
+    return map;
+  }
+
+  /**
+   * @param {string[]} queries - L1が生成したqueries配列（同義語展開済み）
+   * @returns {string|null} 一意にヒットしたcanonical_id、なければnull
+   */
+  _resolveCategoryTag(queries) {
+    if (!this.config.useCategorySearch || !queries?.length) return null;
+    if (typeof CATEGORY_TAXONOMY === 'undefined') return null;
+    if (!MapboxMCPClient._CATEGORY_SUBNAME_MAP) {
+      MapboxMCPClient._CATEGORY_SUBNAME_MAP = MapboxMCPClient._buildCategorySubnameMap();
+    }
+    const subMap = MapboxMCPClient._CATEGORY_SUBNAME_MAP;
+    const candidates = new Set();
+
+    for (const qRaw of queries) {
+      const q = (qRaw || '').trim();
+      if (!q) continue;
+      // 1) sub-part名（">"以降。トップレベルはそのまま）との完全一致
+      if (subMap.has(q)) subMap.get(q).forEach(id => candidates.add(id));
+      // 2) 事前生成した同義語辞書（牛丼屋→丼もの 等の意味的ギャップを埋める）
+      //    synonym が query の部分文字列であることを見る（「牛丼」⊂「牛丼屋」）。
+      if (typeof CATEGORY_SYNONYMS !== 'undefined') {
+        for (const id in CATEGORY_SYNONYMS) {
+          if (CATEGORY_SYNONYMS[id].some(syn => q.includes(syn))) candidates.add(id);
+        }
+      }
+    }
+    if (candidates.size === 1) return [...candidates][0];
+    return null; // 未ヒット or 複数カテゴリに曖昧ヒット → 安全側でフォールバック
+  }
+
   /**
    * 【主】Search Box API ツインリクエスト × queries配列を並行実行。
    * Search Box API (poi/both クエリ) と Tilequery poi_label (streets-v8) を並行実行し、
@@ -873,7 +923,7 @@ class MapboxMCPClient {
     });
   }
 
-  async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null, isPrimary = false, sharedGrid = null, noFallback = false) {
+  async _searchNearbyPOI(queries, proximity, bbox, queryIntent = null, radiusMeters = null, isPrimary = false, sharedGrid = null, noFallback = false, categoryTagPromise = null) {
     // sharedGrid: pre-fetched poi_label items (buildPoiLabelGrid) reused across the
     // target + all poi conditions so we don't run one grid per query. When present,
     // the building/general paths partition it locally instead of fetching their own.
@@ -1102,15 +1152,35 @@ class MapboxMCPClient {
           : Promise.resolve([]));
     if (bigArea && this.config.DEBUG) console.log('[MapboxMCP] 広域のためグリッド省略、Search Boxのみ');
 
-    // ── Run both in parallel ──
-    const [sbResultArrays, tqResults] = await Promise.all([
+    // ── カテゴリタグ(poi_category)による追加検索 ──
+    // categoryTagPromise は呼び出し元(query-engine.js)がJS辞書解決 or LLMフォールバック解決の
+    // どちらかを既に非同期で起動済みのPromise。ここで待つのは他のリクエストと並行なので
+    // レイテンシには乗らない（LLMフォールバックが走るミス時だけ、他の検索と同程度の時間がかかる）。
+    // 名前でなく taxonomy タグそのもので絞るため、text検索では拾えない同カテゴリPOI（名前に
+    // 「牛丼」を含まない店等）も取れる。q には main category（">"より前）を渡し、poi_categoryの
+    // 絞り込みで実質的な精度を出す。
+    const categoryPromise = categoryTagPromise
+      ? Promise.resolve(categoryTagPromise).then(tag => {
+          if (!tag) return [];
+          const mainLabel = tag.includes('>') ? tag.split('>')[0] : tag;
+          return this._searchBoxRequest(mainLabel, 'poi', effectiveProximity, currentBbox, tag);
+        }).catch(() => [])
+      : Promise.resolve([]);
+
+    // ── Run all in parallel ──
+    const [sbResultArrays, tqResults, categoryItems] = await Promise.all([
       Promise.all(sbRequests),
       tqPromise,
+      categoryPromise,
     ]);
 
     // ── Merge with coordinate-based dedup ──
 
     sbResultArrays.flat().forEach(item => {
+      const key = dedupKey(item);
+      if (!seen.has(key)) { seen.set(key, item); sbItems.push(item); sbCount++; }
+    });
+    categoryItems.forEach(item => {
       const key = dedupKey(item);
       if (!seen.has(key)) { seen.set(key, item); sbItems.push(item); sbCount++; }
     });
@@ -2799,9 +2869,11 @@ class MapboxMCPClient {
    * Returns plain item array (not minified JSON string).
    * @param {object} target - QuerySchema.target
    * @param {number[]} bbox
+   * @param {Promise<string|null>|null} categoryTagPromise - poi_category(canonical_id)解決の
+   *   Promise。呼び出し元(query-engine.js)がJS辞書/LLMフォールバックで既に起動済みのもの。
    * @returns {Promise<Array>}
    */
-  async collectTarget(target, bbox, sharedGrid = null) {
+  async collectTarget(target, bbox, sharedGrid = null, categoryTagPromise = null) {
     const proximity = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
     // Query Expansion: general-POI targets carry synonyms (寿司屋→寿司/鮨/すし).
     let queries = (target.queries?.length ? target.queries : [target.text]);
@@ -2812,7 +2884,7 @@ class MapboxMCPClient {
       queries = queries.filter(q => !GENERIC_WORDS.includes(q.trim()));
     }
     const resultStr = await this._searchNearbyPOI(
-      queries, proximity, bbox, target.query_intent, null, false, sharedGrid
+      queries, proximity, bbox, target.query_intent, null, false, sharedGrid, false, categoryTagPromise
     );
     // Stash raw collection debug (SB/TQ/dropped lists) for the debug report.
     try {
@@ -2827,9 +2899,10 @@ class MapboxMCPClient {
    * Returns plain item array.
    * @param {object} condition - QuerySchema.conditions[]
    * @param {number[]} bbox
+   * @param {Promise<string|null>|null} categoryTagPromise - collectTargetと同様
    * @returns {Promise<Array>}
    */
-  async collectCondition(condition, bbox, sharedGrid = null) {
+  async collectCondition(condition, bbox, sharedGrid = null, categoryTagPromise = null) {
     const proximity = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
 
     // The search PATH is driven by condition.type (JS-driven), NOT by L1's query_intent.
@@ -2854,7 +2927,8 @@ class MapboxMCPClient {
     // transit / intersection / signal) take their own layer branches inside.
     // noFallback=true: a 0-hit condition must stay 0 (no bus-stop fallback → no bogus items).
     const resultStr = await this._searchNearbyPOI(
-      queries, proximity, bbox, intent, null, false, condition.type === 'poi' ? sharedGrid : null, true
+      queries, proximity, bbox, intent, null, false, condition.type === 'poi' ? sharedGrid : null, true,
+      condition.type === 'poi' ? categoryTagPromise : null
     );
     return this._parseItemsFromResult(resultStr);
   }

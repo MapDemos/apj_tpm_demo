@@ -282,6 +282,17 @@
       </label>
       <div class="settings-hint" id="set-isochrone-note" style="margin-top:12px">※ 円近似は道路形状を無視した直線距離ベースの概算。API呼び出しが減り高速だが、川や線路で迂回が必要な場所では精度が落ちます。変更は次の検索から反映されます。</div>
 
+      <div class="settings-divider"></div>
+
+      <label class="settings-row">
+        <span id="set-catsearch-row">カテゴリ検索（poi_categoryフィルタ）</span>
+        <select id="useCategorySearchSelect">
+          <option id="set-cat-on" value="on">ON（同カテゴリのPOIも拾う）</option>
+          <option id="set-cat-off" value="off">OFF（テキスト一致のみ）</option>
+        </select>
+      </label>
+      <div class="settings-hint" id="set-catsearch-note" style="margin-top:12px">※「コンビニ」「牛丼屋」のような一般カテゴリ語で、店名に単語が含まれないPOI（例：牛丼屋→名前に「牛丼」を含まない店）も、Search BoxのカテゴリタグをもとにJS辞書＋LLMフォールバックで拾います。変更は次の検索から反映されます。</div>
+
       </div><!-- /tabpage judge -->
 
       <div class="settings-actions">
@@ -412,7 +423,12 @@
 
   <!-- 1. Config -->
   <script src="./config.js"></script>
+  <!-- config.local.js: gitignore対象。存在すればCONFIGをローカル上書き（token差し替え等）。
+       無ければ404するだけで無害（後続スクリプトの読み込みは止まらない）。 -->
+  <script src="./config.local.js"></script>
   <script src="data/poi-blocklist.js"></script>
+  <script src="data/category-taxonomy.js"></script>
+  <script src="data/category-synonyms.js"></script>
 
   <!-- 2. Prompts (L1/L2 for JS-driven arch + legacy) -->
   <script src="./prompts/prompt-l0.js"></script>

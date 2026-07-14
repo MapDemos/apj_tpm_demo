@@ -9,7 +9,7 @@
 const CONFIG = {
 
   // ビルド確認用バージョン（キャッシュで古いJSを読んでいないかの切り分けに使う）。変更ごとに更新。
-  APP_VERSION: '2026-07-13.2103',
+  APP_VERSION: '2026-07-14.1214',
 
   // ============================================
   // API KEYS
@@ -42,6 +42,9 @@ const CONFIG = {
   // L1-3 = 広域proximityの絞り込み提案（例:「鎌倉市」→ 鎌倉駅/北鎌倉/材木座…を世界知識から列挙）。
   // JSが各候補をSearch Boxで実在検証・空間で散らす・上限適用する。※1次検索の前段。L3(後段)とは別。
   L1_3_MODEL:      'claude-haiku-4-5-20251001',
+  // カテゴリタグ解決（JS辞書がミスした時だけ呼ぶLLMフォールバック）。「牛丼屋」→「レストラン>丼もの」
+  // のような意味推論が要るケース専用。JS辞書ヒット時はこの呼び出し自体スキップされゼロコスト。
+  L1_CAT_MODEL:    'claude-haiku-4-5-20251001',
   CLARIFY_MAX_CHOICES: 5,  // 広域絞り込み/もしかしての提案ボタン上限（超過分は空間的に散らして間引き）
   // 曖昧な「近く」(within無指定)の探索半径を anchor種別で変える（収集extentの既定・decisionはJS）。
   // conditionのマッチング距離(DISTANCE_TABLE)とは無関係。広め収集でも採点は実距離で並ぶので精度は保たれる。
@@ -93,6 +96,7 @@ const CONFIG = {
 
   DEFAULT_LEVEL:       'very_close', // distance level when user gives no distance expression
   useIsochrone:        true,         // false時は徒歩/自転車/車のn分判定をturf.circle近似に強制フォールバック（⚙️設定画面でON/OFF切替可）
+  useCategorySearch:   true,         // false時はSearch Boxのpoi_categoryフィルタを使わずtext検索のみ（⚙️設定画面でON/OFF切替可）
   MAX_CLARIFY_TURNS:   3,            // max clarification loops before best-effort (HH)
   FRAGMENT_MERGE_MAX_TRIES: 5,       // 断片的な発話合成(_markFragmentaryAttempt)の連続失敗上限。超えたら諦めてリセット。設定画面で変更可(3-7)
   API_TIMEOUT_MS:      8000,         // per-API-call timeout in ms (GG)
