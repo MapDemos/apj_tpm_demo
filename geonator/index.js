@@ -699,7 +699,9 @@ class LocationFinderApp {
       },
       showRunStats(stats) {
         if (!stats) return;
-        self._hideTypingIndicator?.(); // 考え中表示は処理ビューの状態に関わらず常に消す
+        // 結果表示前の「考え中」表示は_renderCandidatePanel側で既に消えている。ここで無条件に消すと
+        // showResults直後に出したL0確度コメント用プレースホルダー(showL0Typing)まで消えてしまうため、
+        // 明示的なhideは行わない（実文言到着時はaddMessageが自動的に消す）。
         const fmt = n => (n || 0).toLocaleString('ja-JP');
         const secs = (stats.ms / 1000).toFixed(1);
         const en = self._lang === 'en';
