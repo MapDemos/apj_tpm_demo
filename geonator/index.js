@@ -1183,7 +1183,9 @@ class LocationFinderApp {
       attributionControl: false,
     });
 
-    this.map.addControl(new mapboxgl.NavigationControl({ visualizePitch: false }), 'top-right');
+    // top-rightは検索ボックス(searchboxBar)と重なるため、ズームコントロールはbottom-rightへ
+    // （AttributionControlと同じ隅・thinking-floatはbottom:40pxより上にあるので衝突しない）。
+    this.map.addControl(new mapboxgl.NavigationControl({ visualizePitch: false }), 'bottom-right');
     this.map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
 
     return new Promise(resolve => this.map.on('load', () => {
