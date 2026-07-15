@@ -535,6 +535,20 @@ class LocationFinderApp {
    */
   _buildUICallbacks() {
     const self = this;
+    // 検索の主要フェーズ（場所特定→候補収集→距離評価）に段階番号を付ける。query-engine.js側の
+    // thinkingResolve/Collect/Eval文言（ja/en）と対応。絞り込み/探し直しループ(thinkingNarrow等)は
+    // 発生回数が可変なので対象外＝番号を振らない（不正確な進捗表示になるため）。
+    const THINKING_STEPS = {
+      '場所を特定しています': 1, '候補を検索しています…': 1, '候補を集めています': 2, '条件との距離を評価しています': 3,
+      'Locating the area': 1, 'Searching for candidates…': 1, 'Gathering candidates': 2, 'Evaluating distances & conditions': 3,
+    };
+    const THINKING_STEP_TOTAL = 3;
+    const withStepPrefix = (label) => {
+      const step = THINKING_STEPS[label];
+      if (!step) return label;
+      const prefix = self._lang === 'en' ? `Step ${step}/${THINKING_STEP_TOTAL}` : `ステップ${step}/${THINKING_STEP_TOTAL}`;
+      return `${prefix}　${label}`;
+    };
     return {
       showMessage(text) {
         self.addMessage('assistant', text);
@@ -571,8 +585,9 @@ class LocationFinderApp {
         self.addMessage('proc-note', text);
       },
       showSearching(text) {
-        if (self._searchBoxMode) { self._searchBoxShowStatus(text); return; }
-        self._updateThinking(text);
+        const withStep = withStepPrefix(text);
+        if (self._searchBoxMode) { self._searchBoxShowStatus(withStep); return; }
+        self._updateThinking(withStep);
       },
       async showChoices(question, choices) {
         if (self._searchBoxMode) return self._searchBoxShowChoices(question, choices);
@@ -636,8 +651,9 @@ class LocationFinderApp {
       setResultBbox(bbox) { self._lastResultBbox = bbox || null; },
       // 次の計算中に「今何をしているか」を再表示（次の吹き出しで自動的に消える）
       thinking(label) {
-        if (self._searchBoxMode) { self._searchBoxShowStatus(label || (self._lang === 'en' ? 'Searching…' : '検索中…')); return; }
-        self._showTypingIndicator(label);
+        const withStep = withStepPrefix(label);
+        if (self._searchBoxMode) { self._searchBoxShowStatus(withStep || (self._lang === 'en' ? 'Searching…' : '検索中…')); return; }
+        self._showTypingIndicator(withStep);
       },
       // キャンセルされたか（QueryEngineが各局面で確認し、途中で描画を止める）
       isCancelled() { return !!self._cancelled; },
