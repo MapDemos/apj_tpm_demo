@@ -1842,11 +1842,44 @@ class QueryEngine {
       : null;
     this._pf('　└ グリッド構築（Tilequery）', _tg);
 
-    // Target collection (partition shared grid to the tight target bbox)
+    // Target収集とcondition収集を並列発行（②並列化）。別bbox・別API呼び出しで相互に独立しており、
+    // 両者とも後段のL2-1（_applyCategoryFilter、mainRaw＋condResults両方を要求）より前に揃えばよい
+    // だけなので、直前まで直列でtargetを待ってからconditionsを始めていたのを同時発行に変更。
+    // 各自のtiming計測(_pf)は自分のPromiseが解決した時点で個別に記録する（並列化後もどちらが
+    // 遅かったかがデバッグ表示で分かるように）。
     const _tt = this._pnow();
     const targetCategoryTag = this._resolveCategoryTag(target.queries?.length ? target.queries : [target.text]); // Promise, not awaited here
-    let mainRaw = await this.mcp.collectTarget(target, targetBbox, sharedGrid, targetCategoryTag);
-    this._pf('　└ target収集（Search Box＋TQ）', _tt);
+    const targetPromise = this.mcp.collectTarget(target, targetBbox, sharedGrid, targetCategoryTag)
+      .then(raw => { this._pf('　└ target収集（Search Box＋TQ）', _tt); return raw; });
+
+    const condResults = {};
+    const condDebug   = [];
+    const _tc = this._pnow();
+    const condPromise = (conditions?.length
+      ? Promise.all(conditions.map(async (c) => {
+          const key = c.text ?? c.type;
+          // road/water/rail are evaluated per-candidate against the road/water layer
+          // (they're lines, not points) — no item collection here.
+          if (isLineCond(c.type)) {
+            condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: '候補ごと評価' });
+            return;
+          }
+          const condQueries = (c.type === 'poi' && c.queries?.length) ? c.queries : (c.text ? [c.text] : []);
+          const condCategoryTag = condQueries.length ? this._resolveCategoryTag(condQueries) : null;
+          const items = await this.mcp.collectCondition(c, condBbox, sharedGrid, condCategoryTag);
+          condResults[key] = items;
+          condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
+          // [S] note if condition returned 0 items.
+          // ただし負条件(negate=「〜が近くに無い」)の0件は「該当POIが周辺に存在しない＝全候補が
+          // 条件を満たす」＝成功なので警告しない（「見つかりませんでした/未収録」は誤解を招く）。
+          if ((!items || items.length === 0) && !c.negate) {
+            this.ui.showL0Message?.(this._m().condNotFound(key));
+          }
+        }))
+      : Promise.resolve()
+    ).then(() => { this._pf('　└ condition収集', _tc); });
+
+    let [mainRaw] = await Promise.all([targetPromise, condPromise]);
     mainRaw = this._applyBuildingNameRules(target, mainRaw);
     mainRaw = this._dedupTargets(mainRaw); // [pre-scoring] cheap JS-only dedup (see method). LLM-based pass3 runs later, after L2-2.
 
@@ -1868,34 +1901,6 @@ class QueryEngine {
     if (mainRaw.length > this.config.CANDIDATE_LIMIT) {
       mainRaw = mainRaw.slice(0, this.config.CANDIDATE_LIMIT);
     }
-
-    // Conditions collection (partition shared grid to the wide condition bbox) — parallel
-    const condResults = {};
-    const condDebug   = [];
-    const _tc = this._pnow();
-    if (conditions?.length) {
-      await Promise.all(conditions.map(async (c) => {
-        const key = c.text ?? c.type;
-        // road/water/rail are evaluated per-candidate against the road/water layer
-        // (they're lines, not points) — no item collection here.
-        if (isLineCond(c.type)) {
-          condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: '候補ごと評価' });
-          return;
-        }
-        const condQueries = (c.type === 'poi' && c.queries?.length) ? c.queries : (c.text ? [c.text] : []);
-        const condCategoryTag = condQueries.length ? this._resolveCategoryTag(condQueries) : null;
-        const items = await this.mcp.collectCondition(c, condBbox, sharedGrid, condCategoryTag);
-        condResults[key] = items;
-        condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
-        // [S] note if condition returned 0 items.
-        // ただし負条件(negate=「〜が近くに無い」)の0件は「該当POIが周辺に存在しない＝全候補が
-        // 条件を満たす」＝成功なので警告しない（「見つかりませんでした/未収録」は誤解を招く）。
-        if ((!items || items.length === 0) && !c.negate) {
-          this.ui.showL0Message?.(this._m().condNotFound(key));
-        }
-      }));
-    }
-    this._pf('　└ condition収集', _tc);
 
     // [3-B0] L2-1 category validity filter (通常クエリ collections only): drop candidates
     // whose poi_category/class is clearly different from the intent. Runs BEFORE the
