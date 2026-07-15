@@ -1351,6 +1351,8 @@ class LocationFinderApp {
     const input = document.getElementById('searchboxInput');
     const text = (input?.value || '').trim();
     if (!text || this._querying) return; // 対話パネル側が処理中なら無視（入力欄も無効化済みだが二重ガード）
+    const examples = document.getElementById('examplesArea'); // 入力例チップは検索ボックス実行時も隠す
+    if (examples) examples.style.display = 'none';
     input.value = '';
     await this._execSearchBoxQuery(text);
   }
