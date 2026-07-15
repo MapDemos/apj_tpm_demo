@@ -85,7 +85,9 @@ class QueryEngine {
   // Entry point
   // ─────────────────────────────────────────────
 
-  async run(userText) {
+  async run(userText, opts = {}) {
+    const skipL0 = !!opts.skipL0; // 検索ボックス経由：会話エージェント(L0)を呼ばずL1-2へ直行
+    this._skipL0 = skipL0; // run()実行中を通じて参照（_handleFeedback等のネストしたメソッドから）
     // If the previous run ended waiting for clarification (e.g. "池袋は複数あります"),
     // the user's main-input answer (「池袋駅」) is merged with the original query so
     // target/conditions are retained. 句点でつなげるだけの素直な地の文にする（"追加情報："
@@ -118,7 +120,8 @@ class QueryEngine {
     // は表示・記憶しない＝L0がエンジンの実態より先走って喋り、無言停止/情報捏造につながる不具合を
     // 今日繰り返し踏んだための設計変更（詳細はNEXT_STEPS.txt/design.md参照）。
     let confirmShown = false;
-    const l0Promise = (this.llm.converse?.(merged, this._langCode(), this._convHistory) ?? Promise.resolve({ intent: 'new_search', reply: '' }))
+    const l0Promise = skipL0 ? Promise.resolve(false) :
+      (this.llm.converse?.(merged, this._langCode(), this._convHistory) ?? Promise.resolve({ intent: 'new_search', reply: '' }))
       .then(({ intent, reply }) => {
         this._recordTurn('user', merged);
         this._dbgReport.l0Intent = intent; // デバッグ表示専用。制御フローの分岐にはまだ使わない
@@ -152,7 +155,7 @@ class QueryEngine {
     // このLLM呼び出し(Sonnet既定)は復唱を表示するだけで後続の検索処理は内容を参照しないため、
     // await で検索開始をブロックしない（実際の検索=Search Box/Tilequery/L2等の方が大抵長くかかり、
     // その裏に隠れる。schema確定"後"にしか呼ばない点は維持＝先走り発話バグの再発防止はそのまま）。
-    if (!confirmShown) {
+    if (!confirmShown && !skipL0) {
       confirmShown = true;
       const summary = this._buildSchemaSummary(schema);
       (async () => {
@@ -2534,14 +2537,16 @@ class QueryEngine {
     // 確度コメントのL0生成は表示専用（結果パネルの内容を参照しないコメント）なので、confirmSchemaと
     // 同じパターンでawaitせず並行実行する（結果パネル表示をL0往復ぶんブロックしない）。到着まで
     // プレースホルダーを出し、確定ボタン等より後にコメントが浮くのを「読み込み中」感で自然に見せる。
-    const l0TypingToken = this.ui.showL0Typing?.();
-    (async () => {
-      let confidenceText = '';
-      try { confidenceText = await this.llm.describeResults?.(resultsSummary, this._langCode(), this._convHistory); } catch {}
-      if (!confidenceText) confidenceText = M[confidenceKey]; // 失敗/空なら固定文言にフォールバック
-      this.ui.resolveL0Message?.(confidenceText, l0TypingToken);
-      this._recordTurn('l0', confidenceText);
-    })();
+    if (!this._skipL0) {
+      const l0TypingToken = this.ui.showL0Typing?.();
+      (async () => {
+        let confidenceText = '';
+        try { confidenceText = await this.llm.describeResults?.(resultsSummary, this._langCode(), this._convHistory); } catch {}
+        if (!confidenceText) confidenceText = M[confidenceKey]; // 失敗/空なら固定文言にフォールバック
+        this.ui.resolveL0Message?.(confidenceText, l0TypingToken);
+        this._recordTurn('l0', confidenceText);
+      })();
+    }
 
     // [大体の位置] area result: draw an approximate area (convex hull) around the
     // surfaced candidates when the query asked for a rough location, not a pinpoint.
@@ -2559,6 +2564,9 @@ class QueryEngine {
   // ─────────────────────────────────────────────
 
   async _handleFeedback(schema, originalText) {
+    // 検索ボックス経由（L0無し）は単発クエリとして完結させる。「更に絞る/やり直す」の会話継続
+    // ループはL0の対話を前提とするため呼び出さない（結果は候補パネルに出た時点で完了）。
+    if (this._skipL0) return;
     const proximityLabel = (schema?.proximity?.anchors || []).map(a => a.text).filter(Boolean).join('・') || null;
     // 「更に絞り込む」は現在の候補プール(surfaced=full+partial)の中で絞る操作。プールが1件以下なら
     // 絞り込む対象が無い＝無意味なのでボタンを隠す。

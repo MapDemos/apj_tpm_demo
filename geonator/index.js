@@ -540,33 +540,42 @@ class LocationFinderApp {
         self.addMessage('assistant', text);
       },
       // L0（会話マネジメント）の発話。既存の assistant とは別ロール・別スタイルで表示する。
+      // 検索ボックス経由（L0無しモード）ではチャット吹き出しの代わりに検索ボックス直下の
+      // ミニパネルへ短いステータス文言として出す（対話パネルには一切書かない）。
       showL0Message(text) {
+        if (self._searchBoxMode) { self._searchBoxShowStatus(text); return; }
         self.addMessage('l0', text);
         self._speak(text);
       },
       // L0の自然文コメントが非同期で後追い到着するまでの「入力中…」プレースホルダー。呼び出し元は
       // 戻り値のtokenを保持し、resolveL0Messageに渡すこと(次クエリの「考え中」と取り違えないため)。
       showL0Typing() {
+        if (self._searchBoxMode) return null; // 検索ボックスモードはそもそもL0を呼ばない
         return self._showL0TypingPlaceholder();
       },
       // showL0Typing()のプレースホルダーを同じ位置で実文言に差し替える(末尾追加のshowL0Messageと違い、
       // 間に挟まった候補パネル/確定ボタンより後ろに飛ばない)。tokenが一致しなければ(次のクエリの
       // 「考え中」に置き換わっている等)そのプレースホルダーには触れず通常のaddMessageにフォールバック。
       resolveL0Message(text, token) {
+        if (self._searchBoxMode) return;
         self._resolveL0Typing(text, token);
         self._speak(text);
       },
       // 処理エージェント発の申し送り事項（除外条件・rail/地下鉄の扱い等）。会話ではなく
       // エンジンの決定的な注記なので、L0とは別の処理エージェント系スタイル(アンバー)で表示する。
       // 処理ビューOFF時は非表示（会話モード向け・エンジンの判断自体には影響しない）。
+      // 検索ボックスモードは対話パネルに何も書かない方針のためこちらも非表示。
       showProcessingNote(text) {
+        if (self._searchBoxMode) return;
         if (self._processingViewOff) return;
         self.addMessage('proc-note', text);
       },
       showSearching(text) {
+        if (self._searchBoxMode) { self._searchBoxShowStatus(text); return; }
         self._updateThinking(text);
       },
       async showChoices(question, choices) {
+        if (self._searchBoxMode) return self._searchBoxShowChoices(question, choices);
         self._hideCancelBtn(); // ユーザー選択待ち＝処理は一旦ユーザーに委ねる→キャンセル不要
         const answer = await new Promise(resolve => {
           self.addMessage('l0', question);
@@ -579,6 +588,7 @@ class LocationFinderApp {
         return answer;
       },
       async showHintInput(prompt, suggestions) {
+        if (self._searchBoxMode) return self._searchBoxShowHintInput(prompt, suggestions);
         self._hideCancelBtn(); // 入力待ち＝キャンセル不要
         const text = await new Promise(resolve => {
           self.addMessage('l0', prompt);
@@ -601,6 +611,8 @@ class LocationFinderApp {
         // Candidate list in the dialogue panel (clickable + feedback for ground truth).
         // Result-count summary is not shown here — it's already covered by L0's message.
         self._renderCandidatePanel(full, partial, none, droppedNote);
+        // 検索ボックスモードは結果が候補パネルに出た時点でミニパネルの「検索中…」表示は不要。
+        if (self._searchBoxMode) self._searchBoxHide();
       },
       async showFeedback(proximityLabel, opts) {
         self._hideCancelBtn(); // フィードバック待ち＝キャンセル不要
@@ -623,7 +635,10 @@ class LocationFinderApp {
       // 1次検索bbox（within到達圏で絞られていればその値）を保持。地図OFF時の静的地図の枠に使う。
       setResultBbox(bbox) { self._lastResultBbox = bbox || null; },
       // 次の計算中に「今何をしているか」を再表示（次の吹き出しで自動的に消える）
-      thinking(label) { self._showTypingIndicator(label); },
+      thinking(label) {
+        if (self._searchBoxMode) { self._searchBoxShowStatus(label || (self._lang === 'en' ? 'Searching…' : '検索中…')); return; }
+        self._showTypingIndicator(label);
+      },
       // キャンセルされたか（QueryEngineが各局面で確認し、途中で描画を止める）
       isCancelled() { return !!self._cancelled; },
       drawProximityPoints(points) {
@@ -706,6 +721,7 @@ class LocationFinderApp {
       },
       showRunStats(stats) {
         if (!stats) return;
+        if (self._searchBoxMode) return; // 検索ボックスモードは対話パネルに何も書かない方針
         // 結果表示前の「考え中」表示は_renderCandidatePanel側で既に消えている。ここで無条件に消すと
         // showResults直後に出したL0確度コメント用プレースホルダー(showL0Typing)まで消えてしまうため、
         // 明示的なhideは行わない（実文言到着時はaddMessageが自動的に消す）。
@@ -1191,6 +1207,14 @@ class LocationFinderApp {
     });
     input.addEventListener('blur', () => this._hideUserTyping());
 
+    // 検索ボックス（L0無し・L1-2直行）。対話パネルとは排他（_setInputLockで相互に無効化）。
+    const sbInput = document.getElementById('searchboxInput');
+    const sbBtn   = document.getElementById('searchboxBtn');
+    sbBtn?.addEventListener('click', () => this._handleSearchBoxSend());
+    sbInput?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); this._handleSearchBoxSend(); }
+    });
+
     document.getElementById('clearChatBtn').addEventListener('click', () => this._resetChat());
 
     document.getElementById('settingsLangBtn')?.addEventListener('click', () => this._toggleLanguage());
@@ -1285,6 +1309,7 @@ class LocationFinderApp {
     this._lastQuery = text;
     this._cancelled = false;
     input.disabled   = true;
+    this._setSearchBoxDisabled(true); // 対話パネル処理中は検索ボックスを排他ロック
     this._setProcessing(true); // 送信ボタンを停止(■)モードに
     this._advanceMapGen();
     this._showThinking(LANG[this._lang].connecting);
@@ -1301,9 +1326,137 @@ class LocationFinderApp {
         this._hideTypingIndicator();
         this._setProcessing(false); // 送信ボタンを送信(➤)へ戻す
         input.disabled   = false;
+        this._setSearchBoxDisabled(false);
         input.focus();
       }
     }
+  }
+
+  /** 検索ボックス（対話パネルを介さずL1-2へ直行）の送信。対話パネルと排他（同時使用不可）。 */
+  async _handleSearchBoxSend() {
+    const input = document.getElementById('searchboxInput');
+    const text = (input?.value || '').trim();
+    if (!text || this._querying) return; // 対話パネル側が処理中なら無視（入力欄も無効化済みだが二重ガード）
+    input.value = '';
+    await this._execSearchBoxQuery(text);
+  }
+
+  /** 検索ボックス専用のクエリ実行ルーチン（_execQueryのL0無し版）。結果は候補パネルのみに出す。 */
+  async _execSearchBoxQuery(text) {
+    if (this._querying) return;
+    this._querying = true;
+    this._searchBoxMode = true;
+    const gen = (this._uiGen = (this._uiGen || 0) + 1);
+    this._lastQuery = text;
+    this._cancelled = false;
+    this._setChatInputDisabled(true); // 対話パネル側を排他ロック
+    const sbBtn = document.getElementById('searchboxBtn');
+    if (sbBtn) sbBtn.disabled = true;
+    this._advanceMapGen();
+    this._searchBoxShowStatus(this._lang === 'en' ? 'Searching…' : '検索中…');
+
+    try {
+      await this.processUserMessage(text, { skipL0: true });
+    } catch (err) {
+      if (!this._cancelled && gen === this._uiGen) {
+        this._searchBoxShowStatus(String(err?.message || err));
+      }
+    } finally {
+      if (gen === this._uiGen) {
+        this._querying = false;
+        this._searchBoxMode = false;
+        this._setChatInputDisabled(false);
+        if (sbBtn) sbBtn.disabled = false;
+        const sbIn = document.getElementById('searchboxInput');
+        sbIn?.focus();
+      }
+    }
+  }
+
+  /** 対話パネルの入力欄＋送信ボタンをロック/アンロック（検索ボックス実行中の排他用）。 */
+  _setChatInputDisabled(disabled) {
+    const input = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('sendBtn');
+    if (input) input.disabled = disabled;
+    if (sendBtn) sendBtn.disabled = disabled;
+  }
+
+  /** 検索ボックスの入力欄＋ボタンをロック/アンロック（対話パネル実行中の排他用）。 */
+  _setSearchBoxDisabled(disabled) {
+    const sbIn  = document.getElementById('searchboxInput');
+    const sbBtn = document.getElementById('searchboxBtn');
+    if (sbIn)  sbIn.disabled  = disabled;
+    if (sbBtn) sbBtn.disabled = disabled;
+  }
+
+  /** 検索ボックス直下のミニパネルを隠す（結果が候補パネルに出た等、もう用が無い時）。 */
+  _searchBoxHide() {
+    const panel = document.getElementById('searchboxPanel');
+    if (!panel) return;
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+  }
+
+  /** 検索ボックス直下のミニパネルに短いステータス文言を表示する（対話パネルには一切書かない）。 */
+  _searchBoxShowStatus(text) {
+    const panel = document.getElementById('searchboxPanel');
+    if (!panel) return;
+    panel.style.display = 'flex';
+    panel.innerHTML = `<div class="searchbox-panel-msg">${_esc(text || '')}</div>`;
+  }
+
+  /** 検索ボックスモードでの選択肢提示（同名地名の絞り込み等）。ミニパネルにボタンを並べる。 */
+  _searchBoxShowChoices(question, choices) {
+    return new Promise(resolve => {
+      const panel = document.getElementById('searchboxPanel');
+      if (!panel) { resolve(choices[0]); return; }
+      panel.style.display = 'flex';
+      panel.innerHTML = `
+        <div class="searchbox-panel-msg">${_esc(question)}</div>
+        <div class="searchbox-panel-choices">
+          ${choices.map((c, i) => `<button class="choice-btn" data-i="${i}">${i + 1}. ${_esc(c)}</button>`).join('')}
+        </div>
+      `;
+      panel.querySelectorAll('.searchbox-panel-choices .choice-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const i = +btn.dataset.i;
+          panel.style.display = 'none';
+          panel.innerHTML = '';
+          resolve(choices[i]);
+        });
+      });
+    });
+  }
+
+  /** 検索ボックスモードでの追加ヒント入力（場所/対象が特定できない場合等）。ミニパネルに
+   *  テキスト欄（＋あれば提案ボタン）を出す。対話パネルの入力欄は使わない（排他を維持）。 */
+  _searchBoxShowHintInput(prompt, suggestions) {
+    return new Promise(resolve => {
+      const panel = document.getElementById('searchboxPanel');
+      if (!panel) { resolve(null); return; }
+      const sugList = Array.isArray(suggestions) ? suggestions.filter(s => s && s.text) : [];
+      const en = this._lang === 'en';
+      panel.style.display = 'flex';
+      panel.innerHTML = `
+        <div class="searchbox-panel-msg">${_esc(prompt)}</div>
+        ${sugList.length ? `<div class="searchbox-panel-choices">${sugList.map((s, i) => `<button class="choice-btn" data-i="${i}">${i + 1}. ${_esc(s.text)}</button>`).join('')}</div>` : ''}
+        <div class="searchbox-panel-input-row">
+          <input type="text" id="searchboxHintInput" placeholder="${en ? 'Type an answer…' : '回答を入力…'}">
+          <button class="control-btn" id="searchboxHintSend">➤</button>
+        </div>
+      `;
+      const settle = (value) => { panel.style.display = 'none'; panel.innerHTML = ''; resolve(value); };
+      if (sugList.length) {
+        panel.querySelectorAll('.searchbox-panel-choices .choice-btn').forEach(btn => {
+          btn.addEventListener('click', () => settle(sugList[+btn.dataset.i]));
+        });
+      }
+      const hintInput = panel.querySelector('#searchboxHintInput');
+      const send = () => { const v = (hintInput.value || '').trim(); settle(v || null); };
+      panel.querySelector('#searchboxHintSend').addEventListener('click', send);
+      hintInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+      hintInput.focus();
+    });
   }
 
   // 旧・別枠キャンセル吹き出しは廃止。停止は送信ボタン(■)に集約（_setProcessing）。
@@ -1317,6 +1470,7 @@ class LocationFinderApp {
   _setProcessing(on) {
     const sendBtn = document.getElementById('sendBtn');
     if (!sendBtn) return;
+    if (this._searchBoxMode) return; // 検索ボックス実行中は対話パネル排他ロックを崩さない
     sendBtn.disabled = false; // 送信・停止のどちらでもクリック可
     if (on) {
       sendBtn.classList.add('stop');
@@ -2610,12 +2764,13 @@ class LocationFinderApp {
   /**
    * Delegate to QueryEngine (JS-driven architecture).
    * @param {string} userText
+   * @param {{skipL0?: boolean}} [opts] - skipL0: 検索ボックス経由（会話エージェント無し・L1-2直行）
    */
-  async processUserMessage(userText) {
+  async processUserMessage(userText, opts = {}) {
     this._resetFlowState();
     this._lastQuery = userText; // captured for ground-truth feedback rows
     if (this._mapActive()) this.map.flyTo({ zoom: 10, duration: 900, essential: true }); // 地図OFF時はスキップ
-    await this.queryEngine.run(userText);
+    await this.queryEngine.run(userText, opts);
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -2648,16 +2803,16 @@ class LocationFinderApp {
    * @param {string} text
    */
   /** チャット内「考えています…」タイピング吹き出し（送信〜最初の応答の間の“間”を埋める）。 */
-  _showTypingIndicator(label, category = 'assistant') {
+  _showTypingIndicator(label) {
     this._hideTypingIndicator(); // 重複防止（タイマーもクリア）
     const container = document.getElementById('chatMessages');
     if (!container) return;
     const wrapper = document.createElement('div');
-    wrapper.className = `message ${category} typing-indicator`;
+    wrapper.className = 'message assistant typing-indicator';
     wrapper.id = 'typingIndicator';
     const lbl = document.createElement('div');
     lbl.className = 'msg-label';
-    lbl.textContent = category === 'l0' ? LANG[this._lang].roleL0 : LANG[this._lang].roleAssistant;
+    lbl.textContent = LANG[this._lang].roleAssistant;
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
     bubble.innerHTML =
@@ -2676,34 +2831,48 @@ class LocationFinderApp {
     tick();
     this._typingTimer = setInterval(tick, 1000);
   }
-  /** L0確度コメント用プレースホルダーを表示し、以後の照合用トークンを発行する
-   *  (id='typingIndicator'は使い回されるため、tokenで「自分が出したものか」を確認できるようにする)。 */
+  _hideTypingIndicator() {
+    if (this._typingTimer) { clearInterval(this._typingTimer); this._typingTimer = null; }
+    document.getElementById('typingIndicator')?.remove();
+  }
+  /** L0確度コメント用プレースホルダー。汎用の「考え中」(#typingIndicator)とは完全に別id
+   *  (#l0PendingBubble)にすることで、addMessage内の汎用hideや処理ビューOFF時のフィードバック
+   *  プロンプト(addMessage経由)に巻き込まれて消えないようにする。以後の照合用tokenを返す
+   *  (次クエリが新しいプレースホルダーを出した後に、前クエリのdescribeResultsが遅れて解決しても
+   *  誤って新しい方を上書きしないため)。 */
   _showL0TypingPlaceholder() {
+    document.getElementById('l0PendingBubble')?.remove();
+    const container = document.getElementById('chatMessages');
+    if (!container) return null;
     const token = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    this._showTypingIndicator(null, 'l0');
-    const wrapper = document.getElementById('typingIndicator');
-    if (wrapper) wrapper.dataset.l0Token = token;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message l0 typing-indicator';
+    wrapper.id = 'l0PendingBubble';
+    wrapper.dataset.l0Token = token;
+    const lbl = document.createElement('div');
+    lbl.className = 'msg-label';
+    lbl.textContent = LANG[this._lang].roleL0;
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+    bubble.innerHTML = `<span class="typing-dots"><span></span><span></span><span></span></span>`;
+    wrapper.appendChild(lbl); wrapper.appendChild(bubble);
+    container.appendChild(wrapper);
+    container.scrollTop = container.scrollHeight;
     return token;
   }
-  /** プレースホルダー(#typingIndicator)を同じ位置で実メッセージに差し替える。tokenが不一致
-   *  (別クエリの「考え中」に既に置き換わっている等)なら触らず、通常のaddMessageにフォールバック
-   *  (末尾追加＝addMessageだとDOM順序が崩れるが、無関係な表示中インジケータを誤って上書きするよりまし)。 */
+  /** L0確度コメント用プレースホルダーを同じ位置で実文言に差し替える。token不一致(既に別クエリの
+   *  プレースホルダーに置き換わっている等)なら触らず、通常のaddMessageにフォールバック。 */
   _resolveL0Typing(text, token) {
-    const wrapper = document.getElementById('typingIndicator');
+    const wrapper = document.getElementById('l0PendingBubble');
     const isOurs = wrapper && (!token || wrapper.dataset.l0Token === token);
     if (!isOurs) { this.addMessage('l0', text); return; }
-    if (this._typingTimer) { clearInterval(this._typingTimer); this._typingTimer = null; }
     wrapper.removeAttribute('id');
-    wrapper.className = 'message l0';
+    wrapper.classList.remove('typing-indicator');
     this._lastAgentCategory = 'l0';
     const bubble = wrapper.querySelector('.message-bubble');
     if (bubble) bubble.innerHTML = _formatMsg(text);
     const container = document.getElementById('chatMessages');
     if (container) container.scrollTop = container.scrollHeight;
-  }
-  _hideTypingIndicator() {
-    if (this._typingTimer) { clearInterval(this._typingTimer); this._typingTimer = null; }
-    document.getElementById('typingIndicator')?.remove();
   }
 
   addMessage(role, text, opts = {}) {
