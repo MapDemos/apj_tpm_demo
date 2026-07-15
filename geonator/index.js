@@ -1208,11 +1208,25 @@ class LocationFinderApp {
     input.addEventListener('blur', () => this._hideUserTyping());
 
     // 検索ボックス（L0無し・L1-2直行）。対話パネルとは排他（_setInputLockで相互に無効化）。
+    // 送信はEnter×2（誤爆防止・本体入力欄と同じ作法）またはボタンクリックのみ。
     const sbInput = document.getElementById('searchboxInput');
     const sbBtn   = document.getElementById('searchboxBtn');
     sbBtn?.addEventListener('click', () => this._handleSearchBoxSend());
     sbInput?.addEventListener('keydown', e => {
-      if (e.key === 'Enter') { e.preventDefault(); this._handleSearchBoxSend(); }
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      if (this._sbEnterArmed) {
+        this._sbEnterArmed = false;
+        sbInput.classList.remove('armed');
+        this._handleSearchBoxSend();
+      } else if (sbInput.value.trim()) {
+        this._sbEnterArmed = true;
+        sbInput.classList.add('armed'); // もう一度Enterで送信、の視覚合図
+      }
+    });
+    sbInput?.addEventListener('input', () => {
+      this._sbEnterArmed = false;
+      sbInput.classList.remove('armed');
     });
 
     document.getElementById('clearChatBtn').addEventListener('click', () => this._resetChat());
@@ -3139,6 +3153,12 @@ class LocationFinderApp {
     const input = document.getElementById('chatInput');
     if (input) input.placeholder = t.placeholder;
 
+    // Search box (bypasses L0 → L1-2 direct)
+    const sbInput = document.getElementById('searchboxInput');
+    if (sbInput) sbInput.placeholder = t.searchboxPlaceholder;
+    const sbBtn = document.getElementById('searchboxBtn');
+    if (sbBtn) { sbBtn.textContent = t.searchBtn; sbBtn.title = t.searchBtn; }
+
     // Clear chat button
     const clearBtn = document.getElementById('clearChatBtn');
     if (clearBtn) clearBtn.textContent = t.clearChat;
@@ -3317,6 +3337,8 @@ const LANG = {
     appTitle:      'ジオネーター',
     langBtn:       '🌐 Switch to EN',
     placeholder:   '場所を入力… (Enter×2で送信)',
+    searchboxPlaceholder: '場所を直接検索… (Enter×2で送信)',
+    searchBtn:     '検索',
     clearChat:     'チャットをクリア',
     debugOff:      '🔍 デバッグ OFF',
     debugOn:       '🔍 デバッグ ON',
@@ -3451,6 +3473,8 @@ const LANG = {
     appTitle:      'Geonator',
     langBtn:       '🌐 日本語に変更',
     placeholder:   'Describe location… (press Enter twice to send)',
+    searchboxPlaceholder: 'Search a place directly… (press Enter twice to send)',
+    searchBtn:     'Search',
     clearChat:     'Clear Chat',
     debugOff:      '🔍 Debug OFF',
     debugOn:       '🔍 Debug ON',

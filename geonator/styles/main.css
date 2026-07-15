@@ -847,7 +847,7 @@ body { display: flex; flex-direction: column; }
   padding: 6px;
 }
 .searchbox-input {
-  width: 220px;
+  width: 330px;
   background: #0d1424;
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -856,6 +856,7 @@ body { display: flex; flex-direction: column; }
   padding: 5px 8px;
 }
 .searchbox-input:disabled { opacity: .5; }
+.searchbox-input.armed { border-color: var(--amber); } /* もう一度Enterで送信、の合図 */
 .searchbox-btn { font-size: 12px; padding: 5px 9px; }
 
 .searchbox-panel {
