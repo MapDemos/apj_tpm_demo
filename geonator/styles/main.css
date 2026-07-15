@@ -814,6 +814,16 @@ body { display: flex; flex-direction: column; }
   z-index: 5;
 }
 
+/* Mapbox純正の四隅コントロール枠から外し、右端・垂直中央へ再配置したズームコントロール */
+.nav-ctrl-mid-right {
+  position: absolute !important;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  z-index: 6;
+  margin: 0 !important;
+}
+
 .map-status-label {
   position: absolute;
   top: 12px;

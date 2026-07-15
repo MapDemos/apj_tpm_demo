@@ -1183,9 +1183,16 @@ class LocationFinderApp {
       attributionControl: false,
     });
 
-    // top-rightは検索ボックス(searchboxBar)と重なるため、ズームコントロールはbottom-rightへ
-    // （AttributionControlと同じ隅・thinking-floatはbottom:40pxより上にあるので衝突しない）。
-    this.map.addControl(new mapboxgl.NavigationControl({ visualizePitch: false }), 'bottom-right');
+    // top-right（検索ボックス）／bottom-right（Attribution・thinking-float）どちらの隅とも
+    // 重ならないよう、Mapbox純正の四隅コントロール枠には乗せず、.map-panel(position:relative)
+    // 直下へ付け替えて右端・垂直方向中央にCSSで固定配置する。
+    const navControl = new mapboxgl.NavigationControl({ visualizePitch: false });
+    this.map.addControl(navControl, 'top-right'); // 一旦追加してDOM生成させるだけ（位置は直後に上書き）
+    const navEl = navControl._container;
+    if (navEl) {
+      navEl.classList.add('nav-ctrl-mid-right');
+      document.querySelector('.map-panel')?.appendChild(navEl);
+    }
     this.map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
 
     return new Promise(resolve => this.map.on('load', () => {
