@@ -160,7 +160,7 @@ class LLMClient {
    * @param {string|null} previousText - full previous query text for re-parse
    * @returns {Promise<object>} raw QuerySchema (before validation/filling)
    */
-  async parseQuery(userText, previousText = null, lang = 'ja', retryHint = '') {
+  async parseQuery(userText, previousText = null, lang = 'ja', retryHint = '', skipConfirmation = false) {
     const fullText = previousText ? `${previousText}\n追加情報：${userText}` : userText;
     // 上限超過分も含め全条件＋各poiのqueries[]を出すため出力が長くなり得る。max_tokens不足だと
     // JSONが途中で切れてパース失敗→「通信エラー」になる。余裕を持たせる（§透明化A・config化）。
@@ -170,7 +170,7 @@ class LLMClient {
     for (let attempt = 0; attempt <= this.config.L1_MAX_RETRY; attempt++) {
       try {
         const { text, stop_reason } = await this._callClaude(
-          this._buildL1Prompt(fullText, lang, retryHint),
+          this._buildL1Prompt(fullText, lang, retryHint, skipConfirmation),
           MAX_TOK,
           this.config.L1_MODEL,
           'L1',
@@ -655,7 +655,7 @@ class LLMClient {
     return JSON.parse(match[1].trim());
   }
 
-  _buildL1Prompt(userText, lang = 'ja', retryHint = '') {
+  _buildL1Prompt(userText, lang = 'ja', retryHint = '', skipConfirmation = false) {
     // Full prompt text lives in prompts/prompt-l1.js (loaded separately).
     // Here we just compose the call structure. The condition cap is injected at call
     // time (configurable) so L1 emits ≤N conditions and the confirmation stays consistent.
@@ -668,9 +668,13 @@ class LLMClient {
       : '';
     // retryHint: 前回抽出に失敗した時の再試行で付与（壊れた音声入力を丁寧に拾い直させる注記）。
     const hint = retryHint ? `\n\n【システム注記】${retryHint}` : '';
+    // 検索ボックス経由(skipL0)はconfirmationを一切表示しない（query-engine.jsのL0確認文表示は
+    // !skipL0時のみ）ため、生成自体を省いてレイテンシを削る。system(キャッシュ対象)は変えず
+    // user側にだけ注記を足すことで、通常フローとのプロンプトキャッシュを両立させる。
+    const noConfirm = skipConfirmation ? ' confirmation フィールドは出力しないでください（今回は表示に使いません）。' : '';
     return {
       system: PROMPT_L1,
-      user:   `ユーザー入力：「${userText}」\n\n地理的な条件は重要な順に、上限を超える分も含めてすべて conditions 配列に入れてください（システムが上限${maxC}件を適用し、超過分はユーザーへ通知します）。地図データで判定できない非地理的な特徴は unsupported_features 配列に入れてください（confirmation では触れない。JSが決定的に通知します）。${langNote}${hint}QuerySchema JSONのみを返してください。`,
+      user:   `ユーザー入力：「${userText}」\n\n地理的な条件は重要な順に、上限を超える分も含めてすべて conditions 配列に入れてください（システムが上限${maxC}件を適用し、超過分はユーザーへ通知します）。地図データで判定できない非地理的な特徴は unsupported_features 配列に入れてください（confirmation では触れない。JSが決定的に通知します）。${langNote}${noConfirm}${hint}QuerySchema JSONのみを返してください。`,
     };
   }
 

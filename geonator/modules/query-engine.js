@@ -258,7 +258,7 @@ class QueryEngine {
       const retryHint = attempt === 0 ? '' :
         '前回この入力から場所依頼を抽出できませんでした。壊れた音声入力の可能性があります。挨拶・相槌・脱線・言い直しの前半は無視し、地名/駅/施設/条件を丁寧に拾ってスキーマ化してください。手がかりが少しでもあれば not_a_query にしないこと。';
       try {
-        schema = await this.llm.parseQuery(userText, previousText, this._langCode(), retryHint);
+        schema = await this.llm.parseQuery(userText, previousText, this._langCode(), retryHint, this._skipL0);
       } catch (e) {
         lastErr = e; schema = null;
         // 429(混雑)は投げ直しても悪化するだけ → 再試行せず即中断。
@@ -390,7 +390,7 @@ class QueryEngine {
     const combined = `${this._previousText}\n追加情報：${additionalText}`;
     this._previousText = combined;
     try {
-      const schema = await this.llm.parseQuery(combined, null, this._langCode());
+      const schema = await this.llm.parseQuery(combined, null, this._langCode(), '', this._skipL0);
       if (!validateQuerySchema(schema).ok) return null;
       fillSchemaDefaults(schema, this.config.DEFAULT_LEVEL, this.config.MAX_CONDITIONS);
       // Same floors recovery as _parseAndValidate across clarify/refine re-parses.
