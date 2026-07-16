@@ -467,12 +467,13 @@ class QueryEngine {
       const _t2 = this._pnow();
       this.mcp._gridCircles = []; this.mcp._gridCirclesSkipped = []; // TilequeryグリッドをデバッグでリセットしてこのStep1分を蓄積
       let collected = await this._collectCandidates(schema, bboxes);
-      this._pf('② Step1：候補収集（合計）', _t2);
+      this._pf('　└ Step1：候補収集（初回）', _t2);
       if (!collected) return;
 
       // [3-B-overflow] target overflowed the cap (too dense for the proximity bbox) →
       // re-anchor on a selective tight condition (promotion) or ask for a landmark.
       if (this._targetRaw > this.config.CANDIDATE_LIMIT) {
+        const _tOverflow = this._pnow();
         const tight = await this._resolveOverflow(schema, bboxes, collected);
         if (tight && tight.bbox) {
           if (tight.note) this.ui.showL0Message?.(tight.note);
@@ -487,7 +488,9 @@ class QueryEngine {
           if (re) collected = re;
         }
         // no resolution (user skipped / nothing found) → proceed with the capped set.
+        this._pf('　└ overflow再解決（LLM/UI待ち込み・再収集込み）', _tOverflow);
       }
+      this._pf('② Step1：候補収集（合計）', _t2);
 
       this._cache.mainCandidates = collected.main;
       this._cache.condCandidates = collected.conditions;
@@ -1891,6 +1894,7 @@ class QueryEngine {
     ).then(() => { this._pf('　└ condition収集', _tc); });
 
     let [mainRaw] = await Promise.all([targetPromise, condPromise]);
+    const _tPost = this._pnow();
     mainRaw = this._applyBuildingNameRules(target, mainRaw);
     mainRaw = this._dedupTargets(mainRaw); // [pre-scoring] cheap JS-only dedup (see method). LLM-based pass3 runs later, after L2-2.
 
@@ -1912,6 +1916,7 @@ class QueryEngine {
     if (mainRaw.length > this.config.CANDIDATE_LIMIT) {
       mainRaw = mainRaw.slice(0, this.config.CANDIDATE_LIMIT);
     }
+    this._pf(`　└ 建物名寄せ・重複除去・到達圏フィルタ（JS・${mainRaw.length}件）`, _tPost);
 
     // [3-B0] L2-1 category validity filter (通常クエリ collections only): drop candidates
     // whose poi_category/class is clearly different from the intent. Runs BEFORE the
@@ -1929,13 +1934,16 @@ class QueryEngine {
     // 残る等が起きる。通常クエリ(target/condition)として挙動を揃え、条件も名前で弾く。
     const _t22 = this._pnow();
     const poiConds = (schema.conditions || []).filter(c => c.type === 'poi');
+    const _tRateMain = this._pnow();
     const [mainRated] = await Promise.all([
-      this._rateMain(target, mainRaw),
+      this._rateMain(target, mainRaw).then(r => { this._pf('　　└ L2-2 target評価', _tRateMain); return r; }),
       ...poiConds.map(async c => {
         const key = c.text ?? c.type;
         const items = condResults[key];
         if (!items?.length) return;
+        const _tRateCond = this._pnow();
         const { kept: keptCond } = await this._rateMain({ text: c.text, query_intent: c.query_intent || 'specific' }, items);
+        this._pf(`　　└ L2-2 condition[${key}]評価`, _tRateCond);
         condResults[key] = keptCond;
       }),
     ]);
@@ -2017,9 +2025,11 @@ class QueryEngine {
     // (g0,g1,…) for the LLM payload so it doesn't have to echo Japanese keys back.
     const uncached = judgeable.filter(g => !this._catCache.has(cacheKeyOf(g)));
     if (uncached.length) {
+      const _tLLM = this._pnow();
       const res = await this.llm.filterCategories(uncached.map((g, i) => ({
         key: `g${i}`, intent: g.intent, poi_category: g.poi_category, class: g.class,
       })));
+      this._pf(`　　└ L2-1 LLM呼び出し（${uncached.length}グループ）`, _tLLM);
       if (res) {
         uncached.forEach((g, i) => {
           if (res[`g${i}`]) this._catCache.set(cacheKeyOf(g), res[`g${i}`]);
