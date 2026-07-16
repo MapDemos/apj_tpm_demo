@@ -18,7 +18,6 @@ class LLMClient {
       L1c:  { model: this.config.L1_CONFIRM_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L1:   { model: this.config.L1_MODEL,   inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L1_3: { model: this.config.L1_3_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
-      L1_CAT: { model: this.config.L1_CAT_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L2_1: { model: this.config.L2_1_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L2_2: { model: this.config.L2_2_MODEL, inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
       L3:   { model: this.config.L3_MODEL,   inTok: 0, outTok: 0, cacheRead: 0, cacheWrite: 0, ms: 0, calls: 0 },
@@ -397,48 +396,6 @@ class LLMClient {
   }
 
   // ─────────────────────────────────────────────
-  // L1.5: category tag resolution — LLMフォールバック（JS辞書がミスした時のみ呼ばれる）
-  // Search Boxのpoi_categoryフィルタに渡すcanonical_idを、taxonomy一覧から意味推論で選ぶ。
-  // 「牛丼屋」→「レストラン>丼もの」のような、事前辞書(data/category-synonyms.js)の
-  // 文字列一致では拾えない知識ベースのマッピングを担う。呼び出し元(mapbox-mcp.js)が
-  // 返り値を必ずtaxonomy実リストと照合してから使うため、ここでのハルシネーションは
-  // 「フォールバックしてtext検索になる」だけで実害はない。
-  // ─────────────────────────────────────────────
-
-  /**
-   * @param {string[]} queries - 対象のqueries配列（同義語展開済み）
-   * @returns {Promise<string|null>} canonical_id。該当なし/失敗時はnull
-   */
-  async resolveCategoryTag(queries) {
-    if (typeof CATEGORY_TAXONOMY === 'undefined' || !queries?.length) return null;
-    const system =
-      'あなたはPOI検索カテゴリの分類器です。以下はSearch Box APIのカテゴリtaxonomy（canonical_id一覧、' +
-      '"main"または"main>sub"の文字列）です。\n' + JSON.stringify(CATEGORY_TAXONOMY) +
-      '\n\nユーザーの検索語（同義語展開済みの配列）が、上記taxonomyのどれか1件に明確に対応するなら、' +
-      'その文字列をそのまま返してください。一般常識で対応が分かるケース（例：「牛丼屋」→「レストラン>丼もの」）も含みます。' +
-      '複数のカテゴリに当てはまりそう、または該当が無い/確信が持てない場合は null にしてください（無理に当てはめない）。' +
-      '固有のブランド名・店名（例：「ドミノピザ」）はそれ自体がカテゴリではないため、判断できなければ null にしてください。' +
-      '{"canonical_id": "<taxonomy内の文字列 or null>"} のJSON形式のみで返答してください。';
-
-    try {
-      const result = await this._callClaude(
-        { system, user: `検索語: ${JSON.stringify(queries)}` },
-        200,
-        this.config.L1_CAT_MODEL,
-        'L1_CAT',
-        { cacheSystem: true } // taxonomyは不変な固定ブロック→プロンプトキャッシュで2回目以降ほぼ無料
-      );
-      const json = this._extractJSON(result);
-      const id = json?.canonical_id;
-      if (typeof id !== 'string' || !id) return null;
-      // ハルシネーション対策：実在するcanonical_idか必ず検証
-      return CATEGORY_TAXONOMY.includes(id) ? id : null;
-    } catch {
-      return null;
-    }
-  }
-
-  // ─────────────────────────────────────────────
   // L2-1: category validity check (通常クエリ) — see poi_category/class, not names
   // ─────────────────────────────────────────────
 
@@ -672,8 +629,14 @@ class LLMClient {
     // !skipL0時のみ）ため、生成自体を省いてレイテンシを削る。system(キャッシュ対象)は変えず
     // user側にだけ注記を足すことで、通常フローとのプロンプトキャッシュを両立させる。
     const noConfirm = skipConfirmation ? ' confirmation フィールドは出力しないでください（今回は表示に使いません）。' : '';
+    // category_tag判定用のtaxonomyはprompt-l1.js本文には書かず、呼び出し時にここで結合する
+    // （データファイルはdata/category-taxonomy.js。プロンプト本文はシンプルに保つ）。
+    // 結合後の全文が1つのcache_control対象になる＝taxonomyも含めてキャッシュされる。
+    const taxonomyBlock = (this.config.useCategorySearch && typeof CATEGORY_TAXONOMY !== 'undefined')
+      ? `\n\n## POI Category Taxonomy（category_tag出力用・canonical_id一覧）\n${JSON.stringify(CATEGORY_TAXONOMY)}`
+      : '';
     return {
-      system: PROMPT_L1,
+      system: PROMPT_L1 + taxonomyBlock,
       user:   `ユーザー入力：「${userText}」\n\n地理的な条件は重要な順に、上限を超える分も含めてすべて conditions 配列に入れてください（システムが上限${maxC}件を適用し、超過分はユーザーへ通知します）。地図データで判定できない非地理的な特徴は unsupported_features 配列に入れてください（confirmation では触れない。JSが決定的に通知します）。${langNote}${noConfirm}${hint}QuerySchema JSONのみを返してください。`,
     };
   }

@@ -1818,20 +1818,20 @@ class QueryEngine {
   }
 
   /**
-   * poi_category(canonical_id)解決: JS辞書(mcp._resolveCategoryTag、即時) → ミス時のみ
-   * LLMフォールバック(llm.resolveCategoryTag)。呼び出し側は返り値のPromiseをawaitせず
-   * そのまま collectTarget/collectCondition に渡すこと — _searchNearbyPOI 内で他の
-   * Search Box/Tilequeryリクエストと並行してawaitされるため、ここでawaitすると
-   * LLMフォールバックが走るミス時だけ直列にレイテンシが乗ってしまう。
+   * poi_category(canonical_id)解決: JS辞書(mcp._resolveCategoryTag、即時) → ミス時は
+   * L1-2が同じJSON応答内で既に出力したcategory_tag(schema.target/conditions[].category_tag)を
+   * 使う（別LLM呼び出しはしない・taxonomy実在チェックのみ行う）。
    * @param {string[]} queries
-   * @returns {Promise<string|null>}
+   * @param {string|null} schemaTag - L1-2が出力したcategory_tag（無ければnull）
+   * @returns {string|null}
    */
-  async _resolveCategoryTag(queries) {
+  _resolveCategoryTag(queries, schemaTag = null) {
     if (!queries?.length) return null;
     const jsTag = this.mcp._resolveCategoryTag(queries);
     if (jsTag) return jsTag;
-    if (!this.config.useCategorySearch) return null;
-    return await this.llm.resolveCategoryTag(queries);
+    if (!this.config.useCategorySearch || !schemaTag) return null;
+    // ハルシネーション対策：実在するcanonical_idか必ず検証
+    return (typeof CATEGORY_TAXONOMY !== 'undefined' && CATEGORY_TAXONOMY.includes(schemaTag)) ? schemaTag : null;
   }
 
   // ─────────────────────────────────────────────
@@ -1864,7 +1864,7 @@ class QueryEngine {
     // 各自のtiming計測(_pf)は自分のPromiseが解決した時点で個別に記録する（並列化後もどちらが
     // 遅かったかがデバッグ表示で分かるように）。
     const _tt = this._pnow();
-    const targetCategoryTag = this._resolveCategoryTag(target.queries?.length ? target.queries : [target.text]); // Promise, not awaited here
+    const targetCategoryTag = this._resolveCategoryTag(target.queries?.length ? target.queries : [target.text], target.category_tag);
     const targetPromise = this.mcp.collectTarget(target, targetBbox, sharedGrid, targetCategoryTag)
       .then(raw => { this._pf('　└ target収集（Search Box＋TQ）', _tt); return raw; });
 
@@ -1882,7 +1882,7 @@ class QueryEngine {
             return;
           }
           const condQueries = (c.type === 'poi' && c.queries?.length) ? c.queries : (c.text ? [c.text] : []);
-          const condCategoryTag = condQueries.length ? this._resolveCategoryTag(condQueries) : null;
+          const condCategoryTag = condQueries.length ? this._resolveCategoryTag(condQueries, c.category_tag) : null;
           const items = await this.mcp.collectCondition(c, condBbox, sharedGrid, condCategoryTag);
           this._pf(`　　└ condition[${key}]収集`, _tci);
           condResults[key] = items;
@@ -2845,7 +2845,7 @@ class QueryEngine {
       newKeys.add(key);
       if (isLineCond(c.type)) continue; // per-candidate eval, no collection
       const condQueries = (c.type === 'poi' && c.queries?.length) ? c.queries : (c.text ? [c.text] : []);
-      const condCategoryTag = condQueries.length ? this._resolveCategoryTag(condQueries) : null;
+      const condCategoryTag = condQueries.length ? this._resolveCategoryTag(condQueries, c.category_tag) : null;
       condResults[key] = await this.mcp.collectCondition(c, bboxes.condBbox, null, condCategoryTag);
     }
     // L2-1 category validity ONLY on the new poi conditions (target pool is fixed;

@@ -748,7 +748,7 @@ class LocationFinderApp {
         // ロール別トークン（0回は除外）＋ モデル別集計 ＋ 総計
         const roleData = [];
         let totIn = 0, totOut = 0;
-        for (const [role, s] of [['L0', stats.llm?.L0], ['L1-1', stats.llm?.L1c], ['L1-2', stats.llm?.L1], ['L1-CAT', stats.llm?.L1_CAT], ['L1-3', stats.llm?.L1_3], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
+        for (const [role, s] of [['L0', stats.llm?.L0], ['L1-1', stats.llm?.L1c], ['L1-2', stats.llm?.L1], ['L1-3', stats.llm?.L1_3], ['L2-1', stats.llm?.L2_1], ['L2-2', stats.llm?.L2_2], ['L3', stats.llm?.L3]]) {
           if (!s || !s.calls) continue;
           roleData.push({ role, ...s });
           totIn += s.inTok; totOut += s.outTok;
