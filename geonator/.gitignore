@@ -2,6 +2,7 @@
 memory/
 issue/
 config.local.js
+doc/
 
 # macOS
 .DS_Store
