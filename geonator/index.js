@@ -811,6 +811,14 @@ class LocationFinderApp {
               const cache = (r.cacheRead || r.cacheWrite) ? ` 💾r${fmt(r.cacheRead)}/w${fmt(r.cacheWrite)}` : '';
               lines.push(`${r.role}(${shortModel(r.model)}): ↑${fmt(r.inTok)} ↓${fmt(r.outTok)}${cache} ・${r.calls}${en ? ' calls' : '回'}・${(r.ms / 1000).toFixed(1)}s`);
             }
+            // r.ms は各ロールでの「fetch開始〜レスポンス受信」のみ(llm-client.js _callClaude計測)＝
+            // 純粋なLLM往復時間。並列呼び出し（L2-2のtarget/condition評価等）がある場合は
+            // 単純合算だと重複が乗り実時間より大きくなり得るため「合算（並列時は重複あり）」と明示する。
+            const llmMsSum = roleData.reduce((sum, r) => sum + (r.ms || 0), 0);
+            const otherMs = Math.max(0, stats.ms - llmMsSum);
+            lines.push(en
+              ? `— LLM wait (sum, may overlap if parallel) ${(llmMsSum / 1000).toFixed(1)}s / other (JS/Mapbox etc.) ${(otherMs / 1000).toFixed(1)}s —`
+              : `── LLM待ち時間（合算・並列時は重複あり）${(llmMsSum / 1000).toFixed(1)}s / その他(JS・Mapbox API等) ${(otherMs / 1000).toFixed(1)}s ──`);
           }
           // 区間ごとの時間＋発行TQ数（p.tq は累積なので前区間との差を取る＝その区間で叩いたTQ）。
           const phaseAgg = new Map(); // label → { ms, tq }
