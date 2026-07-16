@@ -251,8 +251,10 @@ class QueryEngine {
     // 出力が変わり得る＋一過性エラー(ネットワーク等)も拾える。デモでの取りこぼし対策。
     const MAX_TRY = Math.max(1, this.config.L1_PARSE_MAX_RETRY ?? 3);
     const substantial = (userText || '').trim().length >= 12;
-    let schema = null, lastErr = null;
+    let schema = null, lastErr = null, attempts = 0;
+    const _tL1 = this._pnow();
     for (let attempt = 0; attempt < MAX_TRY; attempt++) {
+      attempts++;
       const retryHint = attempt === 0 ? '' :
         '前回この入力から場所依頼を抽出できませんでした。壊れた音声入力の可能性があります。挨拶・相槌・脱線・言い直しの前半は無視し、地名/駅/施設/条件を丁寧に拾ってスキーマ化してください。手がかりが少しでもあれば not_a_query にしないこと。';
       try {
@@ -268,11 +270,14 @@ class QueryEngine {
       if (!substantial) break;                      // 短い入力＝本当に非クエリ。再試行しない
       schema = null;                                // substantial なら注記付きで再試行
     }
+    this._pf(`　└ L1-2 API呼び出し${attempts > 1 ? `（${attempts}回・再試行込み）` : ''}`, _tL1);
     if (!schema) {
       // l0Promise: L0が既にこのターンで何か発話済みなら、定型メッセージは二重発話になるため出さない。
       // フラグではなく実際に await するのは、短文入力の即時棄却(このパス)がL0のネットワーク往復より
       // 速く終わりうるため（フラグだけだと競合し、先に定型文→直後にL0の発話、が起きる）。
+      const _tL0a = this._pnow();
       const l0Replied = l0Promise ? await l0Promise : false;
+      this._pf('　└ L0意図確認待ち（失敗時）', _tL0a);
       if (lastErr) {
         // デバッグモードでは根本原因（打ち切り・不正JSON・HTTP等）をそのまま可視化する。
         this.ui.showDebug?.(`⚠️ L1解析エラー\n${lastErr?.message || String(lastErr)}`);
@@ -285,12 +290,15 @@ class QueryEngine {
     }
 
     // [II] schema validation — malformed structure = treat as a real parse/comm issue
+    const _tVal = this._pnow();
     const validation = validateQuerySchema(schema);
     if (!validation.ok) {
       console.warn('[QueryEngine] L1 schema invalid:', validation.errors);
       // デバッグモードでは検証エラーの中身（どのフィールドが不正か）を可視化する。
       this.ui.showDebug?.(`⚠️ L1スキーマ検証エラー\n${(validation.errors || []).join('\n')}`);
+      const _tL0b = this._pnow();
       const l0Replied = l0Promise ? await l0Promise : false;
+      this._pf('　└ L0意図確認待ち（検証エラー時）', _tL0b);
       // If it lacks the essentials, it's more likely a non-query than a comm error.
       if (!schema?.proximity?.anchors?.length || !schema?.target?.text) {
         if (!l0Replied) this.ui.showL0Message?.(this._m().not_a_query);
@@ -331,6 +339,7 @@ class QueryEngine {
 
     // [A] structural checks
     const issues = structuralChecks(schema);
+    this._pf('　└ 検証・構造チェック（JS）', _tVal);
     for (const issue of issues) {
       const handled = await this._handleStructuralIssue(issue, schema);
       if (!handled) return null; // unresolvable
