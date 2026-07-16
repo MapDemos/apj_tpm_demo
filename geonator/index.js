@@ -737,7 +737,6 @@ class LocationFinderApp {
       },
       showRunStats(stats) {
         if (!stats) return;
-        if (self._searchBoxMode) return; // 検索ボックスモードは対話パネルに何も書かない方針
         // 結果表示前の「考え中」表示は_renderCandidatePanel側で既に消えている。ここで無条件に消すと
         // showResults直後に出したL0確度コメント用プレースホルダー(showL0Typing)まで消えてしまうため、
         // 明示的なhideは行わない（実文言到着時はaddMessageが自動的に消す）。
@@ -1682,6 +1681,7 @@ class LocationFinderApp {
     if (!this._mapActive()) return; // 地図OFF: マーカー/flyTo はスキップ（候補パネルは別途表示される）
     this.candidateMarkers.forEach(m => m.remove());
     this.candidateMarkers = [];
+    this._openPopupMarker = null; // 表示中ポップアップの追跡もリセット（同時1個の原則）
     if (!candidates || candidates.length === 0) return;
 
     // Rank-based tiers. Full-match (full1/2/3/full) pulse; top 3 get callouts; #1 focused.
@@ -1744,7 +1744,11 @@ class LocationFinderApp {
         .addTo(this.map);
       marker._candId = place.id; // link to dialogue-panel candidate rows
       dot.addEventListener('click', () => {
+        const wasOpen = marker.getPopup()?.isOpen();
+        // 同時に開くポップアップは常に1個まで：別マーカーが開いていれば先に閉じる
+        if (this._openPopupMarker && this._openPopupMarker !== marker) this._openPopupMarker.togglePopup();
         marker.togglePopup();
+        this._openPopupMarker = wasOpen ? null : marker;
         if (this._debugMode) this._highlightStep('step-eval');
       });
       this.candidateMarkers.push(marker);
@@ -1752,8 +1756,15 @@ class LocationFinderApp {
     }
 
     // Callouts on the top 3 full-match (最有力/2番目/3番目), map focus on the #1.
+    // 順番に自動表示するが、同時に開くのは1個まで＝次を開く前に前のものを閉じる（最終的に#1だけ残る）。
     ['full1', 'full2', 'full3'].forEach((t, i) => {
-      if (topMarkers[t]) setTimeout(() => topMarkers[t].marker.togglePopup(), 500 + i * 250);
+      if (!topMarkers[t]) return;
+      setTimeout(() => {
+        const m = topMarkers[t].marker;
+        if (this._openPopupMarker && this._openPopupMarker !== m) this._openPopupMarker.togglePopup();
+        m.togglePopup();
+        this._openPopupMarker = m;
+      }, 500 + i * 250);
     });
     if (topMarkers.full1) {
       const top = topMarkers.full1;

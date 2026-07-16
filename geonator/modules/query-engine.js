@@ -1858,6 +1858,7 @@ class QueryEngine {
     const condPromise = (conditions?.length
       ? Promise.all(conditions.map(async (c) => {
           const key = c.text ?? c.type;
+          const _tci = this._pnow();
           // road/water/rail are evaluated per-candidate against the road/water layer
           // (they're lines, not points) — no item collection here.
           if (isLineCond(c.type)) {
@@ -1867,6 +1868,7 @@ class QueryEngine {
           const condQueries = (c.type === 'poi' && c.queries?.length) ? c.queries : (c.text ? [c.text] : []);
           const condCategoryTag = condQueries.length ? this._resolveCategoryTag(condQueries) : null;
           const items = await this.mcp.collectCondition(c, condBbox, sharedGrid, condCategoryTag);
+          this._pf(`　　└ condition[${key}]収集`, _tci);
           condResults[key] = items;
           condDebug.push({ label: key, type: c.type, level: c.distance?.level, method: c.distance?.method, found: items.length });
           // [S] note if condition returned 0 items.
