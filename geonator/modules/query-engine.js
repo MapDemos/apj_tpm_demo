@@ -78,7 +78,10 @@ class QueryEngine {
 
   /** Debug-mode step gate: pause until the operator clicks "next" (no-op otherwise). */
   async _step(stepId, label, lines) {
-    if (this.ui.isDebug?.()) await this.ui.debugStep?.(stepId, label, lines || []);
+    if (!this.ui.isDebug?.()) return;
+    const t0 = this._pnow();
+    await this.ui.debugStep?.(stepId, label, lines || []);
+    this._stepWaitMs = (this._stepWaitMs || 0) + (this._pnow() - t0);
   }
 
   // ─────────────────────────────────────────────
@@ -111,6 +114,7 @@ class QueryEngine {
     this.mcp.resetRequestCounts?.(); // per-query API caps
     this._runStart = Date.now();
     this._prof = []; // 処理時間内訳（フェーズ別・debug表示用）
+    this._stepWaitMs = 0; // デバッグの手動ステップ待ち（「次へ」クリック待ち）の累計。実処理ではないので総計から除外する
     const gen = (this._runGen = (this._runGen || 0) + 1); // 実行世代（新クエリ/キャンセルで無効化）
     this.ui.clearResults();
 
@@ -544,7 +548,7 @@ class QueryEngine {
     this._pf('④ 結果描画', _t4);
     this.ui.refreshCounts?.();
     // Token/time telemetry for this search cycle
-    this.ui.showRunStats?.({ ms: Date.now() - (this._runStart || Date.now()), llm: this.llm.stats, phases: this._prof });
+    this.ui.showRunStats?.({ ms: Math.max(0, Date.now() - (this._runStart || Date.now()) - (this._stepWaitMs || 0)), llm: this.llm.stats, phases: this._prof });
     this.ui.showDebugReport?.(this._dbgReport);
 
     // [5] feedback
@@ -2796,7 +2800,7 @@ class QueryEngine {
     this.ui.clearResults?.();
     // 選ばれた階数の候補を結果として提示（_showResults が surfaced を keep に更新する）。
     await this._showResults({ full: keep, partial: [], none: [] }, schema);
-    this.ui.showRunStats?.({ ms: Date.now() - (this._runStart || Date.now()), llm: this.llm.stats });
+    this.ui.showRunStats?.({ ms: Math.max(0, Date.now() - (this._runStart || Date.now()) - (this._stepWaitMs || 0)), llm: this.llm.stats });
     await this._handleFeedback(schema, this._previousText);
   }
 
@@ -2875,7 +2879,7 @@ class QueryEngine {
     this._dbgReport.evaluation = { full: results.full.map(dbgRow), partial: results.partial.map(dbgRow), noneCount: results.none.length };
 
     await this._showResults(results, merged);
-    this.ui.showRunStats?.({ ms: Date.now() - (this._runStart || Date.now()), llm: this.llm.stats });
+    this.ui.showRunStats?.({ ms: Math.max(0, Date.now() - (this._runStart || Date.now()) - (this._stepWaitMs || 0)), llm: this.llm.stats });
     this.ui.showDebugReport?.(this._dbgReport);
 
     await this._handleFeedback(merged, this._previousText);
