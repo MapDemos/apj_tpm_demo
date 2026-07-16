@@ -824,7 +824,23 @@ class LocationFinderApp {
           }
           if (phaseAgg.size) {
             lines.push(en ? '— Phase breakdown (debug) —' : '── 処理内訳（デバッグ）──');
-            for (const [l, v] of phaseAgg) lines.push(`${l}: ${(v.ms / 1000).toFixed(2)}s${v.tq ? ` / TQ ${v.tq}` : ''}`);
+            // 子フェーズは親フェーズより先に完了する(=先にpushされる)ため、記録順そのままだと
+            // 親ヘッダーの手前に「直前のフェーズの子」であるかのように紛れて見える。表示だけ、
+            // トップレベル見出し(⓪①②③④)を先に出し、直後にその実の子（間に溜まっていた
+            // 非見出し行）を並べる順に組み替える（計測データ自体は変更しない）。
+            const fmtLine = ([l, v]) => `${l}: ${(v.ms / 1000).toFixed(2)}s${v.tq ? ` / TQ ${v.tq}` : ''}`;
+            const isTopLevel = ([l]) => /^[⓪①②③④]/.test(l);
+            let pendingChildren = [];
+            for (const entry of phaseAgg) {
+              if (isTopLevel(entry)) {
+                lines.push(fmtLine(entry));
+                pendingChildren.forEach(c => lines.push(fmtLine(c)));
+                pendingChildren = [];
+              } else {
+                pendingChildren.push(entry);
+              }
+            }
+            pendingChildren.forEach(c => lines.push(fmtLine(c)));
           }
         }
 
