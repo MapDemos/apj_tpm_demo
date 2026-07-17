@@ -1959,8 +1959,15 @@ class QueryEngine {
     const _t22 = this._pnow();
     const poiConds = (schema.conditions || []).filter(c => c.type === 'poi');
     const _tRateMain = this._pnow();
+    // transit_entrance候補は名前が番号・方角記号のみ（例:「3」「南口」）で、target.textが
+    // 具体的な番号を含まない一般語（例:「出口」）だとLLMが番号と意図の関連性を読み取れず
+    // fail-closedで全滅させる（駅は既にproximity.anchorで確定済み、収集自体も実出口のみなので
+    // 名前関連性フィルタは不要・有害）。target側だけスキップする。
+    const skipTargetRating = target.query_intent === 'transit_entrance';
     const [mainRated] = await Promise.all([
-      this._rateMain(target, mainRaw).then(r => { this._pf('　　└ L2-2 target評価', _tRateMain); return r; }),
+      skipTargetRating
+        ? Promise.resolve({ kept: mainRaw, excludedNames: [] })
+        : this._rateMain(target, mainRaw).then(r => { this._pf('　　└ L2-2 target評価', _tRateMain); return r; }),
       ...poiConds.map(async c => {
         const key = c.text ?? c.type;
         const items = condResults[key];
