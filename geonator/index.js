@@ -240,8 +240,8 @@ class LocationFinderApp {
     // 全ロール Haiku 既定（速さ優先）。load-bearing フィールド(within/floors)はJS保険で復元、
     // relevance等もHaikuで実用十分と確認できたため。必要なら設定画面で個別に Sonnet 等へ変更可。
     const HAIKU = 'claude-haiku-4-5-20251001';
-    // L2-2(target関連性)だけ名前ニュアンス判定のため Sonnet 4.6 既定。他は Haiku（速さ優先）。
-    const MODEL_DEFAULTS = { L0: 'claude-sonnet-4-6', L1: HAIKU, L1c: HAIKU, L1_3: HAIKU, L2_1: HAIKU, L2_2: 'claude-sonnet-4-6', L3: HAIKU };
+    // 全ロール Haiku 既定に統一（L0/L2-2含む）。
+    const MODEL_DEFAULTS = { L0: HAIKU, L1: HAIKU, L1c: HAIKU, L1_3: HAIKU, L2_1: HAIKU, L2_2: HAIKU, L3: HAIKU };
     document.getElementById('settingsResetBtn')?.addEventListener('click', () => {
       this.config.L0_MODEL   = MODEL_DEFAULTS.L0;
       this.config.L1_MODEL   = MODEL_DEFAULTS.L1;
@@ -417,12 +417,12 @@ class LocationFinderApp {
     const suffix = this._lang === 'en' ? ' (Recommended)' : '（推奨）';
     // MODEL_DEFAULTS と一致させること（役割ごとの既定＝推奨）。全ロール Haiku 既定（速さ優先）。
     const rec = {
-      l0ModelSelect:   'claude-sonnet-4-6',               // L0 会話マネジメント→対話の質重視でSonnet推奨
+      l0ModelSelect:   'claude-haiku-4-5-20251001',      // L0 会話マネジメント
       l1ConfirmModelSelect: 'claude-haiku-4-5-20251001', // L1-1 確認文（非活性）
       l1ModelSelect:   'claude-haiku-4-5-20251001',      // L1-2 解析
       l1_3ModelSelect: 'claude-haiku-4-5-20251001',      // L1-3 広域絞り込み提案
       l2_1ModelSelect: 'claude-haiku-4-5-20251001',
-      l2_2ModelSelect: 'claude-sonnet-4-6',              // L2-2 関連性=名前ニュアンス→Sonnet推奨
+      l2_2ModelSelect: 'claude-haiku-4-5-20251001',      // L2-2 関連性
       l3ModelSelect:   'claude-haiku-4-5-20251001',
     };
     const label = (v) =>
