@@ -565,9 +565,21 @@ class LLMClient {
       };
       // temperature は対応モデルにだけ付与（5世代/Opus4.7+ は送ると400）。
       if (this._supportsTemperature(useModel)) reqBody.temperature = 0;
-      const resp = await fetch(this.config.CLAUDE_API_PROXY, {
+      // 診断用：config.local.js に ANTHROPIC_DIRECT_API_KEY があれば Lambda(CLAUDE_API_PROXY)を
+      // 経由せず Anthropic API に直接叩く（レイテンシ比較用。使い終わったらキーを空に戻すこと）。
+      const directKey = this.config.ANTHROPIC_DIRECT_API_KEY;
+      const url = directKey ? 'https://api.anthropic.com/v1/messages' : this.config.CLAUDE_API_PROXY;
+      const headers = directKey
+        ? {
+            'Content-Type': 'application/json',
+            'x-api-key': directKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+          }
+        : { 'Content-Type': 'application/json' };
+      const resp = await fetch(url, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         signal:  controller.signal,
         body: JSON.stringify(reqBody),
       });
