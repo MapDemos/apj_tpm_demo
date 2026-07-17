@@ -781,8 +781,13 @@ class LocationFinderApp {
         const bubble = document.createElement('div');
         bubble.className = 'message-bubble';
 
+        // ローカル診断用プロキシ(local-proxy/)経由時のみ明示（CLAUDE_API_PROXYがlocalhost指定の時）。
+        // 通常のLambda経由では何も付かない。
+        const viaLocalProxy = /^https?:\/\/localhost/.test(CONFIG.CLAUDE_API_PROXY || '');
+        const proxyNote = viaLocalProxy ? (en ? ' (via local proxy)' : '（ローカルプロキシ経由）') : '';
+
         const totalLine = document.createElement('div');
-        totalLine.textContent = en ? `⏱ Total ${secs}s` : `⏱ 処理時間 合計 ${secs}s`;
+        totalLine.textContent = (en ? `⏱ Total ${secs}s` : `⏱ 処理時間 合計 ${secs}s`) + proxyNote;
         bubble.appendChild(totalLine);
 
         const det = document.createElement('details');
