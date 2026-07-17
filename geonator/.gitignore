@@ -3,6 +3,7 @@ memory/
 issue/
 config.local.js
 doc/
+local-proxy/
 
 # macOS
 .DS_Store
