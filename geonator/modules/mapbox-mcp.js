@@ -702,8 +702,20 @@ class MapboxMCPClient {
         filtered = entrances.filter(e => e.name && norm(e.name) === nq);              // 完全一致優先
         if (!filtered.length) filtered = entrances.filter(e => e.name && norm(e.name).includes(nq)); // なければ部分一致
       }
-      const items = filtered.map(e => ({ name: e.name, latitude: e.lat, longitude: e.lng }));
-      return this._minify({ source: 'transit_stop_label (entrance)', count: items.length, items });
+      let items = filtered.map(e => ({ name: e.name, latitude: e.lat, longitude: e.lng }));
+      // フォールバック: 出口データが1件も無い／指定の出口名にヒットしない場合、駅の代表地点
+      // （effectiveProximity＝収集bboxの中心＝駅アンカー）を単一候補として使う。出口の特定は
+      // 諦めるが、後続のcondition距離判定（「セブンイレブンが近くにある出口」等）は
+      // 「駅の近く」として成立させる。QueryEngine側はexitFallbackフラグでメッセージを出す。
+      let exitFallback = false;
+      if (items.length === 0) {
+        exitFallback = true;
+        items = [{ name: '(出口不明・駅代表地点)', latitude: lat, longitude: lng }];
+      }
+      return this._minify({
+        source: 'transit_stop_label (entrance)', count: items.length, items,
+        _debug: exitFallback ? { exitFallback: true } : undefined,
+      });
     }
 
     // ── バス停ロケーション（名前なし・位置関係）: transit_stop_label mode=bus ──

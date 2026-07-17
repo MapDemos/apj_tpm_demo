@@ -1900,6 +1900,9 @@ class QueryEngine {
     ).then(() => { this._pf('　└ condition収集', _tc); });
 
     let [mainRaw] = await Promise.all([targetPromise, condPromise]);
+    if (this.mcp._lastTargetDebug?.exitFallback) {
+      this.ui.showL0Message?.(this._m().exitFallback(schema.proximity?.anchor?.text));
+    }
     const _tPost = this._pnow();
     mainRaw = this._applyBuildingNameRules(target, mainRaw);
     mainRaw = this._dedupTargets(mainRaw); // [pre-scoring] cheap JS-only dedup (see method). LLM-based pass3 runs later, after L2-2.
@@ -2977,6 +2980,7 @@ const MESSAGES = {
     genericMulti:    t => `「${t}」は複数あります。地名や駅名も一緒に教えてください。`,
     intersectionNotFound: t => `「${t}」という名前の交差点が見つかりませんでした。`,
     condNotFound:    k => `「${k}」はこのエリアで見つかりませんでした（地図データ未収録の可能性があります）。`,
+    exitFallback:    a => `${a || 'この駅'}の出口情報が見つからなかったため、駅の代表地点を基準に検索します。`,
     mainZero:        (anchor, target) => `${anchor || 'この付近'}の近くに${target ? `「${target}」` : '候補'}は見つかりませんでした。追加の情報を教えていただけますか？`,
     confidenceDecisive:  'これは高い確率で当たりだと思います。',
     confidenceAmbiguous: '確率順に並べましたが、正直つけがたいです。',
