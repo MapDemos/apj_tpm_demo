@@ -501,7 +501,6 @@ class QueryEngine {
 
       this._cache.mainCandidates = collected.main;
       this._cache.condCandidates = collected.conditions;
-      this._cache.frozenLabels = collected.frozenLabels || null;
       // Visualize hits
       this.ui.drawGrid?.(this.mcp._gridCircles, this.mcp._gridCirclesSkipped);
       this.ui.drawHits?.(collected.main);
@@ -519,7 +518,7 @@ class QueryEngine {
     if (this._aborted(gen)) return; // 収集後キャンセル/新クエリ→評価/描画しない
     // [3-C] evaluate (collect reach polygons for visualization)
     const _t3 = this._pnow();
-    const results = await this._evaluate(schema, this._cache.mainCandidates, this._cache.condCandidates, this._cache.frozenLabels);
+    const results = await this._evaluate(schema, this._cache.mainCandidates, this._cache.condCandidates);
     this._pf('③ Step2：距離評価・採点・ティア', _t3);
     this.ui.drawPolygons?.(this.mcp._evalPolygons);
 
@@ -1927,16 +1926,19 @@ class QueryEngine {
 
     // [3-A2] JS距離事前フィルタ: condition(徒歩n分/近さ等)を一切満たさない候補("none"相当)を
     // L2にかける前に落とす。距離判定自体は_evaluate()と同じロジック（同関数を先出し呼び出し）。
-    // ここで確定したper-candidateの結果(c._condEval)は、後段のStep2 _evaluate() 実行時に
-    // frozenLabelsとして渡して再利用させ、isochrone/Tilequery距離計算の二重実行を避ける。
+    // 注意: この時点のcondResultsはまだL2-1/L2-2で検証されていない生データ（例:「Xラーメン
+    // 天神中央公園前店」のような名前だけ似た偽物が混入し得る）。生データでの絞り込みは
+    // 「本来落とすべき候補を誤って残す」方向にしか働かない（偽物が近くにあると距離が実際より
+    // 近く見えるだけで、遠く見せることはない）ため、母集団を減らす目的では安全に使える。
+    // ただし結果はfrozenLabelsで使い回さない——後段のStep2 _evaluate()は、L2-1/L2-2で
+    // 偽物除外済みのcondResultsを使って必ず再計算し、最終スコア・tierの正しさを担保する
+    // （2026-07-17、frozenLabels再利用が偽ヒットを固定してしまうバグを発見・修正）。
     // 「参考(none)」候補は今後表示しない方針（2026-07-17合意）。母集団が減らない場合は
     // 「近さの定義（distance-table.jsの半径/isochrone分）を広げる」方向で調整する。
-    let frozenLabels = null;
     if (schema.conditions?.length) {
       const _tPre = this._pnow();
       const preEval = await this._evaluate(schema, mainRaw, condResults);
       mainRaw = [...preEval.full, ...preEval.partial];
-      frozenLabels = new Set(schema.conditions.map(c => c.text ?? c.type));
       this._pf(`　└ 条件事前フィルタ（JS距離判定・none除外・${mainRaw.length}件残）`, _tPre);
     }
 
@@ -2003,7 +2005,7 @@ class QueryEngine {
     };
     this._dbgReport.conditions = condDebug;
 
-    return { main: kept, conditions: condResults, frozenLabels };
+    return { main: kept, conditions: condResults };
   }
 
   /**
