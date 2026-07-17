@@ -467,6 +467,9 @@ class QueryEngine {
     this.ui.thinking?.(this._m().thinkingCollect); // 候補収集の計算中
 
     // [3-B] collect candidates (unless cached)
+    // _evalPolygons はここで一度だけリセットする（条件事前フィルタがStep1内の_evaluate()を先出しで
+    // 呼ぶため、Step2の直前でリセットすると先出し分のisochrone可視化が消えてしまう）。
+    this.mcp._evalPolygons = [];
     if (cacheInvalid.candidates) {
       const _t2 = this._pnow();
       this.mcp._gridCircles = []; this.mcp._gridCirclesSkipped = []; // TilequeryグリッドをデバッグでリセットしてこのStep1分を蓄積
@@ -498,6 +501,7 @@ class QueryEngine {
 
       this._cache.mainCandidates = collected.main;
       this._cache.condCandidates = collected.conditions;
+      this._cache.frozenLabels = collected.frozenLabels || null;
       // Visualize hits
       this.ui.drawGrid?.(this.mcp._gridCircles, this.mcp._gridCirclesSkipped);
       this.ui.drawHits?.(collected.main);
@@ -514,9 +518,8 @@ class QueryEngine {
 
     if (this._aborted(gen)) return; // 収集後キャンセル/新クエリ→評価/描画しない
     // [3-C] evaluate (collect reach polygons for visualization)
-    this.mcp._evalPolygons = [];
     const _t3 = this._pnow();
-    const results = await this._evaluate(schema, this._cache.mainCandidates, this._cache.condCandidates);
+    const results = await this._evaluate(schema, this._cache.mainCandidates, this._cache.condCandidates, this._cache.frozenLabels);
     this._pf('③ Step2：距離評価・採点・ティア', _t3);
     this.ui.drawPolygons?.(this.mcp._evalPolygons);
 
@@ -1922,6 +1925,21 @@ class QueryEngine {
     }
     this._pf(`　└ 建物名寄せ・重複除去・到達圏フィルタ（JS・${mainRaw.length}件）`, _tPost);
 
+    // [3-A2] JS距離事前フィルタ: condition(徒歩n分/近さ等)を一切満たさない候補("none"相当)を
+    // L2にかける前に落とす。距離判定自体は_evaluate()と同じロジック（同関数を先出し呼び出し）。
+    // ここで確定したper-candidateの結果(c._condEval)は、後段のStep2 _evaluate() 実行時に
+    // frozenLabelsとして渡して再利用させ、isochrone/Tilequery距離計算の二重実行を避ける。
+    // 「参考(none)」候補は今後表示しない方針（2026-07-17合意）。母集団が減らない場合は
+    // 「近さの定義（distance-table.jsの半径/isochrone分）を広げる」方向で調整する。
+    let frozenLabels = null;
+    if (schema.conditions?.length) {
+      const _tPre = this._pnow();
+      const preEval = await this._evaluate(schema, mainRaw, condResults);
+      mainRaw = [...preEval.full, ...preEval.partial];
+      frozenLabels = new Set(schema.conditions.map(c => c.text ?? c.type));
+      this._pf(`　└ 条件事前フィルタ（JS距離判定・none除外・${mainRaw.length}件残）`, _tPre);
+    }
+
     // [3-B0] L2-1 category validity filter (通常クエリ collections only): drop candidates
     // whose poi_category/class is clearly different from the intent. Runs BEFORE the
     // reach-polygon build (conditions) and BEFORE L2-2 (target) so noise (e.g. コンビニ
@@ -1985,7 +2003,7 @@ class QueryEngine {
     };
     this._dbgReport.conditions = condDebug;
 
-    return { main: kept, conditions: condResults };
+    return { main: kept, conditions: condResults, frozenLabels };
   }
 
   /**
@@ -2229,7 +2247,9 @@ class QueryEngine {
     const floorsHard = !!floorSpec && (this.config.FLOORS_MODE ?? 'hard') === 'hard';
     const floorsSoft = !!floorSpec && (this.config.FLOORS_MODE ?? 'hard') === 'soft';
     if (floorSpec) {
-      await Promise.all(mainCandidates.map(async c => {
+      // _evaluate()はcondition事前フィルタ(_collectCandidates内)と本評価の2回呼ばれ得る。
+      // 既に取得済み(candidateオブジェクトは両呼び出しで同一参照)ならAPI再呼び出しをskip。
+      await Promise.all(mainCandidates.filter(c => c._floors === undefined).map(async c => {
         const lat = c.latitude ?? c.lat, lng = c.longitude ?? c.lng;
         c._floors = (lat != null && lng != null) ? await this.mcp._getBuildingFloors(lat, lng) : null;
       }));
@@ -2263,7 +2283,9 @@ class QueryEngine {
     // [Matrix scoring] 徒歩n分の候補に実移動時間(秒)を注記（足切りせず順位付けのみ）。mainCandidates は
     // ここでハード条件・floors 適用後の最終集合＝Matrixコール数が最小。失敗時は直線距離にフォールバック。
     if (this._reachMinutes != null && this._reachSources?.length) {
-      await this._annotateMatrixTimes(mainCandidates, this._reachSources, this._reachProfile);
+      // 同様に事前フィルタ呼び出しと本評価呼び出しの2回実行対策（未注記の候補のみ）。
+      const unannotated = mainCandidates.filter(c => c._reachSec === undefined);
+      if (unannotated.length) await this._annotateMatrixTimes(unannotated, this._reachSources, this._reachProfile);
     }
 
     // conditionTracker: candidateId → { total, hit, closenessSum }
