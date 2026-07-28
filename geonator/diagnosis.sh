@@ -29,9 +29,16 @@ if [ -n "$PROXY" ]; then
 fi
 
 echo "=== 4. ポート稼働状況 ==="
-grep -n 'const PORT' local-proxy/server.js
-echo "port 3001:  $(lsof -ti :3001 2>/dev/null | head -1)"
-echo "port 30001: $(lsof -ti :30001 2>/dev/null | head -1)"
+SERVER_PORT=$(grep -o 'const PORT = [0-9]*' local-proxy/server.js | grep -o '[0-9]*')
+CONFIG_PORT=$(echo "$PROXY" | grep -o '[0-9]*$')
+echo "server.js の PORT: ${SERVER_PORT:-取得できず}"
+echo "config が指すポート: ${CONFIG_PORT:-取得できず}"
+if [ -n "$SERVER_PORT" ] && [ -n "$CONFIG_PORT" ] && [ "$SERVER_PORT" != "$CONFIG_PORT" ]; then
+  echo "⚠ 不一致: server.jsとconfigが別ポートを指しています"
+fi
+if [ -n "$CONFIG_PORT" ]; then
+  echo "port $CONFIG_PORT で稼働中のPID: $(lsof -ti :$CONFIG_PORT 2>/dev/null | head -1 || echo なし)"
+fi
 
 echo "=== 5. config の値 ==="
 grep -n 'CLAUDE_API_PROXY\|ANTHROPIC_DIRECT_API_KEY' config.local.js 2>/dev/null || echo "config.local.js なし"
