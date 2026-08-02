@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Geonator Lite</title>
+  <meta name="description" content="geonator_lite demo — headless POI search over Mapbox datasets">
+
+  <link rel="shortcut icon" href="https://static-assets.mapbox.com/branding/favicon/v1/favicon.ico" type="image/x-icon"/>
+
+  <!-- Mapbox GL JS -->
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.11.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.11.0/mapbox-gl.js"></script>
+
+  <!-- Turf.js (spatial calculations, used by modules/mapbox-mcp.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <style>
+    /* 配色は既存のまま（アクセント#3887be・グリーン#0a5・レッド#d00・グレー階調）を
+       アプリ全体で統一的に使い回すことでまとまりを出す。新しい色は足さない。 */
+    :root {
+      --accent: #3887be;
+      --accent-dark: #2c6a94;
+      --accent-soft: rgba(56, 135, 190, 0.10);
+      --ink: #1f2328;
+      --ink-soft: #555;
+      --ink-faint: #888;
+      --line: #ddd;
+      --line-soft: #e5e5e5;
+      --surface: #fff;
+      --surface-sunken: #fafafa;
+      --danger: #c00;
+      --radius: 10px;
+      --radius-sm: 6px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+      color: var(--ink);
+    }
+    /* 地図が画面全体を占め、検索ボックス・コンソールはその上に浮くオーバーレイになる */
+    #app { position: relative; height: 100vh; overflow: hidden; }
+    #map { position: absolute; inset: 0; }
+
+    /* 地図上の検索ボックス（上部中央） */
+    #searchBar {
+      position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+      width: min(480px, calc(100vw - 160px));
+      display: flex; gap: 8px; z-index: 10;
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+    }
+    #searchBar input[type="text"] {
+      flex: 1 1 auto; min-width: 0; padding: 8px 10px; font-size: 14px;
+      border: 1px solid var(--line); border-radius: var(--radius-sm);
+      background: var(--surface); color: var(--ink);
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    #searchBar input[type="text"]:focus {
+      outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    #searchBar button#searchBtn { flex: 0 0 auto; padding: 8px 16px; margin-top: 0; width: auto; }
+
+    /* ハンバーガー(三本線)：コンソールの開閉トグル */
+    #consoleToggle {
+      position: absolute; top: 16px; right: 16px; z-index: 10;
+      width: 40px; height: 40px; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--surface); border: 1px solid var(--line); color: var(--ink);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+    }
+    #consoleToggle:hover { background: var(--surface-sunken); }
+
+    /* コンソールが開いている間の背景オーバーレイ（クリックで閉じる） */
+    #consoleBackdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.25);
+      opacity: 0; pointer-events: none; transition: opacity .25s ease; z-index: 890;
+    }
+    #consoleBackdrop.open { opacity: 1; pointer-events: auto; }
+
+    /* コンソール本体：普段は右に隠れていて、ハンバーガーを押すと迫り出してくる */
+    #console {
+      position: fixed; top: 0; right: 0; height: 100vh; width: 380px; max-width: 88vw;
+      padding: 20px; overflow-y: auto; box-sizing: border-box;
+      background: var(--surface-sunken);
+      border-left: 1px solid var(--line);
+      box-shadow: -6px 0 24px rgba(0,0,0,0.18);
+      transform: translateX(100%); transition: transform .28s ease;
+      z-index: 900;
+      scrollbar-width: thin; scrollbar-color: #c9c9c9 transparent;
+    }
+    #console.open { transform: translateX(0); }
+    #console::-webkit-scrollbar { width: 8px; }
+    #console::-webkit-scrollbar-thumb { background: #c9c9c9; border-radius: 8px; }
+    #console::-webkit-scrollbar-track { background: transparent; }
+
+    .console-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+
+    h1 {
+      font-size: 17px; margin: 0; font-weight: 700; letter-spacing: 0.2px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    h1::before {
+      content: ""; width: 9px; height: 9px; border-radius: 50%;
+      background: var(--accent); display: inline-block;
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+
+    .row { margin-bottom: 12px; }
+    .row:last-child { margin-bottom: 0; }
+    .row label { display: block; font-size: 12px; color: var(--ink-soft); margin-bottom: 5px; font-weight: 600; }
+
+    .row input[type="text"], .row select {
+      width: 100%; padding: 8px 10px; font-size: 14px;
+      border: 1px solid var(--line); border-radius: var(--radius-sm);
+      background: var(--surface); color: var(--ink);
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .row input[type="text"]:focus, .row select:focus {
+      outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    .row input[type="range"] { width: 100%; }
+
+    input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+
+    .weight-val { font-size: 11px; color: var(--ink-faint); float: right; font-variant-numeric: tabular-nums; }
+
+    fieldset { border: 1px solid var(--line); border-radius: var(--radius); margin: 0 0 12px; padding: 12px 16px 4px; background: var(--surface); }
+    legend { font-size: 12px; color: var(--ink-soft); padding: 0 6px; font-weight: 600; }
+
+    button {
+      font-family: inherit; cursor: pointer; border-radius: var(--radius-sm);
+      transition: background-color .15s ease, border-color .15s ease, transform .05s ease;
+    }
+    button:active { transform: translateY(1px); }
+
+    button#searchBtn {
+      width: 100%; padding: 10px; font-size: 14px; font-weight: 700;
+      background: var(--accent); color: #fff; border: 1px solid var(--accent-dark);
+      margin-top: 2px;
+    }
+    button#searchBtn:hover { background: var(--accent-dark); }
+    button#searchBtn:disabled { background: #a9c3d4; border-color: #a9c3d4; cursor: default; }
+
+    .btn-ghost {
+      background: var(--surface); color: var(--ink-soft);
+      border: 1px solid var(--line); padding: 6px 10px; font-size: 12px;
+    }
+    .btn-ghost:hover { background: var(--surface-sunken); border-color: #ccc; color: var(--ink); }
+    .btn-ghost:disabled { color: #bbb; cursor: default; background: var(--surface); }
+
+    .bbox-mode-group { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+    .bbox-mode-group label {
+      display: flex; align-items: center; gap: 7px; font-weight: 400;
+      color: var(--ink); margin: 0; padding: 6px 8px; border-radius: var(--radius-sm);
+      transition: background-color .15s ease;
+    }
+    .bbox-mode-group label:hover { background: var(--surface-sunken); }
+    .bbox-mode-group input[type="number"] {
+      width: 72px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; font-size: 13px;
+    }
+
+    .checkbox-row {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: 12px; color: var(--ink-soft);
+    }
+
+    #proximityInfo {
+      font-size: 13px; color: var(--ink-soft); font-variant-numeric: tabular-nums;
+      background: var(--surface-sunken); border: 1px solid var(--line-soft);
+      border-radius: var(--radius-sm); padding: 6px 9px; margin-bottom: 6px;
+    }
+
+    #results { margin-top: 4px; }
+    .result-item {
+      display: flex; align-items: center; gap: 8px;
+      border-bottom: 1px solid var(--line-soft); padding: 9px 4px; font-size: 13px; cursor: pointer;
+      border-radius: var(--radius-sm); transition: background-color .12s ease;
+    }
+    .result-item:hover { background: var(--accent-soft); }
+    .result-item:last-child { border-bottom: none; }
+    .result-rank { font-weight: 700; color: var(--accent-dark); margin-right: 2px; }
+    .result-score { margin-left: auto; color: var(--ink-faint); font-variant-numeric: tabular-nums; font-size: 12px; }
+
+    .meta { font-size: 11px; color: var(--ink-faint); margin-top: 8px; line-height: 1.5; }
+    .error {
+      color: var(--danger); font-size: 12px; margin-top: 8px; white-space: pre-wrap;
+      background: rgba(204,0,0,0.06); border: 1px solid rgba(204,0,0,0.25);
+      border-radius: var(--radius-sm); padding: 8px 10px;
+    }
+
+    hr { border: none; border-top: 1px solid var(--line); margin: 18px 0; }
+
+    /* proximityマーカー：ターゲット(照準)風アイコン */
+    .proximity-target-marker { width: 28px; height: 28px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25)); }
+
+    /* 検索結果は index.js 側で circle + symbol レイヤーとして描画（zoom>=15で名前ラベル表示）。
+       DOMマーカーではなくなったため、専用のCSSクラスは不要。 */
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="map"></div>
+
+    <!-- 地図上に浮く検索ボックス。それ以外の設定/結果類はコンソール(ハンバーガーで開閉)に格納。 -->
+    <div id="searchBar">
+      <input type="text" id="queryInput" placeholder="例: 西大島駅の近くのマンション、すぐ近くにローソン">
+      <button id="searchBtn">検索</button>
+    </div>
+
+    <button id="consoleToggle" type="button" aria-label="コンソールを開く/閉じる">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+        <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+
+    <div id="consoleBackdrop"></div>
+
+    <div id="console">
+      <div class="console-header">
+        <h1>Geonator Lite</h1>
+        <button id="consoleClose" class="btn-ghost" type="button">閉じる</button>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <label>proximity（地図をクリックして指定）</label>
+          <div id="proximityInfo">未指定</div>
+          <button id="clearProximityBtn" class="btn-ghost" type="button">クリア</button>
+        </div>
+        <div class="row">
+          <label>検索範囲（bbox）</label>
+          <div class="bbox-mode-group">
+            <label>
+              <input type="radio" name="bboxMode" value="off"> オフ
+            </label>
+            <label>
+              <input type="radio" name="bboxMode" value="square">
+              オン（proximityから一辺
+              <input type="number" id="bboxSquareM" value="2000" min="100" step="100">
+              m の正方形）
+            </label>
+            <label>
+              <input type="radio" name="bboxMode" value="viewport"> オン（現在の画面表示領域）
+            </label>
+            <label>
+              <input type="radio" name="bboxMode" value="auto" checked> オート（クエリ中の到達時間/距離指定から自動計算）
+            </label>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px; margin-bottom:0;">
+          <label class="checkbox-row" style="display:inline-flex;">
+            <input type="checkbox" id="debugLogToggle" checked>
+            詳細ログを記録する（L1/L2段階トレース＋個別API呼び出し）
+          </label>
+        </div>
+      </div>
+
+      <div id="errorBox" class="error" style="display:none;"></div>
+      <div id="metaBox" class="meta"></div>
+      <div id="usageBox" class="meta"></div>
+      <button id="logBtn" class="btn-ghost" type="button" style="margin-top:8px;" disabled>処理ログを見る</button>
+      <div id="results"></div>
+
+      <hr>
+
+      <!-- Simplified settings form (spec §8.1) — NOT geonator's full settings modal, NOT a raw JSON editor. -->
+      <fieldset>
+        <legend>設定</legend>
+        <div class="row">
+          <label for="modelSelect">モデル</label>
+          <select id="modelSelect">
+            <option value="claude-haiku-4-5-20251001">claude-haiku-4-5-20251001</option>
+            <option value="claude-sonnet-4-6-20251015">claude-sonnet-4-6-20251015</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="wRelevance">関連性 (relevance) <span class="weight-val" id="wRelevanceVal">0.20</span></label>
+          <input type="range" id="wRelevance" min="0" max="1" step="0.05" value="0.20">
+        </div>
+        <div class="row">
+          <label for="wCondition">条件距離 (condition) <span class="weight-val" id="wConditionVal">0.70</span></label>
+          <input type="range" id="wCondition" min="0" max="1" step="0.05" value="0.70">
+        </div>
+        <div class="row">
+          <label for="wAnchor">基準点距離 (anchor) <span class="weight-val" id="wAnchorVal">1.00</span></label>
+          <input type="range" id="wAnchor" min="0" max="1" step="0.05" value="1.00">
+        </div>
+      </fieldset>
+    </div>
+  </div>
+
+  <!-- 処理ログモーダル（L1/L2間のJS処理・query schema確認用） -->
+  <div id="logModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000;">
+    <div style="background:#fff; max-width:900px; max-height:85vh; margin:5vh auto; padding:16px 20px; overflow-y:auto; border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,0.35);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h2 style="font-size:15px; margin:0; font-weight:700;">処理ログ</h2>
+        <button id="logModalClose" class="btn-ghost" type="button">閉じる</button>
+      </div>
+      <pre id="logModalContent" style="white-space:pre-wrap; word-break:break-all; font-size:12px; line-height:1.5; font-family: ui-monospace, Menlo, Consolas, monospace;"></pre>
+    </div>
+  </div>
+
+  <!-- config -->
+  <script src="./config.js"></script>
+  <!-- config.local.js: gitignore対象。存在すればCONFIGをローカル上書き（local-proxy優先切替等）。 -->
+  <script src="./config.local.js"></script>
+
+  <!-- data -->
+  <script src="./data/category-taxonomy.js"></script>
+  <script src="./data/category-synonyms.js"></script>
+  <script src="./data/poi-blocklist.js"></script>
+
+  <!-- prompts -->
+  <script src="./prompts/prompt-l1.js"></script>
+  <script src="./prompts/prompt-l2.js"></script>
+
+  <!-- modules -->
+  <script src="./modules/spatial-utils.js"></script>
+  <script src="./modules/distance-table.js"></script>
+  <script src="./modules/query-schema.js"></script>
+  <script src="./modules/llm-client.js"></script>
+  <script src="./modules/mapbox-mcp.js"></script>
+  <script src="./modules/query-engine.js"></script>
+
+  <!-- demo app (owns the map instance — geonator_lite itself is headless, spec §8) -->
+  <script src="./index.js"></script>
+</body>
+</html>
