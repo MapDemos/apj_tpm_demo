@@ -33,5 +33,10 @@
     "title": "Geonator",
     "description": "AI-powered location finder — identify precise coordinates from vague natural-language descriptions (Claude + Mapbox)",
     "path": "./geonator/"
+  },
+  {
+    "title": "Geonator Lite",
+    "description": "Headless one-shot POI search — single query in, ranked results out, no dialogue loop (Claude + Mapbox)",
+    "path": "./geonator_lite/"
   }
 ]
