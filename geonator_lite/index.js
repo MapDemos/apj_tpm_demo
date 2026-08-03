@@ -265,9 +265,10 @@ map.on('load', () => {
   map.on('click', 'resultsCircle', (e) => {
     const f = e.features[0];
     if (resultPopup) resultPopup.remove();
+    const scoreText = f.properties.score != null ? ` (score ${Number(f.properties.score).toFixed(3)})` : '';
     resultPopup = new mapboxgl.Popup()
       .setLngLat(f.geometry.coordinates)
-      .setText(`#${f.properties.rank} ${f.properties.name || ''} (score ${Number(f.properties.score).toFixed(3)})`)
+      .setText(`#${f.properties.rank} ${f.properties.name || ''}${scoreText}`)
       .addTo(map);
   });
 });
@@ -314,14 +315,15 @@ function renderResults(resp) {
   results.forEach(r => {
     const div = document.createElement('div');
     div.className = 'result-item';
-    div.innerHTML = `<span class="result-rank">#${r.rank}</span>${escapeHtml(r.name || '(名前なし)')}<span class="result-score">${r.score.toFixed(3)}</span>`;
+    const scoreHtml = r.score != null ? `<span class="result-score">${r.score.toFixed(3)}</span>` : '';
+    div.innerHTML = `<span class="result-rank">#${r.rank}</span>${escapeHtml(r.name || '(名前なし)')}${scoreHtml}`;
     box.appendChild(div);
 
     if (r.lat != null && r.lng != null) {
       features.push({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [r.lng, r.lat] },
-        properties: { rank: r.rank, name: r.name || '(名前なし)', score: r.score },
+        properties: { rank: r.rank, name: r.name || '(名前なし)', score: r.score ?? null },
       });
       bounds.extend([r.lng, r.lat]);
       div.addEventListener('click', () => map.jumpTo({ center: [r.lng, r.lat], zoom: 16 }));
@@ -535,7 +537,10 @@ function openRequestModal() {
   const content = document.getElementById('requestModalContent');
   const text = document.getElementById('queryInput').value.trim() || '(検索テキスト未入力)';
   try {
-    content.textContent = JSON.stringify(buildRequestBody(text), null, 2);
+    const body = searchMode === 'normal'
+      ? { note: '通常検索: Search Box forwardのみ（L1/L2/bbox/judgeなし）', q: text, language: 'ja', country: 'jp', limit: 30, proximity: proximityPoint || null }
+      : buildRequestBody(text);
+    content.textContent = JSON.stringify(body, null, 2);
     errBox.style.display = 'none';
   } catch (e) {
     content.textContent = '';
@@ -557,8 +562,7 @@ async function runSearch() {
 
   document.getElementById('searchBtn').disabled = true;
   try {
-    const requestBody = buildRequestBody(text);
-    const resp = await searchPOI(requestBody);
+    const resp = searchMode === 'normal' ? await runPlainSearch(text) : await searchPOI(buildRequestBody(text));
     renderResults(resp);
   } catch (e) {
     errorBox.style.display = 'block';
@@ -566,6 +570,56 @@ async function runSearch() {
   } finally {
     document.getElementById('searchBtn').disabled = false;
   }
+}
+
+// AI検索(既定)/通常検索の切替。通常検索はgeonator_liteの処理(L1/L2/bbox自動計算/judgeスコア)を
+// 一切介さず、Search Box forwardをq=検索テキストそのまま・固定パラメータで叩くだけ
+// (proximityだけはON検索と同じ地図クリック地点を使う。それ以外は一切設定を反映しない)。
+let searchMode = 'ai';
+const searchModeAiBtn = document.getElementById('searchModeAiBtn');
+const searchModeNormalBtn = document.getElementById('searchModeNormalBtn');
+function setSearchMode(mode) {
+  searchMode = mode;
+  searchModeAiBtn.classList.toggle('active', mode === 'ai');
+  searchModeNormalBtn.classList.toggle('active', mode === 'normal');
+}
+searchModeAiBtn.addEventListener('click', () => setSearchMode('ai'));
+searchModeNormalBtn.addEventListener('click', () => setSearchMode('normal'));
+
+/** 通常検索モード: Search Box forwardのみを固定パラメータで呼ぶ。renderResults()が読む
+ * {results, meta}の形はAI検索と揃えるが、score(judgeスコア)は存在しないためnullのまま渡す。 */
+async function runPlainSearch(text) {
+  const params = new URLSearchParams({
+    q: text,
+    language: 'ja',
+    country: 'jp',
+    limit: '30',
+    access_token: CONFIG.MAPBOX_ACCESS_TOKEN,
+  });
+  if (proximityPoint) params.set('proximity', `${proximityPoint.lng},${proximityPoint.lat}`);
+  const url = `${CONFIG.SEARCH_BOX_API}?${params.toString()}`;
+
+  const t0 = performance.now();
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Search Box APIエラー: HTTP ${res.status}`);
+  const data = await res.json();
+  const items = MapboxMCPClient._mapSearchBoxFeatures(data);
+  const elapsedMs = Math.round(performance.now() - t0);
+
+  return {
+    results: items.map((it, i) => ({
+      rank: i + 1,
+      name: it.name || it.full_address,
+      lat: it.latitude,
+      lng: it.longitude,
+      score: null,
+    })),
+    meta: {
+      candidateCount: items.length,
+      elapsedMs,
+      note: '通常検索（Search Box APIのみ・L1/L2/bbox/judgeなし）',
+    },
+  };
 }
 
 document.getElementById('searchBtn').addEventListener('click', runSearch);

@@ -55,11 +55,16 @@
       padding: 0 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.12);
     }
 
-    /* 地図上の検索ボックス（下部中央） */
-    #searchBar {
+    /* 地図上の検索ボックス（下部中央）＋その上のAI検索/通常検索切替 */
+    #searchBarWrap {
       position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
       width: min(480px, calc(100vw - 160px));
-      display: flex; gap: 8px; z-index: 10;
+      display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 10;
+    }
+    #searchModeToggle { align-self: center; }
+    #searchBar {
+      width: 100%;
+      display: flex; gap: 8px;
       background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
       padding: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.18);
     }
@@ -239,7 +244,7 @@
       #mapHeader { padding: 0 14px; height: 52px; }
       h1 { font-size: 15px; }
       #consoleToggle { top: 64px; right: 14px; width: 36px; height: 36px; }
-      #searchBar {
+      #searchBarWrap {
         width: auto; max-width: none;
         left: 14px; right: 14px; transform: none; bottom: 14px;
       }
@@ -256,10 +261,18 @@
       <h1>Geonator Lite</h1>
     </div>
 
-    <!-- 地図上に浮く検索ボックス。それ以外の設定/結果類はコンソール(ハンバーガーで開閉)に格納。 -->
-    <div id="searchBar">
-      <input type="text" id="queryInput" placeholder="例: 西大島駅の近くのマンション、すぐ近くにローソン">
-      <button id="searchBtn">検索</button>
+    <!-- 地図上に浮く検索ボックス。それ以外の設定/結果類はコンソール(ハンバーガーで開閉)に格納。
+         AI検索(既定)=現行のL1/L2込みgeonator_lite処理、通常検索=Search Box APIへの固定パラメータ
+         forwardリクエストのみ(L1もgeonator_liteのbbox/judge等も一切介さない)。 -->
+    <div id="searchBarWrap">
+      <div class="settings-modes" id="searchModeToggle">
+        <button type="button" id="searchModeAiBtn" class="settings-mode-btn active">AI検索</button>
+        <button type="button" id="searchModeNormalBtn" class="settings-mode-btn">通常検索</button>
+      </div>
+      <div id="searchBar">
+        <input type="text" id="queryInput" placeholder="例: 西大島駅の近くのマンション、すぐ近くにローソン">
+        <button id="searchBtn">検索</button>
+      </div>
     </div>
 
     <button id="consoleToggle" type="button" aria-label="コンソールを開く/閉じる">
