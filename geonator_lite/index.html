@@ -36,7 +36,7 @@
 
     * { box-sizing: border-box; }
     html, body {
-      margin: 0; padding: 0; height: 100%;
+      margin: 0; padding: 0; height: 100%; overflow: hidden;
       font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
       color: var(--ink);
     }
@@ -55,9 +55,11 @@
       padding: 0 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.12);
     }
 
-    /* 地図上の検索ボックス（下部中央）＋その上のAI検索/通常検索切替 */
+    /* 地図上の検索ボックス（下部中央）＋その上のAI検索/通常検索切替。
+       bottomはMapboxロゴ(左下)・attribution(右下)より上に十分な余白を空ける
+       (ロゴ/attributionはMapboxの利用規約上、常に視認可能でなければならず隠せない)。 */
     #searchBarWrap {
-      position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+      position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
       width: min(480px, calc(100vw - 160px));
       display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 10;
     }
@@ -238,6 +240,20 @@
     /* 検索結果は index.js 側で circle + symbol レイヤーとして描画（zoom>=15で名前ラベル表示）。
        DOMマーカーではなくなったため、専用のCSSクラスは不要。 */
 
+    /* 検索中の画面暗転＋スピナー。AI検索/通常検索どちらもrunSearch()実行中は表示する。 */
+    #loadingOverlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none; transition: opacity .15s ease; z-index: 950;
+    }
+    #loadingOverlay.open { opacity: 1; pointer-events: auto; }
+    .spinner {
+      width: 44px; height: 44px; border-radius: 50%;
+      border: 4px solid rgba(255,255,255,0.35); border-top-color: #fff;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     /* レスポンシブ対応：狭い画面(スマホ縦持ち想定)ではコンソールを全幅化し、
        各オーバーレイの余白・フォントサイズを詰める。 */
     @media (max-width: 600px) {
@@ -246,7 +262,7 @@
       #consoleToggle { top: 64px; right: 14px; width: 36px; height: 36px; }
       #searchBarWrap {
         width: auto; max-width: none;
-        left: 14px; right: 14px; transform: none; bottom: 14px;
+        left: 14px; right: 14px; transform: none; bottom: 40px;
       }
       #console { width: 100vw; max-width: 100vw; border-left: none; padding: 16px; }
     }
@@ -282,6 +298,8 @@
     </button>
 
     <div id="consoleBackdrop"></div>
+
+    <div id="loadingOverlay"><div class="spinner"></div></div>
 
     <div id="console">
       <!-- コンソールの中身はこの3タブが唯一の上位構造（「設定」等の親カテゴリは作らない）。

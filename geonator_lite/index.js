@@ -14,7 +14,11 @@ const map = new mapboxgl.Map({
   style: 'mapbox://styles/10da032y/cmp29b79d001601so7q6d07ls',
   center: CONFIG.DEFAULT_MAP_CENTER || [139.7671, 35.6812], // Tokyo
   zoom: 12,
+  attributionControl: false,
 });
+// デフォルトのAttributionControlは幅が狭い画面だと属性表示テキストがそのまま横に伸びて
+// 画面外にはみ出す（横スクロールの原因になる）。compact:trueで常に「ⓘ」アイコンに畳んでおく。
+map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
 
 // コンソール(旧サイドバー)はハンバーガーで開閉するオーバーレイ。地図上にはヘッダー・検索ボックス・
 // ハンバーガーだけを常時表示し、それ以外(proximity/bbox/設定/結果一覧/ログ)はここに隠す。
@@ -561,6 +565,7 @@ async function runSearch() {
   if (!text) return;
 
   document.getElementById('searchBtn').disabled = true;
+  document.getElementById('loadingOverlay').classList.add('open');
   try {
     const resp = searchMode === 'normal' ? await runPlainSearch(text) : await searchPOI(buildRequestBody(text));
     renderResults(resp);
@@ -569,6 +574,7 @@ async function runSearch() {
     errorBox.textContent = e?.message || String(e);
   } finally {
     document.getElementById('searchBtn').disabled = false;
+    document.getElementById('loadingOverlay').classList.remove('open');
   }
 }
 
