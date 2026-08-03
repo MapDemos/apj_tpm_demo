@@ -583,7 +583,11 @@ class QueryEngine {
     const jsTag = this.mcp._resolveCategoryTag(queries);
     if (jsTag) return jsTag;
     if (!this.config.useCategorySearch || !schemaTag) return null;
-    return (typeof CATEGORY_TAXONOMY !== 'undefined' && CATEGORY_TAXONOMY.includes(schemaTag)) ? schemaTag : null;
+    if (typeof CATEGORY_TAXONOMY === 'undefined' || !CATEGORY_TAXONOMY.includes(schemaTag)) return null;
+    // Mapbox's poi_category param expects a single category keyword, not our internal
+    // taxonomy's "親>子" grouping id — send only the child segment (mirrors mcp._resolveCategoryTag).
+    const idx = schemaTag.indexOf('>');
+    return idx === -1 ? schemaTag : schemaTag.slice(idx + 1);
   }
 
   _distM(a, b) {

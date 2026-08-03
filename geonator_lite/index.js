@@ -15,10 +15,10 @@ const map = new mapboxgl.Map({
   center: CONFIG.DEFAULT_MAP_CENTER || [139.7671, 35.6812], // Tokyo
   zoom: 12,
 });
-map.addControl(new mapboxgl.NavigationControl(), 'top-left');
 
-// コンソール(旧サイドバー)はハンバーガーで開閉するオーバーレイ。地図上には検索ボックスと
+// コンソール(旧サイドバー)はハンバーガーで開閉するオーバーレイ。地図上にはヘッダー・検索ボックス・
 // ハンバーガーだけを常時表示し、それ以外(proximity/bbox/設定/結果一覧/ログ)はここに隠す。
+// ズーム/方角ボタン(NavigationControl)は廃止（ピンチ/スクロールでズーム操作は可能）。
 const consoleEl = document.getElementById('console');
 const consoleBackdrop = document.getElementById('consoleBackdrop');
 function setConsoleOpen(open) {
@@ -26,7 +26,6 @@ function setConsoleOpen(open) {
   consoleBackdrop.classList.toggle('open', open);
 }
 document.getElementById('consoleToggle').addEventListener('click', () => setConsoleOpen(!consoleEl.classList.contains('open')));
-document.getElementById('consoleClose').addEventListener('click', () => setConsoleOpen(false));
 consoleBackdrop.addEventListener('click', () => setConsoleOpen(false));
 
 // 検索結果は mapboxgl.Marker(DOM)ではなく、circle(丸+番号) + symbol(名前ラベル)の
@@ -353,13 +352,14 @@ function escapeHtml(s) {
 }
 
 // 「リクエストパラメータ」タブはGUI(スライダー等)とJSON(直接編集)の2ビューを切り替えられる。
-// どちらも同じreadSettings()の戻り値の形(model/judge.weights/bboxMode/bboxSquareM/debugLog
-// ——いずれもrequestBody構築に使う値。「フロントエンド設定」タブのshowBboxPreviewは含まない、
-// あれはリクエストに載らないUI専用の値のため)を表現する。値の実体は常にGUI側のinput要素に
-// 持たせ、JSONビューはその読み書き用の別表現として扱う(GUI→JSON切り替え時にシリアライズ、
-// JSON→GUI切り替え時にパースしてGUIへ反映)。
+// どちらも同じreadSettings()の戻り値の形(proximity/model/judge.weights/bboxMode/bboxSquareM
+// /debugLog——いずれもrequestBody構築に使う値。「UI設定」タブのshowBboxPreviewは含まない、
+// あれはリクエストに載らないUI専用の値のため)を表現する。値の実体は常にGUI側のinput要素・
+// proximityPoint変数に持たせ、JSONビューはその読み書き用の別表現として扱う(GUI→JSON切り替え
+// 時にシリアライズ、JSON→GUI切り替え時にパースしてGUIへ反映)。
 function readSettingsFromGui() {
   return {
+    proximity: proximityPoint ? { lat: proximityPoint.lat, lng: proximityPoint.lng } : null,
     model: document.getElementById('modelSelect').value,
     judge: {
       weights: {
@@ -397,6 +397,15 @@ function applySettingsToGui(settings) {
   }
   if (settings.debugLog != null) {
     document.getElementById('debugLogToggle').checked = !!settings.debugLog;
+  }
+  if ('proximity' in settings) {
+    if (settings.proximity == null) {
+      clearProximityPoint();
+    } else {
+      const { lat, lng } = settings.proximity;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error('proximity は {lat, lng} の数値である必要があります');
+      setProximityPoint({ lat, lng });
+    }
   }
   const w = settings.judge?.weights || {};
   for (const [key, id] of [['relevance', 'wRelevance'], ['condition', 'wCondition'], ['anchor', 'wAnchor']]) {
@@ -458,25 +467,31 @@ function switchToGuiView() {
 settingsModeJsonBtn.addEventListener('click', () => { if (settingsMode !== 'json') switchToJsonView(); });
 settingsModeGuiBtn.addEventListener('click', () => { if (settingsMode === 'json') switchToGuiView(); });
 
-// 設定タブ：「リクエストパラメータ」(searchPOI()のrequestBodyに載る値。上のGUI/JSON切替対象)
-// と「フロントエンド設定」(showBboxPreviewのようなUI専用の値。リクエストには載らない)を分ける。
+// 設定タブ：「検索結果」(debugLogToggleのような結果表示・ログ記録の値。リクエストには載らない)、
+// 「リクエストパラメータ」(searchPOI()のrequestBodyに載る値。上のGUI/JSON切替対象)、
+// 「UI設定」(showBboxPreviewのようなUI専用の値。リクエストには載らない)の3つを分ける。
+const settingsTabResult = document.getElementById('settingsTabResult');
 const settingsTabRequest = document.getElementById('settingsTabRequest');
 const settingsTabFrontend = document.getElementById('settingsTabFrontend');
+const settingsTopTabResultBtn = document.getElementById('settingsTopTabResultBtn');
 const settingsTopTabRequestBtn = document.getElementById('settingsTopTabRequestBtn');
 const settingsTopTabFrontendBtn = document.getElementById('settingsTopTabFrontendBtn');
 
-settingsTopTabRequestBtn.addEventListener('click', () => {
-  settingsTabRequest.style.display = '';
-  settingsTabFrontend.style.display = 'none';
-  settingsTopTabRequestBtn.classList.add('active');
-  settingsTopTabFrontendBtn.classList.remove('active');
-});
-settingsTopTabFrontendBtn.addEventListener('click', () => {
-  settingsTabRequest.style.display = 'none';
-  settingsTabFrontend.style.display = '';
-  settingsTopTabFrontendBtn.classList.add('active');
-  settingsTopTabRequestBtn.classList.remove('active');
-});
+const settingsTopTabs = [
+  { btn: settingsTopTabResultBtn, panel: settingsTabResult },
+  { btn: settingsTopTabRequestBtn, panel: settingsTabRequest },
+  { btn: settingsTopTabFrontendBtn, panel: settingsTabFrontend },
+];
+function activateSettingsTopTab(active) {
+  for (const { btn, panel } of settingsTopTabs) {
+    const isActive = btn === active;
+    panel.style.display = isActive ? '' : 'none';
+    btn.classList.toggle('active', isActive);
+  }
+}
+settingsTopTabResultBtn.addEventListener('click', () => activateSettingsTopTab(settingsTopTabResultBtn));
+settingsTopTabRequestBtn.addEventListener('click', () => activateSettingsTopTab(settingsTopTabRequestBtn));
+settingsTopTabFrontendBtn.addEventListener('click', () => activateSettingsTopTab(settingsTopTabFrontendBtn));
 
 /** 検索実行時に読む設定値。JSONビュー中は編集中のテキストをその場でパースする
  * (GUIに戻さずJSONのまま検索できるようにするため)。不正なら例外を投げる。 */

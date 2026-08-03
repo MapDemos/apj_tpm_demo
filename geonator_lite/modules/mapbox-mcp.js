@@ -340,8 +340,12 @@ class MapboxMCPClient {
         }
       }
     }
-    if (candidates.size === 1) return [...candidates][0];
-    return null;
+    if (candidates.size !== 1) return null;
+    const id = [...candidates][0];
+    // Mapbox's poi_category param expects a single category keyword, not our internal
+    // taxonomy's "親>子" grouping id — send only the child segment (e.g. "レストラン>丼もの" → "丼もの").
+    const idx = id.indexOf('>');
+    return idx === -1 ? id : id.slice(idx + 1);
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -800,13 +804,15 @@ class MapboxMCPClient {
     const seen = new Map();
 
     // Category Search API (separate endpoint, max limit=25) has been retired in favor of
-    // passing poi_category directly on the forward-search call. Forward search supports the
-    // same category-filtered lookup (verified against real queries — e.g. "牛丼屋" +
-    // poi_category=レストラン>丼もの surfaces "松屋" even though its name doesn't textually
-    // match "牛丼屋") while allowing forward's higher limit (up to 30) instead of Category
-    // Search's 25 cap, and without a second parallel API call. Only attached to the primary
-    // query (index 0, always the original tx per the QE-expansion rule) — attaching it to
-    // every expanded synonym too would just resend the same category filter redundantly.
+    // passing poi_category directly on the forward-search call, keeping forward's higher
+    // limit (up to 30) and avoiding a second parallel API call. NOTE: q + poi_category are
+    // ANDed by the forward endpoint — if q's text doesn't match any indexed name/address in
+    // the current proximity/bbox, poi_category can't rescue it even when true category
+    // matches exist (e.g. "牛丼屋" q text failing to match "松屋"'s name). _resolveCategoryTag
+    // also strips our taxonomy's "親>子" grouping down to just the child keyword, since that's
+    // what Mapbox's poi_category value actually expects. Only attached to the primary query
+    // (index 0, always the original tx per the QE-expansion rule) — attaching it to every
+    // expanded synonym too would just resend the same category filter redundantly.
     const categoryTag = categoryTagPromise ? await Promise.resolve(categoryTagPromise).catch(() => null) : null;
 
     const sbRequests = queries.flatMap((q, i) => {
