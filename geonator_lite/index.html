@@ -40,16 +40,19 @@
       font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
       color: var(--ink);
     }
-    /* 地図が画面全体を占め、検索ボックス・コンソールはその上に浮くオーバーレイになる */
-    #app { position: relative; height: 100vh; overflow: hidden; }
+    /* 地図が画面全体を占め、検索ボックス・コンソールはその上に浮くオーバーレイになる。
+       100dvhはモバイルのアドレスバー分の高さ変動に対応(未対応ブラウザは100vhのまま)。 */
+    #app { position: relative; height: 100vh; height: 100dvh; overflow: hidden; }
     #map { position: absolute; inset: 0; }
 
-    /* 地図のヘッダー：上部を全幅で埋めるバー。旧NavigationControl(ズーム/方角)の場所を引き継ぐ */
+    /* 地図のヘッダー：上部を全幅で埋めるバー。旧NavigationControl(ズーム/方角)の場所を引き継ぐ。
+       高さを固定し、consoleToggle(ハンバーガー)をその直下に一定間隔で配置できるようにする。 */
     #mapHeader {
       position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+      height: 56px; box-sizing: border-box;
       display: flex; align-items: center;
       background: var(--surface); border-bottom: 1px solid var(--line);
-      padding: 14px 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+      padding: 0 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.12);
     }
 
     /* 地図上の検索ボックス（下部中央） */
@@ -73,7 +76,7 @@
 
     /* ハンバーガー(三本線)：コンソールの開閉トグル */
     #consoleToggle {
-      position: absolute; top: 6px; right: 20px; z-index: 11;
+      position: absolute; top: 68px; right: 20px; z-index: 11;
       width: 40px; height: 40px; padding: 0;
       display: flex; align-items: center; justify-content: center;
       background: var(--surface); border: 1px solid var(--line); color: var(--ink);
@@ -154,10 +157,35 @@
     .btn-ghost:hover { background: var(--surface-sunken); border-color: #ccc; color: var(--ink); }
     .btn-ghost:disabled { color: #bbb; cursor: default; background: var(--surface); }
 
-    .settings-mode-btn.active, .settings-tab-btn.active {
-      background: var(--accent); border-color: var(--accent-dark); color: #fff;
+    /* 上位3タブ（検索結果/リクエストパラメータ/UI設定）：下線タブ型。
+       「リクエストパラメータ」が長いため、狭い画面では折り返さず横スクロールにする。 */
+    .settings-tabs {
+      display: flex; gap: 4px; margin-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+      overflow-x: auto; -webkit-overflow-scrolling: touch;
     }
-    .settings-mode-btn.active:hover, .settings-tab-btn.active:hover { background: var(--accent-dark); }
+    .settings-tab-btn {
+      background: none; border: none; border-bottom: 2px solid transparent;
+      border-radius: 0; margin-bottom: -1px; padding: 8px 10px;
+      font-size: 13px; font-weight: 600; color: var(--ink-faint);
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .settings-tab-btn:hover { color: var(--ink); background: var(--surface); }
+    .settings-tab-btn.active { color: var(--accent-dark); border-bottom-color: var(--accent); }
+
+    /* GUI/JSON切替：セグメント（ピル）型。上位タブとは別物と分かるよう見た目を変える */
+    .settings-modes {
+      display: inline-flex; gap: 2px; padding: 3px;
+      background: var(--surface-sunken); border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+    }
+    .settings-mode-btn {
+      background: none; border: none; padding: 4px 12px;
+      font-size: 12px; font-weight: 600; color: var(--ink-soft); border-radius: 4px;
+    }
+    .settings-mode-btn:hover { color: var(--ink); }
+    .settings-mode-btn.active { background: var(--accent); color: #fff; }
+    .settings-mode-btn.active:hover { background: var(--accent-dark); }
 
     .bbox-mode-group { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
     .bbox-mode-group label {
@@ -204,6 +232,19 @@
 
     /* 検索結果は index.js 側で circle + symbol レイヤーとして描画（zoom>=15で名前ラベル表示）。
        DOMマーカーではなくなったため、専用のCSSクラスは不要。 */
+
+    /* レスポンシブ対応：狭い画面(スマホ縦持ち想定)ではコンソールを全幅化し、
+       各オーバーレイの余白・フォントサイズを詰める。 */
+    @media (max-width: 600px) {
+      #mapHeader { padding: 0 14px; height: 52px; }
+      h1 { font-size: 15px; }
+      #consoleToggle { top: 64px; right: 14px; width: 36px; height: 36px; }
+      #searchBar {
+        width: auto; max-width: none;
+        left: 14px; right: 14px; transform: none; bottom: 14px;
+      }
+      #console { width: 100vw; max-width: 100vw; border-left: none; padding: 16px; }
+    }
   </style>
 </head>
 <body>
@@ -233,10 +274,10 @@
       <!-- コンソールの中身はこの3タブが唯一の上位構造（「設定」等の親カテゴリは作らない）。
            検索結果＝結果表示・ログ記録に関わる値、リクエストパラメータ＝searchPOI()の
            requestBodyに載る値、UI設定＝地図表示等UI側だけの表示設定でリクエストには載らない。 -->
-      <div class="row" style="display:flex; gap:6px;">
-        <button type="button" id="settingsTopTabResultBtn" class="btn-ghost settings-tab-btn active">検索結果</button>
-        <button type="button" id="settingsTopTabRequestBtn" class="btn-ghost settings-tab-btn">リクエストパラメータ</button>
-        <button type="button" id="settingsTopTabFrontendBtn" class="btn-ghost settings-tab-btn">UI設定</button>
+      <div class="settings-tabs">
+        <button type="button" id="settingsTopTabResultBtn" class="settings-tab-btn active">検索結果</button>
+        <button type="button" id="settingsTopTabRequestBtn" class="settings-tab-btn">リクエストパラメータ</button>
+        <button type="button" id="settingsTopTabFrontendBtn" class="settings-tab-btn">UI設定</button>
       </div>
 
       <div id="settingsTabResult">
@@ -254,9 +295,11 @@
       </div>
 
       <div id="settingsTabRequest" style="display:none;">
-          <div class="row" style="display:flex; gap:6px;">
-            <button type="button" id="settingsModeGuiBtn" class="btn-ghost settings-mode-btn active">GUI</button>
-            <button type="button" id="settingsModeJsonBtn" class="btn-ghost settings-mode-btn">JSON</button>
+          <div class="row" style="display:flex; align-items:center; gap:6px;">
+            <div class="settings-modes">
+              <button type="button" id="settingsModeGuiBtn" class="settings-mode-btn active">GUI</button>
+              <button type="button" id="settingsModeJsonBtn" class="settings-mode-btn">JSON</button>
+            </div>
             <button type="button" id="viewRequestBtn" class="btn-ghost" style="margin-left:auto;">リクエスト全文を見る</button>
           </div>
 

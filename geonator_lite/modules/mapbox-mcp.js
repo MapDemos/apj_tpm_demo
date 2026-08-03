@@ -204,32 +204,31 @@ class MapboxMCPClient {
   // "close enough" either way. This is a deliberately different feature from the old
   // auto-derived locality bbox that was removed (huge/skewed admin-boundary bbox, fixed
   // 800m near-radius excluding real targets) — see class header comment.
-  async _searchBoxRequest(q, types, proximity, poiCategory = null, limit = 30) {
+  async _searchBoxRequest(q, types, proximity, limit = 30) {
     let url =
       `${this.config.SEARCH_BOX_API}?q=${encodeURIComponent(q)}&access_token=${this.token}` +
       `&language=ja&country=jp&types=${types}&limit=${limit}`;
-    if (poiCategory) url += `&poi_category=${encodeURIComponent(poiCategory)}`;
     if (proximity && proximity.length >= 2) url += `&proximity=${proximity[0]},${proximity[1]}`;
     if (this._bbox) url += `&bbox=${this._bbox.join(',')}`;
 
     if (this._sbRequests >= (this.config.SB_MAX_PER_QUERY ?? 100)) {
       this._capHit.sb++;
-      this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit, capped: true, resultCount: 0, names: [] });
+      this._logApi({ api: 'search_box_forward', q, types, proximity, bbox: this._bbox, limit, capped: true, resultCount: 0, names: [] });
       return [];
     }
     try {
       this._sbRequests++;
       const res = await this._fetchWithRetry(url);
       if (!res.ok) {
-        this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit, error: `HTTP ${res.status ?? '(不明)'}`, resultCount: 0, names: [] });
+        this._logApi({ api: 'search_box_forward', q, types, proximity, bbox: this._bbox, limit, error: `HTTP ${res.status ?? '(不明)'}`, resultCount: 0, names: [] });
         return [];
       }
       const data = await res.json();
       const items = MapboxMCPClient._mapSearchBoxFeatures(data);
-      this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit, resultCount: items.length, names: items.map(f => f.name).slice(0, 50) });
+      this._logApi({ api: 'search_box_forward', q, types, proximity, bbox: this._bbox, limit, resultCount: items.length, names: items.map(f => f.name).slice(0, 50) });
       return items;
     } catch (e) {
-      this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit, error: e?.message || String(e), resultCount: 0, names: [] });
+      this._logApi({ api: 'search_box_forward', q, types, proximity, bbox: this._bbox, limit, error: e?.message || String(e), resultCount: 0, names: [] });
       return [];
     }
   }
@@ -237,7 +236,7 @@ class MapboxMCPClient {
   /** Search Box wrapper for QueryEngine (raw feature-array shape). */
   async searchBox(query, opts = {}) {
     const types = opts.types || 'poi,address,place,locality';
-    const features = await this._searchBoxRequest(query, types, opts.proximity || null, null, opts.limit ?? 30);
+    const features = await this._searchBoxRequest(query, types, opts.proximity || null, opts.limit ?? 30);
     return {
       features: features.map(f => ({
         geometry: { coordinates: [f.longitude, f.latitude] },
@@ -342,8 +341,9 @@ class MapboxMCPClient {
     }
     if (candidates.size !== 1) return null;
     const id = [...candidates][0];
-    // Mapbox's poi_category param expects a single category keyword, not our internal
-    // taxonomy's "親>子" grouping id — send only the child segment (e.g. "レストラン>丼もの" → "丼もの").
+    // This resolved tag is used AS the forward-search `q` text (see _collectPOI below), so
+    // send only the child keyword, not our internal taxonomy's "親>子" grouping id
+    // (e.g. "レストラン>丼もの" → "丼もの").
     const idx = id.indexOf('>');
     return idx === -1 ? id : id.slice(idx + 1);
   }
@@ -713,8 +713,8 @@ class MapboxMCPClient {
    * Core collection routine (replaces geonator's `_searchNearbyPOI`). Single-shot
    * Tilequery (spec §5) instead of grid sampling; bus-stop/intersection/signal/
    * transit-entrance special-cased layers are the same shape as geonator. category_tag
-   * (when resolved) is passed as `poi_category` on the primary forward-search request
-   * rather than a separate Category Search API call (retired — see below).
+   * (when resolved) is used AS the `q` text on the primary forward-search request (not a
+   * separate poi_category filter, and not a separate Category Search API call — see below).
    *
    * @param {string[]} queries
    * @param {number[]|null} proximity - [lng, lat], the Search Box bias point AND the Tilequery center
@@ -722,10 +722,12 @@ class MapboxMCPClient {
    * @param {Promise<string|null>|null} categoryTagPromise
    * @param {string|null} specificity - 'unique'|'brand'|'generic' (see _searchBoxLimitFor)
    * @param {string|null} textType - L1's own 'poi'|'place'|'ambiguous' self-report (schema
-   *   text_type — see query-schema.js), used only by the general-POI branch below to pick
-   *   Search Box's `types` param. Replaces the former classifyQueryType() regex heuristic:
-   *   L1 already knows semantically whether e.g. "渋谷109" is a facility vs. an area, so
-   *   re-guessing it from text-only suffix patterns was redundant and less accurate.
+   *   text_type — see query-schema.js), used by the general-POI branch below to pick
+   *   Search Box's `types` param. Overridden to a single types=poi search whenever a
+   *   categoryTag resolves (index 0 only — see below), since that's a stronger signal than
+   *   this text_type guess. Otherwise replaces the former classifyQueryType() regex
+   *   heuristic: L1 already knows semantically whether e.g. "渋谷109" is a facility vs. an
+   *   area, so re-guessing it from text-only suffix patterns was redundant and less accurate.
    *   'ambiguous' (default) preserves the old 'both' fallback (query both types).
    * @returns {Promise<Array>}
    */
@@ -804,27 +806,27 @@ class MapboxMCPClient {
     const seen = new Map();
 
     // Category Search API (separate endpoint, max limit=25) has been retired in favor of
-    // passing poi_category directly on the forward-search call, keeping forward's higher
-    // limit (up to 30) and avoiding a second parallel API call. NOTE: q + poi_category are
-    // ANDed by the forward endpoint — if q's text doesn't match any indexed name/address in
-    // the current proximity/bbox, poi_category can't rescue it even when true category
-    // matches exist (e.g. "牛丼屋" q text failing to match "松屋"'s name). _resolveCategoryTag
-    // also strips our taxonomy's "親>子" grouping down to just the child keyword, since that's
-    // what Mapbox's poi_category value actually expects. Only attached to the primary query
-    // (index 0, always the original tx per the QE-expansion rule) — attaching it to every
-    // expanded synonym too would just resend the same category filter redundantly.
+    // just using the resolved category term itself as `q` on the forward-search call — no
+    // separate poi_category param. (q + poi_category used to be ANDed by the forward
+    // endpoint, so a generic genre word like "牛丼屋" as q would fail to match an indexed
+    // name like "松屋" even with a correct poi_category filter attached; verified manually
+    // that q=<category term alone> (e.g. "丼もの") finds it directly.) A resolved categoryTag
+    // is also a stronger, more specific signal than L1's own text_type guess, so it overrides
+    // the ambiguous/poi/place branching below and always does a single types=poi search — this
+    // only applies to the primary query (index 0, always the original tx per the QE-expansion
+    // rule); expanded synonym queries (i>0) keep following textType as before.
     const categoryTag = categoryTagPromise ? await Promise.resolve(categoryTagPromise).catch(() => null) : null;
 
     const sbRequests = queries.flatMap((q, i) => {
-      const cat = i === 0 ? categoryTag : null;
-      if (textType === 'place') return [this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, null, sbLimit)];
-      if (textType === 'poi')   return [this._searchBoxRequest(q, 'poi', effectiveProximity, cat, sbLimit)];
+      if (i === 0 && categoryTag) return [this._searchBoxRequest(categoryTag, 'poi', effectiveProximity, sbLimit)];
+      if (textType === 'place') return [this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, sbLimit)];
+      if (textType === 'poi')   return [this._searchBoxRequest(q, 'poi', effectiveProximity, sbLimit)];
       // 'ambiguous' (or unset): L1 couldn't commit either way (e.g. "鎌倉" — a locality
       // name that could also be a same-named facility) — query both types, same safety
       // net the old classifyQueryType 'both' fallback provided.
       return [
-        this._searchBoxRequest(q, 'poi', effectiveProximity, cat, sbLimit),
-        this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, null, sbLimit),
+        this._searchBoxRequest(q, 'poi', effectiveProximity, sbLimit),
+        this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, sbLimit),
       ];
     });
 

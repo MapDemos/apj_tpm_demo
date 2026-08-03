@@ -584,8 +584,9 @@ class QueryEngine {
     if (jsTag) return jsTag;
     if (!this.config.useCategorySearch || !schemaTag) return null;
     if (typeof CATEGORY_TAXONOMY === 'undefined' || !CATEGORY_TAXONOMY.includes(schemaTag)) return null;
-    // Mapbox's poi_category param expects a single category keyword, not our internal
-    // taxonomy's "親>子" grouping id — send only the child segment (mirrors mcp._resolveCategoryTag).
+    // This resolved tag is used AS the forward-search `q` text (see mapbox-mcp.js _collectPOI),
+    // so send only the child keyword, not our internal taxonomy's "親>子" grouping id
+    // (mirrors mcp._resolveCategoryTag).
     const idx = schemaTag.indexOf('>');
     return idx === -1 ? schemaTag : schemaTag.slice(idx + 1);
   }
