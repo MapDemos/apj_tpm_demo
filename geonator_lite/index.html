@@ -164,10 +164,21 @@
     .btn-ghost:hover { background: var(--surface-sunken); border-color: #ccc; color: var(--ink); }
     .btn-ghost:disabled { color: #bbb; cursor: default; background: var(--surface); }
 
+    /* コンソール(#console)はoverflow-y:autoで中身が縦スクロールする。閉じるボタンと
+       上位タブだけはスクロールしても常に見える位置に固定したいので、この2つをまとめて
+       #consoleStickyHeaderに入れてposition:stickyにする。#console自体のpadding(20px)分だけ
+       top/marginをマイナスにして、その分をpaddingで内側に付け直す定番のテクニック。 */
+    #consoleStickyHeader {
+      position: sticky; top: -20px; z-index: 5;
+      margin: -20px -20px 14px; padding: 16px 20px 0;
+      background: var(--surface-sunken);
+    }
+    #consoleCloseBtn { margin-bottom: 12px; }
+
     /* 上位3タブ（検索結果/リクエストパラメータ/UI設定）：下線タブ型。
        「リクエストパラメータ」が長いため、狭い画面では折り返さず横スクロールにする。 */
     .settings-tabs {
-      display: flex; gap: 4px; margin-bottom: 14px;
+      display: flex; gap: 4px;
       border-bottom: 1px solid var(--line);
       overflow-x: auto; -webkit-overflow-scrolling: touch;
     }
@@ -305,10 +316,13 @@
       <!-- コンソールの中身はこの3タブが唯一の上位構造（「設定」等の親カテゴリは作らない）。
            検索結果＝結果表示・ログ記録に関わる値、リクエストパラメータ＝searchPOI()の
            requestBodyに載る値、UI設定＝地図表示等UI側だけの表示設定でリクエストには載らない。 -->
-      <div class="settings-tabs">
-        <button type="button" id="settingsTopTabResultBtn" class="settings-tab-btn active">検索結果</button>
-        <button type="button" id="settingsTopTabRequestBtn" class="settings-tab-btn">リクエストパラメータ</button>
-        <button type="button" id="settingsTopTabFrontendBtn" class="settings-tab-btn">UI設定</button>
+      <div id="consoleStickyHeader">
+        <button type="button" id="consoleCloseBtn" class="btn-ghost">✕ 閉じる</button>
+        <div class="settings-tabs">
+          <button type="button" id="settingsTopTabResultBtn" class="settings-tab-btn active">検索結果</button>
+          <button type="button" id="settingsTopTabRequestBtn" class="settings-tab-btn">リクエストパラメータ</button>
+          <button type="button" id="settingsTopTabFrontendBtn" class="settings-tab-btn">UI設定</button>
+        </div>
       </div>
 
       <div id="settingsTabResult">

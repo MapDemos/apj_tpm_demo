@@ -31,6 +31,7 @@ function setConsoleOpen(open) {
 }
 document.getElementById('consoleToggle').addEventListener('click', () => setConsoleOpen(!consoleEl.classList.contains('open')));
 consoleBackdrop.addEventListener('click', () => setConsoleOpen(false));
+document.getElementById('consoleCloseBtn').addEventListener('click', () => setConsoleOpen(false));
 
 // 検索結果は mapboxgl.Marker(DOM)ではなく、circle(丸+番号) + symbol(名前ラベル)の
 // レイヤーとして描画する。ズーム15以上でのみ名前ラベルを出したい要件がlayer側の
