@@ -236,6 +236,40 @@ class QueryEngine {
     return coord[0] >= bbox[0] && coord[0] <= bbox[2] && coord[1] >= bbox[1] && coord[1] <= bbox[3];
   }
 
+  /** Expand a bbox outward by `marginM` meters on every side (scope-boundary slack — see
+   * _filterByScope: a scope bbox is never an exact physical boundary, whether it's a
+   * synthetic point+radius square (station/poi scope) or Mapbox's own rectangular
+   * approximation of an irregular administrative polygon (locality scope), so a candidate
+   * just outside it by a small margin can still be a legitimate in-scope match). */
+  _expandBbox(bbox, marginM) {
+    const cy = (bbox[1] + bbox[3]) / 2;
+    const dLng = marginM / (111320 * Math.cos(cy * Math.PI / 180));
+    const dLat = marginM / 110540;
+    return [bbox[0] - dLng, bbox[1] - dLat, bbox[2] + dLng, bbox[3] + dLat];
+  }
+
+  /**
+   * Filter candidate features to those within a scope bbox, with a fixed-distance slack
+   * (config.NEAR_POI_M — this app's own definition of "close enough to count as near
+   * something", reused here rather than inventing a new threshold) for boundary
+   * approximation error. Unlike the old behavior, an empty result here is NOT papered
+   * over by falling back to the full unfiltered candidate list — a scope the user
+   * explicitly stated (e.g. "新橋駅の") is a strong signal, and silently ignoring it to
+   * grab the closest text match from anywhere in Japan produces a confidently WRONG
+   * anchor point (not just a missed one), which then contaminates every downstream
+   * distance/score against that wrong point — worse than returning 0 hits (spec:
+   * precision over recall — see [[project_geonator_lite_precision_over_recall]]).
+   * Returns [] when nothing qualifies even with slack — callers must treat that as
+   * "scope-constrained anchor unresolved", not "fall through to unrestricted feats".
+   */
+  _filterByScope(feats, scopeBbox) {
+    if (!scopeBbox) return feats;
+    const inScope = feats.filter(f => this._pointInBbox(f.geometry?.coordinates, scopeBbox));
+    if (inScope.length) return inScope;
+    const slackBbox = this._expandBbox(scopeBbox, this.config.NEAR_POI_M ?? 400);
+    return feats.filter(f => this._pointInBbox(f.geometry?.coordinates, slackBbox));
+  }
+
   // ─────────────────────────────────────────────
   // Proximity resolution (spec §4.2) — simplified: no clarify/choice dialogs
   // (deterministic best-match picks instead), no LLM world-knowledge place
@@ -262,7 +296,15 @@ class QueryEngine {
         if (!points || points.length === 0) return { point: null, anchorNotFound: true };
         resolvedPoints.push(...points);
       }
-      return this._finalizeProximity(schema, resolvedPoints, scopeBbox);
+      // scopeBbox's job (disambiguating *which* anchor instance is meant — see
+      // _resolveAnchor/_filterByScope) is already done by this point. Passing it through
+      // to _finalizeProximity here would additionally intersect the final search-area bbox
+      // with the scope's own box — geometrically that's two independently-centered squares
+      // (anchor's own point+radius vs. the outer landmark's), which generically produces a
+      // skewed/non-square (sometimes near-degenerate) rectangle centered on neither point,
+      // not a tighter version of "near the anchor". The search area should stay centered on
+      // the anchor alone, same as an anchor with no scope at all.
+      return this._finalizeProximity(schema, resolvedPoints, null);
     }
 
     // scope alone, no anchor at all (e.g. "藍住町のショッピングモール" — a plain "POI
@@ -380,9 +422,13 @@ class QueryEngine {
       autoBbox = this._intersectBbox(autoBbox, unionBbox);
     }
 
-    // scope（行政区域指定、例:「鎌倉市の」）: narrow further when the query also named an
-    // administrative area — scopeBbox was previously only used to disambiguate anchor
-    // resolution, never fed into the search-restriction bbox.
+    // scope（行政区域指定、例:「鎌倉市の」）: only reaches here when there's no anchor at
+    // all (the scope-only fallback in _resolveProximity — e.g. "藍住町のショッピングモール").
+    // There, scopeBbox *is* the stated search area, so narrowing to it is correct. When an
+    // anchor exists, _resolveProximity passes scopeBbox=null here on purpose — see its
+    // comment: scope's job was just disambiguating which anchor instance was meant, already
+    // done during anchor resolution, and intersecting the anchor's own box with the outer
+    // landmark's box here would just distort the search area around neither point.
     if (scopeBbox) autoBbox = this._intersectBbox(autoBbox, scopeBbox);
 
     return { point, radiusM, reachPolygons, reachHole, autoBbox };
@@ -435,8 +481,8 @@ class QueryEngine {
     const [lng, lat] = f.geometry.coordinates;
     // Admin areas (place/locality/etc.) fall back to a generous 5km square when Mapbox gives
     // no bbox of its own. A station/landmark is a point, not a region, so a much tighter radius
-    // makes more sense — and _resolvePoiOrAddress already degrades gracefully (falls back to
-    // unfiltered, proximity-ranked results) if this ends up excluding the real match anyway.
+    // makes more sense — callers apply their own boundary slack on top of this (_filterByScope),
+    // so this radius doesn't need to itself be overly generous.
     const r = isPointType ? (this.config.NEAR_STATION_M ?? 600) : 5000;
     const dLng = r / (111320 * Math.cos(lat * Math.PI / 180)), dLat = r / 110540;
     return [lng - dLng, lat - dLat, lng + dLng, lat + dLat];
@@ -496,12 +542,12 @@ class QueryEngine {
   }
 
   async _resolveLocality(anchor, scopeBbox) {
-    const sb = await this.mcp.searchBox(anchor.text, { types: 'place,locality,neighborhood,district,address' });
+    const sb = await this.mcp.searchBox(anchor.text, {
+      types: 'place,locality,neighborhood,district,address',
+      limit: this.mcp._searchBoxLimitFor(anchor.specificity),
+    });
     let feats = sb?.features || [];
-    if (scopeBbox) {
-      const inScope = feats.filter(f => this._pointInBbox(f.geometry?.coordinates, scopeBbox));
-      if (inScope.length) feats = inScope;
-    }
+    if (scopeBbox) feats = this._filterByScope(feats, scopeBbox);
     if (!feats.length) return null;
     return [this._featureToPoint(this._pickBest(feats, anchor.text))];
   }
@@ -516,16 +562,14 @@ class QueryEngine {
   }
 
   async _resolvePoiOrAddress(anchor, scopeBbox, requestProximity) {
-    const opts = { types: 'poi,address,place,locality' };
+    const opts = { types: 'poi,address,place,locality', limit: this.mcp._searchBoxLimitFor(anchor.specificity) };
     if (scopeBbox) opts.proximity = [(scopeBbox[0] + scopeBbox[2]) / 2, (scopeBbox[1] + scopeBbox[3]) / 2];
     else if (requestProximity) opts.proximity = [requestProximity.lng, requestProximity.lat];
     const sb = await this.mcp.searchBox(anchor.text, opts);
     let feats = sb?.features || [];
     if (!feats.length) return null;
-    if (scopeBbox) {
-      const filtered = feats.filter(f => this._pointInBbox(f.geometry?.coordinates, scopeBbox));
-      if (filtered.length) feats = filtered;
-    }
+    if (scopeBbox) feats = this._filterByScope(feats, scopeBbox);
+    if (!feats.length) return null;
     const chosen = this._pickBest(feats, anchor.text);
     return [this._featureToPoint(chosen)];
   }

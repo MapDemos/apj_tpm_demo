@@ -163,7 +163,7 @@ class MapboxMCPClient {
   // Search Box API
   // ═══════════════════════════════════════════════════════════════
 
-  /** Shared Search Box family feature mapper (forward search + Category Search share this response shape). */
+  /** Search Box forward-search feature mapper (Category Search endpoint retired — see _collectPOI). */
   static _mapSearchBoxFeatures(data) {
     return (data.features || []).map(f => {
       const p = f.properties || {};
@@ -186,6 +186,17 @@ class MapboxMCPClient {
     }).filter(f => f.longitude != null && f.latitude != null);
   }
 
+  /** Search Box forward `limit` for a given tgt/cond specificity ('unique'|'brand'|
+   * 'generic'/unset). Unique landmarks realistically have ~1 real match, brands have many
+   * branches, generic categories need the widest net — see config.js comment. */
+  _searchBoxLimitFor(specificity) {
+    switch (specificity) {
+      case 'unique': return this.config.SEARCHBOX_LIMIT_UNIQUE ?? 5;
+      case 'brand':  return this.config.SEARCHBOX_LIMIT_BRAND ?? 20;
+      default:       return this.config.SEARCHBOX_LIMIT_GENERIC ?? 30;
+    }
+  }
+
   // `bbox` (this._bbox, [minLng,minLat,maxLng,maxLat]) is only ever set by an explicit,
   // UI-controlled requestBody.bbox (see QueryEngine.run) — never auto-derived from a
   // locality/anchor. It's off by default: `proximity` (soft bias) still does all the work
@@ -193,66 +204,32 @@ class MapboxMCPClient {
   // "close enough" either way. This is a deliberately different feature from the old
   // auto-derived locality bbox that was removed (huge/skewed admin-boundary bbox, fixed
   // 800m near-radius excluding real targets) — see class header comment.
-  async _searchBoxRequest(q, types, proximity, poiCategory = null) {
+  async _searchBoxRequest(q, types, proximity, poiCategory = null, limit = 30) {
     let url =
       `${this.config.SEARCH_BOX_API}?q=${encodeURIComponent(q)}&access_token=${this.token}` +
-      `&language=ja&country=jp&types=${types}&limit=30`;
+      `&language=ja&country=jp&types=${types}&limit=${limit}`;
     if (poiCategory) url += `&poi_category=${encodeURIComponent(poiCategory)}`;
     if (proximity && proximity.length >= 2) url += `&proximity=${proximity[0]},${proximity[1]}`;
     if (this._bbox) url += `&bbox=${this._bbox.join(',')}`;
 
     if (this._sbRequests >= (this.config.SB_MAX_PER_QUERY ?? 100)) {
       this._capHit.sb++;
-      this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit: 30, capped: true, resultCount: 0, names: [] });
+      this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit, capped: true, resultCount: 0, names: [] });
       return [];
     }
     try {
       this._sbRequests++;
       const res = await this._fetchWithRetry(url);
       if (!res.ok) {
-        this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit: 30, error: `HTTP ${res.status ?? '(不明)'}`, resultCount: 0, names: [] });
+        this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit, error: `HTTP ${res.status ?? '(不明)'}`, resultCount: 0, names: [] });
         return [];
       }
       const data = await res.json();
       const items = MapboxMCPClient._mapSearchBoxFeatures(data);
-      this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit: 30, resultCount: items.length, names: items.map(f => f.name).slice(0, 50) });
+      this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit, resultCount: items.length, names: items.map(f => f.name).slice(0, 50) });
       return items;
     } catch (e) {
-      this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit: 30, error: e?.message || String(e), resultCount: 0, names: [] });
-      return [];
-    }
-  }
-
-  /** Mapbox Search Box "Category Search" endpoint (GET .../category/{canonical_id}) — documented max limit is 25. `bbox` — see _searchBoxRequest comment. */
-  async _categorySearchRequest(canonicalId, proximity, limit = 25) {
-    let url =
-      `${this.config.CATEGORY_SEARCH_API}/${encodeURIComponent(canonicalId)}?access_token=${this.token}` +
-      `&language=ja&country=jp&limit=${limit}`;
-    if (proximity && proximity.length >= 2) url += `&proximity=${proximity[0]},${proximity[1]}`;
-    if (this._bbox) url += `&bbox=${this._bbox.join(',')}`;
-
-    if (this._sbRequests >= (this.config.SB_MAX_PER_QUERY ?? 100)) {
-      this._capHit.sb++;
-      this._logApi({ api: 'search_box_category', canonicalId, proximity, bbox: this._bbox, limit, capped: true, resultCount: 0, names: [] });
-      return [];
-    }
-    try {
-      this._sbRequests++;
-      const res = await this._fetchWithRetry(url);
-      if (!res.ok) {
-        // limit=25 is already the documented max, so a further-reduced retry is only a
-        // fallback against unexpected errors, not the expected common case.
-        this._logApi({ api: 'search_box_category', canonicalId, proximity, bbox: this._bbox, limit, error: `HTTP ${res.status ?? '(不明)'}`, resultCount: 0, names: [], retrying: limit > 10 });
-        if (limit > 10) return this._categorySearchRequest(canonicalId, proximity, 10);
-        return [];
-      }
-      const data = await res.json();
-      const items = MapboxMCPClient._mapSearchBoxFeatures(data);
-      this._logApi({ api: 'search_box_category', canonicalId, proximity, bbox: this._bbox, limit, resultCount: items.length, names: items.map(f => f.name).slice(0, 50) });
-      return items;
-    } catch (e) {
-      this._logApi({ api: 'search_box_category', canonicalId, proximity, bbox: this._bbox, limit, error: e?.message || String(e), resultCount: 0, names: [], retrying: limit > 10 });
-      if (limit > 10) return this._categorySearchRequest(canonicalId, proximity, 10);
+      this._logApi({ api: 'search_box_forward', q, types, poiCategory, proximity, bbox: this._bbox, limit, error: e?.message || String(e), resultCount: 0, names: [] });
       return [];
     }
   }
@@ -260,7 +237,7 @@ class MapboxMCPClient {
   /** Search Box wrapper for QueryEngine (raw feature-array shape). */
   async searchBox(query, opts = {}) {
     const types = opts.types || 'poi,address,place,locality';
-    const features = await this._searchBoxRequest(query, types, opts.proximity || null);
+    const features = await this._searchBoxRequest(query, types, opts.proximity || null, null, opts.limit ?? 30);
     return {
       features: features.map(f => ({
         geometry: { coordinates: [f.longitude, f.latitude] },
@@ -319,12 +296,6 @@ class MapboxMCPClient {
     if (MapboxMCPClient.NON_ROAD_CLASSES.has(cls)) return '線路・海路・その他';
     if (MapboxMCPClient.POINT_DATA_CLASSES.has(cls)) return 'ポイント（交差点・信号等）';
     return 'その他';
-  }
-
-  static classifyQueryType(query) {
-    if (/[都道府県][市区町村]|[市区]$|[町村]$|丁目|番地|番町/.test(query)) return 'place';
-    if (/駅$|空港$|港$|病院$|クリニック$|学校$|大学$|図書館$|神社$|寺$|寺院$|ホテル$|旅館$|銀行$|警察署$|消防署$|郵便局$/.test(query)) return 'poi';
-    return 'both';
   }
 
   static BUS_STOP_KEYWORDS = ['バス停', 'バス停留所', '停留所', 'bus stop', 'bus_stop'];
@@ -736,20 +707,29 @@ class MapboxMCPClient {
 
   /**
    * Core collection routine (replaces geonator's `_searchNearbyPOI`). Single-shot
-   * Tilequery (spec §5) instead of grid sampling; everything else (Search Box
-   * parallel run, category_tag extra search, bus-stop/intersection/signal/
-   * transit-entrance special-cased layers) is the same shape as geonator.
+   * Tilequery (spec §5) instead of grid sampling; bus-stop/intersection/signal/
+   * transit-entrance special-cased layers are the same shape as geonator. category_tag
+   * (when resolved) is passed as `poi_category` on the primary forward-search request
+   * rather than a separate Category Search API call (retired — see below).
    *
    * @param {string[]} queries
    * @param {number[]|null} proximity - [lng, lat], the Search Box bias point AND the Tilequery center
    * @param {string|null} queryIntent
    * @param {Promise<string|null>|null} categoryTagPromise
+   * @param {string|null} specificity - 'unique'|'brand'|'generic' (see _searchBoxLimitFor)
+   * @param {string|null} textType - L1's own 'poi'|'place'|'ambiguous' self-report (schema
+   *   text_type — see query-schema.js), used only by the general-POI branch below to pick
+   *   Search Box's `types` param. Replaces the former classifyQueryType() regex heuristic:
+   *   L1 already knows semantically whether e.g. "渋谷109" is a facility vs. an area, so
+   *   re-guessing it from text-only suffix patterns was redundant and less accurate.
+   *   'ambiguous' (default) preserves the old 'both' fallback (query both types).
    * @returns {Promise<Array>}
    */
-  async _collectPOI(queries, proximity, queryIntent = null, categoryTagPromise = null) {
+  async _collectPOI(queries, proximity, queryIntent = null, categoryTagPromise = null, specificity = null, textType = null) {
     const effectiveProximity = proximity?.length >= 2 ? proximity : null;
+    const sbLimit = this._searchBoxLimitFor(specificity);
 
-    const cacheKey = `${queryIntent ?? 'auto'}|${queries.slice(0, 3).join(',')}|${effectiveProximity ? effectiveProximity.join(',') : 'noloc'}`;
+    const cacheKey = `${queryIntent ?? 'auto'}|${textType ?? 'ambiguous'}|${queries.slice(0, 3).join(',')}|${effectiveProximity ? effectiveProximity.join(',') : 'noloc'}|${sbLimit}`;
     if (this._searchResultCache.has(cacheKey)) return this._searchResultCache.get(cacheKey);
 
     // Tilequery takes a point+radius, not a bbox, so a user-set search bbox caps the radius
@@ -819,28 +799,32 @@ class MapboxMCPClient {
     const dedupKey = item => `${MapboxMCPClient._normalizeName(item.name)}|${Math.round((item.longitude ?? 0) * 1000)}|${Math.round((item.latitude ?? 0) * 1000)}`;
     const seen = new Map();
 
-    const sbRequests = queries.flatMap(q => {
-      const qt = MapboxMCPClient.classifyQueryType(q);
-      if (qt === 'place') return [this._searchBoxRequest(q, 'place,district,locality', effectiveProximity)];
-      if (qt === 'poi')   return [this._searchBoxRequest(q, 'poi', effectiveProximity)];
-      return [this._searchBoxRequest(q, 'poi', effectiveProximity), this._searchBoxRequest(q, 'place,district,locality', effectiveProximity)];
+    // Category Search API (separate endpoint, max limit=25) has been retired in favor of
+    // passing poi_category directly on the forward-search call. Forward search supports the
+    // same category-filtered lookup (verified against real queries — e.g. "牛丼屋" +
+    // poi_category=レストラン>丼もの surfaces "松屋" even though its name doesn't textually
+    // match "牛丼屋") while allowing forward's higher limit (up to 30) instead of Category
+    // Search's 25 cap, and without a second parallel API call. Only attached to the primary
+    // query (index 0, always the original tx per the QE-expansion rule) — attaching it to
+    // every expanded synonym too would just resend the same category filter redundantly.
+    const categoryTag = categoryTagPromise ? await Promise.resolve(categoryTagPromise).catch(() => null) : null;
+
+    const sbRequests = queries.flatMap((q, i) => {
+      const cat = i === 0 ? categoryTag : null;
+      if (textType === 'place') return [this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, null, sbLimit)];
+      if (textType === 'poi')   return [this._searchBoxRequest(q, 'poi', effectiveProximity, cat, sbLimit)];
+      // 'ambiguous' (or unset): L1 couldn't commit either way (e.g. "鎌倉" — a locality
+      // name that could also be a same-named facility) — query both types, same safety
+      // net the old classifyQueryType 'both' fallback provided.
+      return [
+        this._searchBoxRequest(q, 'poi', effectiveProximity, cat, sbLimit),
+        this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, null, sbLimit),
+      ];
     });
 
-    const categoryPromise = categoryTagPromise
-      ? Promise.resolve(categoryTagPromise).then(tag => {
-          if (!tag) return [];
-          return this._categorySearchRequest(tag, effectiveProximity);
-        }).catch(() => [])
-      : Promise.resolve([]);
-
-    const [sbResultArrays, categoryItems] = await Promise.all([Promise.all(sbRequests), categoryPromise]);
+    const sbResultArrays = await Promise.all(sbRequests);
 
     sbResultArrays.flat().forEach(item => {
-      if (isBuilding && !_notBlocked(item.name)) return;
-      const key = dedupKey(item);
-      if (!seen.has(key)) seen.set(key, item);
-    });
-    categoryItems.forEach(item => {
       if (isBuilding && !_notBlocked(item.name)) return;
       const key = dedupKey(item);
       if (!seen.has(key)) seen.set(key, item);
@@ -857,7 +841,7 @@ class MapboxMCPClient {
     let queries = (target.queries?.length ? target.queries : [target.text]);
     const GENERIC_INTENTS = ['intersection', 'signal', 'transit_entrance', 'category_busstop'];
     if (GENERIC_INTENTS.includes(target.query_intent)) queries = queries.filter(q => !GENERIC_WORDS.includes(q.trim()));
-    return this._collectPOI(queries, proximity, target.query_intent, categoryTagPromise);
+    return this._collectPOI(queries, proximity, target.query_intent, categoryTagPromise, target.specificity, target.text_type);
   }
 
   /** Collect condition candidates near a point. condition.type and target.query_intent now share the same vocabulary (poi/intersection/signal/transit_entrance/category_busstop), so it's passed straight through as the queryIntent. */
@@ -871,6 +855,6 @@ class MapboxMCPClient {
     } else {
       queries = text ? [text] : [];
     }
-    return this._collectPOI(queries, proximity, condition.type, condition.type === 'poi' ? categoryTagPromise : null);
+    return this._collectPOI(queries, proximity, condition.type, condition.type === 'poi' ? categoryTagPromise : null, condition.specificity, condition.text_type);
   }
 }

@@ -35,8 +35,9 @@ const CONFIG = {
   // MAPBOX API ENDPOINTS
   // ============================================
 
+  // Category Search endpoint retired — poi_category is now passed directly on
+  // SEARCH_BOX_API forward requests instead (see mapbox-mcp.js _collectPOI comment).
   SEARCH_BOX_API:   'https://api.mapbox.com/search/searchbox/v1/forward',
-  CATEGORY_SEARCH_API: 'https://api.mapbox.com/search/searchbox/v1/category', // + /{canonical_id} (max limit=25)
   TILEQUERY_API:    'https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery',
 
   // ============================================
@@ -53,6 +54,16 @@ const CONFIG = {
   TILEQUERY_RADIUS_M: 50000,
 
   useCategorySearch: true, // Search Box poi_category resolution (category-taxonomy.js) — same as geonator
+
+  // Search Box forward search `limit`, varied by how specific tgt/cond's own text is
+  // (L1's tgt.spc/cond.spc — reuses the same "specific/generic" concept anchors already
+  // have, extended to a 3-way split). A unique landmark has ~1 real match, so a small
+  // limit avoids paying L2 to re-confirm a pile of irrelevant same-ish-named noise; a
+  // brand/chain has many branches so needs more; a generic category needs the most (wide
+  // net, since anything from a single query text won't cover the category well).
+  SEARCHBOX_LIMIT_UNIQUE:  5,
+  SEARCHBOX_LIMIT_BRAND:   20,
+  SEARCHBOX_LIMIT_GENERIC: 30,
 
   // ============================================
   // JS-DRIVEN PIPELINE SETTINGS

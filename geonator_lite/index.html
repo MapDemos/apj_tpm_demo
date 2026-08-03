@@ -157,6 +157,11 @@
     .btn-ghost:hover { background: var(--surface-sunken); border-color: #ccc; color: var(--ink); }
     .btn-ghost:disabled { color: #bbb; cursor: default; background: var(--surface); }
 
+    .settings-mode-btn.active, .settings-tab-btn.active {
+      background: var(--accent); border-color: var(--accent-dark); color: #fff;
+    }
+    .settings-mode-btn.active:hover, .settings-tab-btn.active:hover { background: var(--accent-dark); }
+
     .bbox-mode-group { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
     .bbox-mode-group label {
       display: flex; align-items: center; gap: 7px; font-weight: 400;
@@ -236,32 +241,6 @@
           <div id="proximityInfo">未指定</div>
           <button id="clearProximityBtn" class="btn-ghost" type="button">クリア</button>
         </div>
-        <div class="row">
-          <label>検索範囲（bbox）</label>
-          <div class="bbox-mode-group">
-            <label>
-              <input type="radio" name="bboxMode" value="off"> オフ
-            </label>
-            <label>
-              <input type="radio" name="bboxMode" value="square">
-              オン（proximityから一辺
-              <input type="number" id="bboxSquareM" value="2000" min="100" step="100">
-              m の正方形）
-            </label>
-            <label>
-              <input type="radio" name="bboxMode" value="viewport"> オン（現在の画面表示領域）
-            </label>
-            <label>
-              <input type="radio" name="bboxMode" value="auto" checked> オート（クエリ中の到達時間/距離指定から自動計算）
-            </label>
-          </div>
-        </div>
-        <div class="row" style="margin-top:10px; margin-bottom:0;">
-          <label class="checkbox-row" style="display:inline-flex;">
-            <input type="checkbox" id="debugLogToggle" checked>
-            詳細ログを記録する（L1/L2段階トレース＋個別API呼び出し）
-          </label>
-        </div>
       </div>
 
       <div id="errorBox" class="error" style="display:none;"></div>
@@ -272,27 +251,89 @@
 
       <hr>
 
-      <!-- Simplified settings form (spec §8.1) — NOT geonator's full settings modal, NOT a raw JSON editor. -->
+      <!-- 設定は「リクエストパラメータ」(searchPOI()のrequestBodyに載る値)と
+           「フロントエンド設定」(UI側だけの表示設定。リクエストには載らない)をタブで分ける。
+           前者はさらにGUI/JSON編集を切り替えられる（settingsModeGuiBtn/settingsModeJsonBtn）。 -->
       <fieldset>
         <legend>設定</legend>
-        <div class="row">
-          <label for="modelSelect">モデル</label>
-          <select id="modelSelect">
-            <option value="claude-haiku-4-5-20251001">claude-haiku-4-5-20251001</option>
-            <option value="claude-sonnet-4-6-20251015">claude-sonnet-4-6-20251015</option>
-          </select>
+
+        <div class="row" style="display:flex; gap:6px;">
+          <button type="button" id="settingsTopTabRequestBtn" class="btn-ghost settings-tab-btn active">リクエストパラメータ</button>
+          <button type="button" id="settingsTopTabFrontendBtn" class="btn-ghost settings-tab-btn">フロントエンド設定</button>
         </div>
-        <div class="row">
-          <label for="wRelevance">関連性 (relevance) <span class="weight-val" id="wRelevanceVal">0.20</span></label>
-          <input type="range" id="wRelevance" min="0" max="1" step="0.05" value="0.20">
+
+        <div id="settingsTabRequest">
+          <div class="row" style="display:flex; gap:6px;">
+            <button type="button" id="settingsModeGuiBtn" class="btn-ghost settings-mode-btn active">GUI</button>
+            <button type="button" id="settingsModeJsonBtn" class="btn-ghost settings-mode-btn">JSON</button>
+            <button type="button" id="viewRequestBtn" class="btn-ghost" style="margin-left:auto;">リクエスト全文を見る</button>
+          </div>
+
+          <div id="settingsGuiView">
+            <div class="row">
+              <label for="modelSelect">モデル</label>
+              <select id="modelSelect">
+                <option value="claude-haiku-4-5-20251001">claude-haiku-4-5-20251001</option>
+                <option value="claude-sonnet-4-6-20251015">claude-sonnet-4-6-20251015</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="wRelevance">関連性 (relevance) <span class="weight-val" id="wRelevanceVal">0.20</span></label>
+              <input type="range" id="wRelevance" min="0" max="1" step="0.05" value="0.20">
+            </div>
+            <div class="row">
+              <label for="wCondition">条件距離 (condition) <span class="weight-val" id="wConditionVal">0.70</span></label>
+              <input type="range" id="wCondition" min="0" max="1" step="0.05" value="0.70">
+            </div>
+            <div class="row">
+              <label for="wAnchor">基準点距離 (anchor) <span class="weight-val" id="wAnchorVal">1.00</span></label>
+              <input type="range" id="wAnchor" min="0" max="1" step="0.05" value="1.00">
+            </div>
+            <div class="row">
+              <label>検索範囲（bbox）</label>
+              <div class="bbox-mode-group">
+                <label>
+                  <input type="radio" name="bboxMode" value="off"> オフ
+                </label>
+                <label>
+                  <input type="radio" name="bboxMode" value="square">
+                  オン（proximityから一辺
+                  <input type="number" id="bboxSquareM" value="2000" min="100" step="100">
+                  m の正方形）
+                </label>
+                <label>
+                  <input type="radio" name="bboxMode" value="viewport"> オン（現在の画面表示領域）
+                </label>
+                <label>
+                  <input type="radio" name="bboxMode" value="auto" checked> オート（クエリ中の到達時間/距離指定から自動計算）
+                </label>
+              </div>
+            </div>
+            <div class="row" style="margin-bottom:0;">
+              <label class="checkbox-row" style="display:inline-flex;">
+                <input type="checkbox" id="debugLogToggle" checked>
+                詳細ログを記録する（L1/L2段階トレース＋個別API呼び出し）
+              </label>
+            </div>
+          </div>
+
+          <div id="settingsJsonView" class="row" style="display:none;">
+            <label for="settingsJsonInput">リクエストパラメータ JSON</label>
+            <textarea id="settingsJsonInput" rows="12" spellcheck="false"
+              style="width:100%; font-family:ui-monospace, Menlo, Consolas, monospace; font-size:12px;
+                     padding:8px 10px; border:1px solid var(--line); border-radius:var(--radius-sm);
+                     background:var(--surface); color:var(--ink); resize:vertical;"></textarea>
+            <div id="settingsJsonError" class="error" style="display:none;"></div>
+          </div>
         </div>
-        <div class="row">
-          <label for="wCondition">条件距離 (condition) <span class="weight-val" id="wConditionVal">0.70</span></label>
-          <input type="range" id="wCondition" min="0" max="1" step="0.05" value="0.70">
-        </div>
-        <div class="row">
-          <label for="wAnchor">基準点距離 (anchor) <span class="weight-val" id="wAnchorVal">1.00</span></label>
-          <input type="range" id="wAnchor" min="0" max="1" step="0.05" value="1.00">
+
+        <div id="settingsTabFrontend" style="display:none;">
+          <div class="row" style="margin-bottom:0;">
+            <label class="checkbox-row" style="display:inline-flex;">
+              <input type="checkbox" id="showBboxPreview">
+              bboxを地図上に表示する
+            </label>
+          </div>
         </div>
       </fieldset>
     </div>
@@ -306,6 +347,19 @@
         <button id="logModalClose" class="btn-ghost" type="button">閉じる</button>
       </div>
       <pre id="logModalContent" style="white-space:pre-wrap; word-break:break-all; font-size:12px; line-height:1.5; font-family: ui-monospace, Menlo, Consolas, monospace;"></pre>
+    </div>
+  </div>
+
+  <!-- リクエストプレビューモーダル：今「検索」を押した場合に実際に送られるrequestBody全文
+       （text/proximity/実際に解決したbbox値等を含む）。読み取り専用、編集不可。 -->
+  <div id="requestModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000;">
+    <div style="background:#fff; max-width:900px; max-height:85vh; margin:5vh auto; padding:16px 20px; overflow-y:auto; border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,0.35);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h2 style="font-size:15px; margin:0; font-weight:700;">リクエスト全文（現在の設定で検索した場合に送られる内容）</h2>
+        <button id="requestModalClose" class="btn-ghost" type="button">閉じる</button>
+      </div>
+      <div id="requestModalError" class="error" style="display:none;"></div>
+      <pre id="requestModalContent" style="white-space:pre-wrap; word-break:break-all; font-size:12px; line-height:1.5; font-family: ui-monospace, Menlo, Consolas, monospace;"></pre>
     </div>
   </div>
 

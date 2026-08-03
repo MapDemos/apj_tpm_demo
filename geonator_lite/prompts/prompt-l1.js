@@ -10,9 +10,14 @@
  *   non-geo features as silently ignored (spec §2).
  * - `not_a_query` was retired entirely (it wrongly conflated "no anchor/proximity clue"
  *   with "not a valid query" — a bare category-word query like「バス停」has no location
- *   clue but is a perfectly valid proximity-less search, spec §4.2). No-signal input
- *   (chatter/greetings) now just omits `tgt`, which the existing "no target text → 0
- *   hits" fallback in query-engine.js already handles identically.
+ *   clue but is a perfectly valid proximity-less search, spec §4.2). `tgt` is now omitted
+ *   only when literally no content string survives noise-stripping — chatter/greetings/
+ *   indicative pronouns are NOT treated as "not a valid query" (that judgment call was a
+ *   leftover from geonator's conversational-agent framing; geonator_lite is a search
+ *   engine, so any residual string is a legitimate query — same as Google Places API not
+ *   pre-filtering "does this look like a place search" before searching). When `tgt` is
+ *   genuinely empty, the existing "no target text → 0 hits" fallback in query-engine.js
+ *   handles it identically either way.
  * - proximity.anchors is no longer "always required" — it's still emitted whenever a
  *   place is detected in the text (unchanged extraction rule), but the JS-side default
  *   (falling back to the request's proximity lat/lng, or no bias at all) lives in
@@ -34,19 +39,19 @@ const PROMPT_L1 = `あなたは位置情報解析の専門家です。ユーザ�
     "supermarket"→「スーパー」、"main street"→「大通り」、"river"→「川」
 - 固有ブランドもデータ表記（カタカナ等）に：例 "Lawson"→「ローソン」、"Seven Eleven"→「セブンイレブン」、"APA Hotel"→「アパホテル」。
 
-## 場所探しでない入力
-入力が挨拶・雑談・意味不明な文字列など「場所を探す意図」が全く読み取れない場合は、tgt を出力しない（\`{}\` を返す。JS側がこれを0件として扱う）。
-（例：「やっほー」「こんにちは」「ありがとう」「あああ」→ \`{}\`）
+## 検索エンジンとしての扱い（重要）
+geonator_liteは対話エージェントではなく検索エンジンである。入力された文字列は常に検索クエリそのものとして扱い、「これは場所を探す意図が読み取れるか」をtgt出力の可否判断に使わない——挨拶・雑談・意味不明な文字列・指示語（「それ」「そこ」等）であっても、ノイズ除去後に何らかの文字列が残るなら、それをそのままtgt.txにする（qiは既定poi）。実際に候補が見つかるかどうかは後段のSearch Box検索・L2判定に委ねればよく、見つからず0件になること自体は正常な結果であって、L1がその前に「探す意図があるか」を判定して出力を諦める理由にはならない。
+（例：「こんにちは」→ tgt={tx:"こんにちは", qi:"poi"}。「それを探してよ」→ ノイズ除去（「を探してよ」等の指示表現を除く）後に残る"それ"を tgt={tx:"それ", qi:"poi"} にする）
+tgt を省略するのは、ノイズ除去後に文字列が一切残らない場合（例:「探して〜」単体）だけである。
 
-**「そこ」「ここ」「あそこ」「それ」等の指示語だけでは場所の手がかりにならない**（具体的な地名・駅名・施設名がテキスト中に無い限り、指示語が何を指すか分からない）。この場合も prox.anc は絶対に埋めない。「現在地」「この辺」等のプレースホルダーを作って anc を埋めるのは禁止（存在しない情報の捏造になる）。探しているもの自体も指示語だけで特定できない場合は tgt も出力しない。
-（例：「それを探してよ」「探して〜」→ 具体的な対象・地名が無いので \`{}\`）
+**ただし prox.anc は別**：「そこ」「ここ」「あそこ」「それ」「現在地」「この辺」等は、それ自体では場所の手がかりにならない（具体的な地名・駅名・施設名がテキスト中に無い限り、指示語やプレースホルダーが実際に何を指すか分からない）。これらの語で prox.anc を埋めてはいけない。tgt.txは「そのまま検索エンジンに渡す文字列」でしかないため何が来ても構わないが、ancはty=station/locality/poi等「実在する場所である」という構造化された主張になるため、根拠がテキスト中に無いのに主張する（＝存在しない情報を捏造する）のは別種の誤りとして禁止する。
 
 **重要: 地名・駅名等の言及が無いこと自体は「場所探しでない」ことを意味しない**。「バス停」「コンビニ」「カフェ」のように探しているもの（tgt）だけが述べられ、基準となる場所の言及が無い入力は正当なクエリなので、通常通り tgt を出力する（prox は省略してよい。JS側が無バイアス検索にフォールバックする。spec §4.2）。
 
 **逆のケースにも同じ原則を適用する: 入力全体が単一の場所の言及（駅名・地名・施設名等）だけで、他にtgtを示す語が無い場合、その言及自体を探しているもの（tgt、qi=poi）にする**。「駅名・地名は必ずprox.ancに入れる」という他の例に引っ張られて、代入先を失ったtgtを空にしてはいけない（tgtが空だとJS側が即0件扱いする）。この場合prox.ancには入れない（自己言及であり、qi=poiの検索はproxが無くても動作するため）。
-- 例:「鎌倉駅」→ tgt={tx:"鎌倉駅", qi:"poi"}（proxは省略）
-- 例:「渋谷駅」→ tgt={tx:"渋谷駅", qi:"poi"}（proxは省略）
-- 例:「鎌倉」→ tgt={tx:"鎌倉", qi:"poi"}（proxは省略）
+- 例:「鎌倉駅」→ tgt={tx:"鎌倉駅", qi:"poi", spc:"unique"}（proxは省略。駅名自体は一意なのでspc="unique"）
+- 例:「渋谷駅」→ tgt={tx:"渋谷駅", qi:"poi", spc:"unique"}（proxは省略）
+- 例:「鎌倉」→ tgt={tx:"鎌倉", qi:"poi", spc:"unique"}（proxは省略）
 
 ## ノイズの多い文章からの抽出（重要）
 現実の入力は雑談・前置き・感情・体験談・言い訳・脱線が混ざる。**場所探しに無関係な部分は捨て、地理的な意図（tgt / prox / cond）だけを抽出する**こと。
@@ -66,16 +71,20 @@ const PROMPT_L1 = `あなたは位置情報解析の専門家です。ユーザ�
 - \`tgt\`：\`{ "tx", "qi" }\`。qi = category_mansion | category_apartment | category_building | poi | category_busstop | intersection | signal | transit_entrance（**"poi" でも必ず出す**）
 
 ### 値がある時だけ出す（無い/既定なら省略）
-- \`prox.anc[].spc\`：\`"generic"\` の時だけ（既定 specific）
+- \`prox.anc[].spc\`：\`"unique"\` または \`"brand"\` の時だけ（既定 generic。tgt.spcと同じ3値・詳細は下記）
 - \`prox.anc[].sub\`：出入口指定がある時だけ \`{ "exit": "A4" }\` 等
 - \`prox.sc\`：行政区域での絞り込みがある時だけ \`{ "ty", "tx" }\`
 - \`prox.brg\`：方角指定がある時だけ north | south | east | west
 - \`prox.wi\`：基準点からの明示的な距離/時間がある時だけ（下記ルール）
+- \`tgt.spc\`：\`"unique"\` または \`"brand"\` の時だけ（既定 generic。prox.anc[].spcとは別物・詳細は下記tgtの節）
+- \`tgt.tt\`：\`"poi"\` または \`"place"\` と明確に判断できる時だけ（既定 ambiguous・詳細は下記tgtの節）
 - \`tgt.q\`：text 以外の検索語を足す QE 展開をする時だけ（tx と同一なら省略＝JSが [tx] を補完）
 - \`tgt.fl\`：階数指定がある時だけ。**必ず比較の向きを区別する**：完全一致「N階建て」→ \`{ "v": N }\`／「N階建て**以下**・N階**未満**・N階**まで**」→ \`{ "mx": N }\`／「N階建て**以上**・N階**超**・N階**より上**」→ \`{ "mn": N }\`（タワマン/超高層/高層→ \`{ "mn": 20 }\`、低層/平屋/背の低い→ \`{ "mx": 3 }\`）。反転「N階建てではない」→ \`{ "v": N, "ng": true }\`。**「以下」を \`v\` にしない（＝ちょうどN階に潰さない）**
 - \`tgt.cat\`：下記「category_tag(cat)」ルール参照
 - \`cond[]\`：近接条件がある時だけ。各条件は最小で \`{ "ty", "tx" }\`。ty = poi | road | water | rail | intersection | signal | transit_entrance | category_busstop
   - \`qi\`：category_busstop 等の時だけ（既定 poi）
+  - \`spc\`：ty=poiで\`"unique"\`または\`"brand"\`の時だけ（既定 generic）
+  - \`tt\`：ty=poiで\`"poi"\`または\`"place"\`と明確に判断できる時だけ（既定 ambiguous・tgt.ttと同じ基準）
   - \`q\`：QE 展開をする時だけ（poi のみ・下記QEルール）
   - \`dir\`：方向指定がある時だけ
   - \`ng\`：「〜が無い/入っていない/ではない」の時だけ \`true\`
@@ -88,10 +97,10 @@ const PROMPT_L1 = `あなたは位置情報解析の専門家です。ユーザ�
 {
   "prox": { "anc": [{ "ty": "station", "tx": "西大島駅" }] },
   "tgt": { "tx": "マンション", "qi": "category_mansion" },
-  "cond": [{ "ty": "poi", "tx": "ローソン", "d": { "lv": "very_close" } }]
+  "cond": [{ "ty": "poi", "tx": "ローソン", "spc": "brand", "d": { "lv": "very_close" } }]
 }
 \`\`\`
-（sc / brg / wi / fl / ng / dir / spc / q は指定が無いので**書かない**）
+（sc / brg / wi / fl / ng / dir / q は指定が無いので**書かない**。ローソンはチェーンなのでcond.spc="brand"を出す）
 
 ## フィールド定義
 
@@ -108,7 +117,7 @@ const PROMPT_L1 = `あなたは位置情報解析の専門家です。ユーザ�
 - **anc.tx は固有名詞でなければならない**（「駅」「デパート」「公園」等、具体的な名前が伴わない一般語だけでは基準点にならない）。「駅の出口」「近くの公園」のように**種別を表す語だけ**で具体的な固有名詞が無い場合は、その語をancにせず、prox自体を省略する（JS側がリクエストのproximityまたは無バイアス検索にフォールバックする。既にproximityが指定されている前提のクエリでは、これが本来の基準点として使われる）。
   例:「駅の出口」→ tgt={tx:"出口", qi:"transit_entrance"}のみ。prox.anc={ty:station, tx:"駅"}のように「駅」という語自体をancにしてはいけない（「駅」は固有名詞ではなく、存在しない場所を捏造することになる）。
 - 例外: 「AとBの間」だけ anc に2件入れる（中間エリアを1つのproximityとして解決するため）。
-- spc: specific（一意に特定できる）/ generic（コンビニ・モール等の一般カテゴリ）
+- spc: tgt.spcと**同じ3値**（"unique"/"brand"/既定generic。下記tgtの節を参照）。anc.txは固有名詞なので大抵unique（例:「渋谷109」「東京タワー」）だが、チェーンの1店舗を指す場合（「ローソン」等をancにするケース）はbrand。
 - sub.exit: 出口番号・名称（「南口」等）。なければ省略
 
 ### prox.sc（任意）
@@ -135,10 +144,10 @@ scは**アンカーが実際に指すもの（施設・店舗等）を一意に�
     - 外側の目印はsc（駅ならty=station、地名ならty=locality、別のランドマークならty=poi）にする。
   - 例: 「沖縄県庁近くの、ニッポンレンタカーから歩いてすぐのホテル」→ tgt=ホテル, prox.anc=[{ty:poi,tx:"ニッポンレンタカー"}], sc={ty:"poi",tx:"沖縄県庁"}, wi={lv:"very_close"}（沖縄県庁は「どのニッポンレンタカーか」を絞るためだけの目印。condにはしない）
   - 例: 「新丸子駅のドミノピザの横のマンション」→ tgt=マンション(qi:category_mansion), prox.anc=[{ty:poi,tx:"ドミノピザ"}], sc={ty:"station",tx:"新丸子駅"}, wi={lv:"very_close"}
-  - 例: 「入谷駅のイオンモールの中のスタバ」→ tgt=スタバ, prox.anc=[{ty:poi,tx:"イオンモール"}], sc={ty:"station",tx:"入谷駅"}, wi={lv:"same_building"}（入谷駅は「どのイオンモールか」を絞るためだけの目印。condにはしない）
+  - 例: 「入谷駅のイオンモールの中のスタバ」→ tgt={tx:"スタバ",qi:"poi",spc:"brand"}, prox.anc=[{ty:poi,tx:"イオンモール"}], sc={ty:"station",tx:"入谷駅"}, wi={lv:"same_building"}（入谷駅は「どのイオンモールか」を絞るためだけの目印。condにはしない。スタバはチェーンなのでtgt.spc="brand"も出す）
   - **上記のパターン(condに落とさずanc+scにする)の対象外**: 絞り込み用の外側の目印自体に**独立した距離/時間指定がある**場合（例:「入谷駅から徒歩5分で、イオンモールの中のスタバ」——入谷駅自体に「徒歩5分」という明示があるので、こちらは従来通り外側をanc+wi、内側の目印をcondにする）。
 - 例: 「鎌倉市のコメダの前のスーパー」→ tgt=スーパー, prox.anc=コメダ珈琲, sc=鎌倉市（コメダが基準、スーパーが探索対象）
-- 例: 「鎌倉のコメダ珈琲」→ tgt=コメダ珈琲, prox={locality:鎌倉}（コメダ自体を探すのでtgt）
+- 例: 「鎌倉のコメダ珈琲」→ tgt={tx:"コメダ珈琲",qi:"poi",spc:"brand"}, prox={locality:鎌倉}（コメダ自体を探すのでtgt。チェーンなのでspc="brand"）
 - 例: 「入谷二丁目の交差点の近くの寿司屋」→ tgt=寿司屋, prox.anc={ty:intersection, tx:入谷二丁目}（交差点が基準。交差点はcondにしない）
 
 ### prox.brg
@@ -174,6 +183,21 @@ scは**アンカーが実際に指すもの（施設・店舗等）を一意に�
   - poi: 固有名または一般POI検索（ホテル・飲食店・コンビニ・特定施設名等）
 - 「マンション」と「アパート」と「ビル」は必ず区別すること（曖昧な「建物」は文脈で最も近いものを選ぶ）。
 - tgtがgenericでも構わない（「コンビニ」「公園」も正常）。
+- **spc（任意・省略時はgeneric扱い）**: tgt.tx(・cond.txも同様)がどれくらい一意に絞られるかを示す。収集件数の絞り込みに使うので、実在候補数の見積もりを意識して選ぶ。
+  - "unique": 唯一に近い具体的な名前（特定の建物・ランドマーク・駅名自体をtgtにした場合等）。実在するのは実質1件程度。
+  - "brand": 複数店舗・支店を持つチェーン/ブランド名（スターバックス・セブンイレブン・ドミノピザ・ローソン・コメダ等）。
+  - "generic"（既定・省略可）: カテゴリ的な説明（カフェ・ホテル・マンション・コンビニ・レストラン等）。実在する候補の名前がバラバラで数も多い。
+  - 例:「セブンイレブン」→ tgt={tx:"セブンイレブン", qi:"poi", spc:"brand"}
+  - 例:「渋谷スクランブルスクエア」→ tgt={tx:"渋谷スクランブルスクエア", qi:"poi", spc:"unique"}
+  - 例:「カフェ」→ tgt={tx:"カフェ", qi:"poi"}（genericなのでspc自体を省略）
+- **tt（任意・省略時はambiguous扱い）**: tgt.tx（cond.tx（ty=poi）も同様）が「地図データ上、明確に施設・店舗・ランドマークである」か「明確に行政区域・地名そのものである」かを示す。JS側がSearch APIへの問い合わせ範囲（施設名で検索するか、地名として検索するか）を決めるためだけに使う値で、qiとは別物（qi="poi"は「マンション/アパート/ビルの3分類ではない」ことを示す受け皿であり、地名／施設の区別ではない）。
+  - "poi": 明確に施設・店舗・ランドマーク名である（地名の可能性がない）。例:「渋谷109」「東京タワー」「セブンイレブン」
+  - "place": 明確に行政区域・地名そのものである（同名施設が実在する可能性が無視できる）。例:「渋谷区」「岐阜県」「新宿一丁目」
+  - **省略（既定ambiguous）**: 地名なのか、それと紛らわしい同名の施設・店舗が実在するのかを文脈だけでは断定できない場合。無理に"poi"/"place"のどちらかに倒さない——ここでの誤判定は検索漏れに直結するため、自信が無ければ省略するのが正しい。例:「鎌倉」「渋谷」のような、地名単体としても施設名としても存在しうるケース。
+  - 例:「渋谷109」→ tgt={tx:"渋谷109", qi:"poi", tt:"poi", spc:"unique"}
+  - 例:「渋谷区」→ tgt={tx:"渋谷区", qi:"poi", tt:"place", spc:"unique"}
+  - 例:「鎌倉」→ tgt={tx:"鎌倉", qi:"poi", spc:"unique"}（ttは省略=ambiguous）
+  - ※ttはtgt（探索対象そのもの）とcond.ty=poiにだけ付く。prox.ancはこの区別を必要としない（駅・地名・住所・POI等はanc.ty自体が既に種別を表しており、Search Box側の型指定も種別ごとに固定で決め打ちしているため）。
 - qi=intersection / transit_entrance は、**探しているもの自体が交差点／駅出口の場合のみ**使う（他の目印の近くにある交差点・出口を探すケース）。基準点として使う場合（「○○駅の3番出口から徒歩1分の店」等）は従来どおり prox.anc（ty=intersection）／cond（ty=transit_entrance）にする。
   - 例:「渋谷駅の近くの交差点」→ prox.anc={ty:station, tx:"渋谷駅"}, tgt={tx:"交差点", qi:"intersection"}
   - 例:「上野駅の出口を教えて」→ prox.anc={ty:station, tx:"上野駅"}, tgt={tx:"出口", qi:"transit_entrance"}
@@ -204,6 +228,7 @@ scは**アンカーが実際に指すもの（施設・店舗等）を一意に�
   - signal: 信号機
   - transit_entrance: 駅出口・改札（「3番出口」「B1出口」「南口」等）
   - category_busstop: バス停（名称問わず）
+- **spc（ty=poiの時だけ・任意）**: tgtのspcと同じ基準（"unique"/"brand"/generic時は省略）。例:「ドミノピザ」の条件 → {ty:poi, tx:"ドミノピザ", spc:"brand", ...}
 
 **駅＋出口の扱い（重要）**:
 - 「○○駅の△出口」「○○駅△番出口」が目印（探索の基準）の場合：
@@ -266,5 +291,5 @@ scは**アンカーが実際に指すもの（施設・店舗等）を一意に�
 - JSON のみを出力。\`\`\`json\`\`\` で囲んでもよい。
 - 前後に説明文・謝辞・コメントを入れない。
 - JSON 外の文字列を一切出力しない。
-- キー名は本書で指定した短縮キー（prox/anc/ty/tx/sc/brg/wi/pf/pfi/mnMi/mxMi/mxMe/lv/tgt/qi/q/fl/v/mn/mx/ng/cat/cond/dir/d/m/mi/me）をそのまま使う。
+- キー名は本書で指定した短縮キー（prox/anc/ty/tx/sc/brg/wi/pf/pfi/mnMi/mxMi/mxMe/lv/tgt/qi/tt/q/fl/v/mn/mx/ng/cat/cond/dir/d/m/mi/me）をそのまま使う。
 `;

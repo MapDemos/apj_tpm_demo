@@ -17,9 +17,13 @@
 
 const SCHEMA_ENUMS = {
   anchor_type:    ['station', 'poi', 'address', 'locality', 'intersection'],
-  specificity:    ['specific', 'generic'],
+  specificity:    ['unique', 'brand', 'generic'],
   query_intent:   ['category_mansion', 'category_apartment', 'category_building', 'poi', 'category_busstop', 'intersection', 'signal', 'transit_entrance'],
   condition_type: ['poi', 'road', 'water', 'rail', 'intersection', 'signal', 'transit_entrance', 'category_busstop'],
+  // L1 の「地名寄りか施設寄りか」自己申告（Search Boxのtypesパラメータ選択専用 — query_intentとは別軸）。
+  // 'ambiguous'（省略時の既定）は「鎌倉」のように地名／同名施設のどちらもあり得るケースの安全策で、
+  // 従来の classifyQueryType の 'both' フォールバックと同じ意味（poi/place両方のtypesで検索する）。
+  text_type:      ['poi', 'place', 'ambiguous'],
   distance_method: ['radius', 'isochrone'],
   distance_level: ['same_building', 'adjacent', 'roadside', 'very_close', 'nearby', 'somewhat_nearby', 'far'],
   profile:        ['walking', 'cycling', 'driving'],
@@ -35,7 +39,7 @@ const L1_SHORT_KEY_MAP = {
   prox: 'proximity', anc: 'anchors', ty: 'type', tx: 'text', spc: 'specificity', sub: 'subtype',
   sc: 'scope', brg: 'bearing_filter', wi: 'within', pf: 'profile', pfi: 'profile_inferred',
   mnMi: 'minMinutes', mxMi: 'maxMinutes', mxMe: 'maxMeters', lv: 'level', tgt: 'target',
-  qi: 'query_intent', q: 'queries', fl: 'floors', v: 'value', mn: 'min', mx: 'max',
+  qi: 'query_intent', tt: 'text_type', q: 'queries', fl: 'floors', v: 'value', mn: 'min', mx: 'max',
   ng: 'negate', cat: 'category_tag', cond: 'conditions', dir: 'direction', d: 'distance',
   m: 'method', mi: 'minutes', me: 'meters',
 };
@@ -89,6 +93,9 @@ function validateQuerySchema(schema) {
     if (schema.target.query_intent && !SCHEMA_ENUMS.query_intent.includes(schema.target.query_intent)) {
       errors.push(`target.query_intent invalid: ${schema.target.query_intent}`);
     }
+    if (schema.target.text_type && !SCHEMA_ENUMS.text_type.includes(schema.target.text_type)) {
+      errors.push(`target.text_type invalid: ${schema.target.text_type}`);
+    }
   }
 
   if (schema.conditions && !Array.isArray(schema.conditions)) {
@@ -96,6 +103,7 @@ function validateQuerySchema(schema) {
   } else if (schema.conditions) {
     schema.conditions.forEach((c, i) => {
       if (!SCHEMA_ENUMS.condition_type.includes(c.type)) errors.push(`conditions[${i}].type invalid: ${c.type}`);
+      if (c.text_type && !SCHEMA_ENUMS.text_type.includes(c.text_type)) errors.push(`conditions[${i}].text_type invalid: ${c.text_type}`);
       if (c.distance) {
         const d = c.distance;
         if (d.method && !SCHEMA_ENUMS.distance_method.includes(d.method)) errors.push(`conditions[${i}].distance.method invalid`);
@@ -127,8 +135,10 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
 
   if (schema.proximity?.anchors) {
     for (const a of schema.proximity.anchors) {
-      if (!a.specificity) a.specificity = 'specific';
-      if (!a.subtype)     a.subtype = {};
+      // specificity intentionally left unset when L1 omits it — 'unique'/'brand'/generic
+      // (see prompt-l1.js), and _searchBoxLimitFor's default branch already treats
+      // undefined the same as explicit 'generic'.
+      if (!a.subtype) a.subtype = {};
     }
   }
   if (schema.proximity && schema.proximity.bearing_filter === undefined) schema.proximity.bearing_filter = null;
@@ -140,6 +150,7 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
 
   if (schema.target) {
     if (!schema.target.query_intent) schema.target.query_intent = 'poi';
+    if (!schema.target.text_type) schema.target.text_type = 'ambiguous';
     if (!Array.isArray(schema.target.queries) || schema.target.queries.length === 0) {
       schema.target.queries = schema.target.text ? [schema.target.text] : [];
     } else if (schema.target.text && !schema.target.queries.includes(schema.target.text)) {
@@ -183,6 +194,7 @@ function fillSchemaDefaults(schema, defaultLevel = 'very_close', maxConditions =
       } else if (c.text && !c.queries.includes(c.text)) {
         c.queries.unshift(c.text);
       }
+      if (c.type === 'poi' && !c.text_type) c.text_type = 'ambiguous';
       if (c.direction === undefined) c.direction = null;
       c.negate = c.negate === true;
     }

@@ -45,9 +45,6 @@ function formatApiCall(c, i) {
   if (c.api === 'search_box_forward') {
     lines.push(`[${i}] Search Box (forward)  q="${c.q}"  types=${c.types}${c.poiCategory ? `  poi_category=${c.poiCategory}` : ''}  limit=${c.limit}  ${status}`);
     lines.push(`      proximity=${c.proximity ? c.proximity.join(',') : '(なし)'}  bbox=${c.bbox ? c.bbox.map(n => n.toFixed(5)).join(',') : '(なし)'}`);
-  } else if (c.api === 'search_box_category') {
-    lines.push(`[${i}] Search Box (category)  canonical_id="${c.canonicalId}"  limit=${c.limit}${c.retrying ? '(→10で再試行)' : ''}  ${status}`);
-    lines.push(`      proximity=${c.proximity ? c.proximity.join(',') : '(なし)'}  bbox=${c.bbox ? c.bbox.map(n => n.toFixed(5)).join(',') : '(なし)'}`);
   } else if (c.api === 'tilequery') {
     lines.push(`[${i}] Tilequery  目的="${c.purpose}"  tileset=${c.tileset}  layers=${c.layers}  radius=${c.radius}m  ${status}`);
     lines.push(`      中心=${c.lng?.toFixed?.(6)},${c.lat?.toFixed?.(6)}`);
@@ -154,12 +151,14 @@ document.getElementById('clearProximityBtn').addEventListener('click', clearProx
 // square modeはproximity未指定だと中心が無いのでoff同然（bbox無しで検索）になる。
 // autoはクエリの中身(proximity.within)に依存するため、ここではまだ実際の値を計算できない
 // ('auto'という文字列のままrequestBodyに載せ、query-engine.js側でL1解析後に解決する)。
-function computeBbox() {
-  const mode = document.querySelector('input[name="bboxMode"]:checked')?.value || 'off';
+// bboxMode/bboxSquareMは引数で受け取る（DOM直読みにしない）——設定がJSON編集モードの
+// 時は、非表示のGUI input要素ではなくJSONの値を正としたいため（readSettings()参照）。
+function computeBbox(bboxMode, bboxSquareM) {
+  const mode = bboxMode || 'off';
   if (mode === 'auto') return 'auto';
   if (mode === 'square') {
     if (!proximityPoint) return null;
-    const half = parseFloat(document.getElementById('bboxSquareM').value) / 2;
+    const half = (parseFloat(bboxSquareM) || 0) / 2;
     if (!half || half <= 0) return null;
     const { lat, lng } = proximityPoint;
     const dLng = half / (111320 * Math.cos(lat * Math.PI / 180));
@@ -174,6 +173,9 @@ function computeBbox() {
 }
 
 // bboxがオン(どのモードでも)の間、実際に検索に使われる範囲を地図上に矩形表示する。
+// ※表示するかどうかは「bboxを地図上に表示する」設定(既定オフ)で別途ゲートする——
+// これはbboxMode自体（実際の検索に使うbbox値。requestBody.bboxに載る）とは独立した、
+// 純粋にUI側の可視化トグル。オフでもbboxMode('auto'等)による検索自体の絞り込みは動く。
 function bboxToPolygonFeature(bbox) {
   const [minLng, minLat, maxLng, maxLat] = bbox;
   return {
@@ -192,7 +194,16 @@ let lastAutoBbox = null;
 function updateBboxPreview() {
   const source = map.getSource('bboxPreview');
   if (!source) return; // map style not loaded yet
-  const bbox = computeBbox();
+  const showPreview = document.getElementById('showBboxPreview').checked;
+  let bbox = null;
+  if (showPreview) {
+    // JSON編集中に構文が壊れていることがあるので、プレビュー更新では例外を投げず単に
+    // 何も描かない(検索実行時のエラー表示はrunSearch/openRequestModal側の責務)。
+    try {
+      const settings = readSettings();
+      bbox = computeBbox(settings.bboxMode, settings.bboxSquareM);
+    } catch (e) { bbox = null; }
+  }
   const drawBbox = bbox === 'auto' ? lastAutoBbox : bbox;
   source.setData({
     type: 'FeatureCollection',
@@ -273,6 +284,7 @@ map.on('resize', updateBboxPreview);
 
 document.querySelectorAll('input[name="bboxMode"]').forEach(el => el.addEventListener('change', updateBboxPreview));
 document.getElementById('bboxSquareM').addEventListener('input', updateBboxPreview);
+document.getElementById('showBboxPreview').addEventListener('change', updateBboxPreview);
 
 function renderResults(resp) {
   const box = document.getElementById('results');
@@ -340,7 +352,13 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function readSettings() {
+// 「リクエストパラメータ」タブはGUI(スライダー等)とJSON(直接編集)の2ビューを切り替えられる。
+// どちらも同じreadSettings()の戻り値の形(model/judge.weights/bboxMode/bboxSquareM/debugLog
+// ——いずれもrequestBody構築に使う値。「フロントエンド設定」タブのshowBboxPreviewは含まない、
+// あれはリクエストに載らないUI専用の値のため)を表現する。値の実体は常にGUI側のinput要素に
+// 持たせ、JSONビューはその読み書き用の別表現として扱う(GUI→JSON切り替え時にシリアライズ、
+// JSON→GUI切り替え時にパースしてGUIへ反映)。
+function readSettingsFromGui() {
   return {
     model: document.getElementById('modelSelect').value,
     judge: {
@@ -350,7 +368,129 @@ function readSettings() {
         anchor:    parseFloat(document.getElementById('wAnchor').value),
       },
     },
+    bboxMode: document.querySelector('input[name="bboxMode"]:checked')?.value || 'off',
+    bboxSquareM: parseFloat(document.getElementById('bboxSquareM').value) || 2000,
+    debugLog: document.getElementById('debugLogToggle').checked,
   };
+}
+
+/** JSONの値をGUI側のinput要素に反映する。想定外の形は例外を投げる(呼び出し側でエラー表示)。 */
+function applySettingsToGui(settings) {
+  if (!settings || typeof settings !== 'object') throw new Error('設定はオブジェクトである必要があります');
+  const modelSelect = document.getElementById('modelSelect');
+  if (settings.model != null) {
+    if (![...modelSelect.options].some(o => o.value === settings.model)) {
+      throw new Error(`model の値が不正です: ${settings.model}`);
+    }
+    modelSelect.value = settings.model;
+  }
+  if (settings.bboxMode != null) {
+    const validModes = ['off', 'square', 'viewport', 'auto'];
+    if (!validModes.includes(settings.bboxMode)) throw new Error(`bboxMode の値が不正です: ${settings.bboxMode}`);
+    const radio = document.querySelector(`input[name="bboxMode"][value="${settings.bboxMode}"]`);
+    if (radio) radio.checked = true;
+  }
+  if (settings.bboxSquareM != null) {
+    const n = Number(settings.bboxSquareM);
+    if (!Number.isFinite(n) || n <= 0) throw new Error('bboxSquareM は正の数値である必要があります');
+    document.getElementById('bboxSquareM').value = n;
+  }
+  if (settings.debugLog != null) {
+    document.getElementById('debugLogToggle').checked = !!settings.debugLog;
+  }
+  const w = settings.judge?.weights || {};
+  for (const [key, id] of [['relevance', 'wRelevance'], ['condition', 'wCondition'], ['anchor', 'wAnchor']]) {
+    if (w[key] == null) continue;
+    const n = Number(w[key]);
+    if (!Number.isFinite(n) || n < 0 || n > 1) throw new Error(`judge.weights.${key} は0〜1の数値である必要があります`);
+    document.getElementById(id).value = n;
+    document.getElementById(id + 'Val').textContent = n.toFixed(2);
+  }
+}
+
+const settingsGuiView = document.getElementById('settingsGuiView');
+const settingsJsonView = document.getElementById('settingsJsonView');
+const settingsModeGuiBtn = document.getElementById('settingsModeGuiBtn');
+const settingsModeJsonBtn = document.getElementById('settingsModeJsonBtn');
+const settingsJsonInput = document.getElementById('settingsJsonInput');
+const settingsJsonError = document.getElementById('settingsJsonError');
+let settingsMode = 'gui';
+
+function showSettingsJsonError(msg) {
+  settingsJsonError.textContent = msg;
+  settingsJsonError.style.display = msg ? 'block' : 'none';
+}
+
+function switchToJsonView() {
+  settingsJsonInput.value = JSON.stringify(readSettingsFromGui(), null, 2);
+  showSettingsJsonError('');
+  settingsMode = 'json';
+  settingsGuiView.style.display = 'none';
+  settingsJsonView.style.display = '';
+  settingsModeGuiBtn.classList.remove('active');
+  settingsModeJsonBtn.classList.add('active');
+}
+
+/** @returns {boolean} 成功したか(JSONが不正なら失敗しGUIに戻らない) */
+function switchToGuiView() {
+  let parsed;
+  try {
+    parsed = JSON.parse(settingsJsonInput.value);
+  } catch (e) {
+    showSettingsJsonError(`JSONとして読めません: ${e.message}`);
+    return false;
+  }
+  try {
+    applySettingsToGui(parsed);
+  } catch (e) {
+    showSettingsJsonError(e.message);
+    return false;
+  }
+  showSettingsJsonError('');
+  settingsMode = 'gui';
+  settingsGuiView.style.display = '';
+  settingsJsonView.style.display = 'none';
+  settingsModeJsonBtn.classList.remove('active');
+  settingsModeGuiBtn.classList.add('active');
+  return true;
+}
+
+settingsModeJsonBtn.addEventListener('click', () => { if (settingsMode !== 'json') switchToJsonView(); });
+settingsModeGuiBtn.addEventListener('click', () => { if (settingsMode === 'json') switchToGuiView(); });
+
+// 設定タブ：「リクエストパラメータ」(searchPOI()のrequestBodyに載る値。上のGUI/JSON切替対象)
+// と「フロントエンド設定」(showBboxPreviewのようなUI専用の値。リクエストには載らない)を分ける。
+const settingsTabRequest = document.getElementById('settingsTabRequest');
+const settingsTabFrontend = document.getElementById('settingsTabFrontend');
+const settingsTopTabRequestBtn = document.getElementById('settingsTopTabRequestBtn');
+const settingsTopTabFrontendBtn = document.getElementById('settingsTopTabFrontendBtn');
+
+settingsTopTabRequestBtn.addEventListener('click', () => {
+  settingsTabRequest.style.display = '';
+  settingsTabFrontend.style.display = 'none';
+  settingsTopTabRequestBtn.classList.add('active');
+  settingsTopTabFrontendBtn.classList.remove('active');
+});
+settingsTopTabFrontendBtn.addEventListener('click', () => {
+  settingsTabRequest.style.display = 'none';
+  settingsTabFrontend.style.display = '';
+  settingsTopTabFrontendBtn.classList.add('active');
+  settingsTopTabRequestBtn.classList.remove('active');
+});
+
+/** 検索実行時に読む設定値。JSONビュー中は編集中のテキストをその場でパースする
+ * (GUIに戻さずJSONのまま検索できるようにするため)。不正なら例外を投げる。 */
+function readSettings() {
+  if (settingsMode === 'json') {
+    let parsed;
+    try {
+      parsed = JSON.parse(settingsJsonInput.value);
+    } catch (e) {
+      throw new Error(`設定JSONが不正です: ${e.message}`);
+    }
+    return parsed;
+  }
+  return readSettingsFromGui();
 }
 
 ['wRelevance', 'wCondition', 'wAnchor'].forEach(id => {
@@ -359,25 +499,50 @@ function readSettings() {
   input.addEventListener('input', () => { out.textContent = parseFloat(input.value).toFixed(2); });
 });
 
+/** searchPOI()に渡すrequestBody全文を組み立てる。runSearch()と「リクエスト全文を見る」
+ * モーダルの両方から使う共通ロジック——設定JSONが不正なら例外を投げる(呼び出し側で処理)。 */
+function buildRequestBody(text) {
+  const settings = readSettings();
+  const requestBody = {
+    text,
+    model: settings.model,
+    judge: settings.judge,
+    debugLog: !!settings.debugLog,
+  };
+  if (proximityPoint) requestBody.proximity = proximityPoint;
+  const bbox = computeBbox(settings.bboxMode, settings.bboxSquareM);
+  if (bbox) requestBody.bbox = bbox;
+  return requestBody;
+}
+
+function openRequestModal() {
+  const errBox = document.getElementById('requestModalError');
+  const content = document.getElementById('requestModalContent');
+  const text = document.getElementById('queryInput').value.trim() || '(検索テキスト未入力)';
+  try {
+    content.textContent = JSON.stringify(buildRequestBody(text), null, 2);
+    errBox.style.display = 'none';
+  } catch (e) {
+    content.textContent = '';
+    errBox.style.display = 'block';
+    errBox.textContent = e?.message || String(e);
+  }
+  document.getElementById('requestModal').style.display = 'block';
+}
+function closeRequestModal() { document.getElementById('requestModal').style.display = 'none'; }
+document.getElementById('viewRequestBtn').addEventListener('click', openRequestModal);
+document.getElementById('requestModalClose').addEventListener('click', closeRequestModal);
+document.getElementById('requestModal').addEventListener('click', (e) => { if (e.target.id === 'requestModal') closeRequestModal(); });
+
 async function runSearch() {
   const text = document.getElementById('queryInput').value.trim();
   const errorBox = document.getElementById('errorBox');
   errorBox.style.display = 'none';
   if (!text) return;
 
-  const settings = readSettings();
-  const requestBody = {
-    text,
-    model: settings.model,
-    judge: settings.judge,
-    debugLog: document.getElementById('debugLogToggle').checked,
-  };
-  if (proximityPoint) requestBody.proximity = proximityPoint;
-  const bbox = computeBbox();
-  if (bbox) requestBody.bbox = bbox;
-
   document.getElementById('searchBtn').disabled = true;
   try {
+    const requestBody = buildRequestBody(text);
     const resp = await searchPOI(requestBody);
     renderResults(resp);
   } catch (e) {
