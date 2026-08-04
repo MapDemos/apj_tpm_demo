@@ -25,7 +25,7 @@ const SCHEMA_ENUMS = {
   // 従来の classifyQueryType の 'both' フォールバックと同じ意味（poi/place両方のtypesで検索する）。
   text_type:      ['poi', 'place', 'ambiguous'],
   distance_method: ['radius', 'isochrone'],
-  distance_level: ['same_building', 'adjacent', 'roadside', 'very_close', 'nearby', 'somewhat_nearby', 'far'],
+  distance_level: ['adjacent', 'roadside', 'very_close', 'nearby', 'somewhat_nearby', 'far'],
   profile:        ['walking', 'cycling', 'driving'],
   bearing_filter: ['north', 'south', 'east', 'west', null],
 };

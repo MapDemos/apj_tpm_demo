@@ -5,12 +5,6 @@
  */
 
 const DISTANCE_TABLE = {
-  // same_building no longer does an exact building-polygon match (Tilequery's building
-  // layer lookup was unreliable and its "hard filter" mode fell apart badly once search
-  // stopped being bbox-restricted — candidates and condition items could be collected from
-  // anywhere, so almost nothing ever shared a real building id). It's now just an alias for
-  // "extremely close" (same radius as adjacent) — real-distance based like everything else.
-  same_building:   { method: 'circle',      radius_m: 50,    iso_min: null },
   // Thresholds are GENEROUS (avoid missing real matches — POI points are building
   // centroids, so "目の前" can be 30-50m by point distance). Scoring ranks the
   // truly-close ones to the top (gold), so a wide threshold no longer over-dilutes.

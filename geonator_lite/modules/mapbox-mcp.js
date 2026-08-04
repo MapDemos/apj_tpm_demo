@@ -723,9 +723,12 @@ class MapboxMCPClient {
    * @param {string|null} specificity - 'unique'|'brand'|'generic' (see _searchBoxLimitFor)
    * @param {string|null} textType - L1's own 'poi'|'place'|'ambiguous' self-report (schema
    *   text_type — see query-schema.js), used by the general-POI branch below to pick
-   *   Search Box's `types` param. Overridden to a single types=poi search whenever a
-   *   categoryTag resolves (index 0 only — see below), since that's a stronger signal than
-   *   this text_type guess. Otherwise replaces the former classifyQueryType() regex
+   *   Search Box's `types` param. When a categoryTag resolves (index 0 only — see below),
+   *   an extra types=poi search on the categoryTag itself is added ALONGSIDE the normal
+   *   textType-driven search(es) for that query, not instead of them — the category tag
+   *   only captures the genre suffix (e.g. "ショップ"), not a modifier like "アニメ" that
+   *   carries the actual distinguishing meaning, so both signals need to survive. Otherwise
+   *   replaces the former classifyQueryType() regex
    *   heuristic: L1 already knows semantically whether e.g. "渋谷109" is a facility vs. an
    *   area, so re-guessing it from text-only suffix patterns was redundant and less accurate.
    *   'ambiguous' (default) preserves the old 'both' fallback (query both types).
@@ -811,23 +814,27 @@ class MapboxMCPClient {
     // endpoint, so a generic genre word like "牛丼屋" as q would fail to match an indexed
     // name like "松屋" even with a correct poi_category filter attached; verified manually
     // that q=<category term alone> (e.g. "丼もの") finds it directly.) A resolved categoryTag
-    // is also a stronger, more specific signal than L1's own text_type guess, so it overrides
-    // the ambiguous/poi/place branching below and always does a single types=poi search — this
-    // only applies to the primary query (index 0, always the original tx per the QE-expansion
-    // rule); expanded synonym queries (i>0) keep following textType as before.
+    // is a stronger, more specific signal than L1's own text_type guess, so on the primary
+    // query (index 0, always the original tx per the QE-expansion rule) it adds an extra
+    // types=poi search on the tag itself — ALONGSIDE the normal textType-driven search(es),
+    // not replacing them. Replacing used to silently drop the case where the category tag
+    // only matches the genre suffix (e.g. "ショップ" in "アニメショップ") while the actual
+    // distinguishing modifier ("アニメ") lives in queries[0]/queries[1] and is invisible to
+    // the taxonomy; unioning both keeps that modifier alive (dedup'd below by name+coords).
     const categoryTag = categoryTagPromise ? await Promise.resolve(categoryTagPromise).catch(() => null) : null;
 
     const sbRequests = queries.flatMap((q, i) => {
-      if (i === 0 && categoryTag) return [this._searchBoxRequest(categoryTag, 'poi', effectiveProximity, sbLimit)];
-      if (textType === 'place') return [this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, sbLimit)];
-      if (textType === 'poi')   return [this._searchBoxRequest(q, 'poi', effectiveProximity, sbLimit)];
-      // 'ambiguous' (or unset): L1 couldn't commit either way (e.g. "鎌倉" — a locality
-      // name that could also be a same-named facility) — query both types, same safety
-      // net the old classifyQueryType 'both' fallback provided.
-      return [
-        this._searchBoxRequest(q, 'poi', effectiveProximity, sbLimit),
-        this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, sbLimit),
-      ];
+      const base = textType === 'place' ? [this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, sbLimit)]
+        : textType === 'poi' ? [this._searchBoxRequest(q, 'poi', effectiveProximity, sbLimit)]
+        // 'ambiguous' (or unset): L1 couldn't commit either way (e.g. "鎌倉" — a locality
+        // name that could also be a same-named facility) — query both types, same safety
+        // net the old classifyQueryType 'both' fallback provided.
+        : [
+            this._searchBoxRequest(q, 'poi', effectiveProximity, sbLimit),
+            this._searchBoxRequest(q, 'place,district,locality', effectiveProximity, sbLimit),
+          ];
+      if (i === 0 && categoryTag) return [this._searchBoxRequest(categoryTag, 'poi', effectiveProximity, sbLimit), ...base];
+      return base;
     });
 
     const sbResultArrays = await Promise.all(sbRequests);

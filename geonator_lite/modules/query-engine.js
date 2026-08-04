@@ -853,9 +853,8 @@ class QueryEngine {
   async _evaluate(schema, mainCandidates, condCandidates) {
     if (!mainCandidates || mainCandidates.length === 0) return [];
 
-    // same_building is no longer an exact building-polygon hard filter (removed — see
-    // distance-table.js) and floors is no longer filtered/scored at all — both conditions
-    // now flow through the normal radius/isochrone distance evaluation below like any other.
+    // floors is no longer filtered/scored at all — conditions flow through the normal
+    // radius/isochrone distance evaluation below like any other.
     const conditions = schema.conditions ?? [];
     const targetGroup = `target: ${schema.target?.text}`;
 
