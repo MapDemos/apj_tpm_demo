@@ -470,21 +470,32 @@ class QueryEngine {
     // and standalone landmarks are 'poi' features, not place/locality/district, so they need
     // broader types than the admin-area case.
     const isPointType = scope.type === 'station' || scope.type === 'poi';
-    const types = isPointType ? 'poi,address,place' : 'place,locality,neighborhood,district,address';
-    const sb = await this.mcp.searchBox(scope.text, { types });
-    const feats = sb?.features || [];
-    if (!feats.length) return null;
-    const q = MapboxMCPClient._normalizeName(scope.text);
-    const f = feats.find(x => MapboxMCPClient._normalizeName(x.properties?.name) === q) || feats[0];
+    const pointRadius = this.config.NEAR_STATION_M ?? 600;
+    if (isPointType) {
+      const feats = (await this.mcp.searchBox(scope.text, { types: 'poi,address,place' }))?.features || [];
+      return feats.length ? this._featToBbox(feats, scope.text, pointRadius) : null;
+    }
+    // Admin-area search first (place/locality/etc. — gets the real administrative bbox when
+    // available). Some area names users treat as a "locality" (informal/colloquial spot names,
+    // shopping-street nicknames etc.) only exist in Mapbox's index as a poi, not as
+    // place/locality/district/neighborhood — falling back to a poi search when the admin-area
+    // search comes up empty catches those instead of silently dropping the scope. The fallback
+    // match is a point, not a real administrative area, so it gets the same tight point radius
+    // as the station/poi scope type above rather than the generous 5km admin-area default.
+    const areaFeats = (await this.mcp.searchBox(scope.text, { types: 'place,locality,neighborhood,district,address' }))?.features || [];
+    if (areaFeats.length) return this._featToBbox(areaFeats, scope.text, 5000);
+    const poiFeats = (await this.mcp.searchBox(scope.text, { types: 'poi,address,place' }))?.features || [];
+    return poiFeats.length ? this._featToBbox(poiFeats, scope.text, pointRadius) : null;
+  }
+
+  /** Pick the best-matching feature for `text` and turn it into a bbox — the feature's own
+   * admin bbox if Mapbox provides one, else a `radius`-sized square around its point. */
+  _featToBbox(feats, text, radius) {
+    const f = this._pickBest(feats, text);
     const bbox = f.properties?.bbox;
     if (bbox) return bbox;
     const [lng, lat] = f.geometry.coordinates;
-    // Admin areas (place/locality/etc.) fall back to a generous 5km square when Mapbox gives
-    // no bbox of its own. A station/landmark is a point, not a region, so a much tighter radius
-    // makes more sense — callers apply their own boundary slack on top of this (_filterByScope),
-    // so this radius doesn't need to itself be overly generous.
-    const r = isPointType ? (this.config.NEAR_STATION_M ?? 600) : 5000;
-    const dLng = r / (111320 * Math.cos(lat * Math.PI / 180)), dLat = r / 110540;
+    const dLng = radius / (111320 * Math.cos(lat * Math.PI / 180)), dLat = radius / 110540;
     return [lng - dLng, lat - dLat, lng + dLng, lat + dLat];
   }
 
@@ -542,11 +553,20 @@ class QueryEngine {
   }
 
   async _resolveLocality(anchor, scopeBbox) {
+    const limit = this.mcp._searchBoxLimitFor(anchor.specificity);
     const sb = await this.mcp.searchBox(anchor.text, {
       types: 'place,locality,neighborhood,district,address',
-      limit: this.mcp._searchBoxLimitFor(anchor.specificity),
+      limit,
     });
     let feats = sb?.features || [];
+    if (!feats.length) {
+      // Same fallback as _resolveScopeBbox: some area names users treat as a "locality"
+      // (a station name used colloquially as an area reference, an informal spot name,
+      // etc.) only exist in Mapbox's index as a poi, not as place/locality/district/
+      // neighborhood — retry there instead of silently dropping the anchor.
+      const sbPoi = await this.mcp.searchBox(anchor.text, { types: 'poi,address,place', limit });
+      feats = sbPoi?.features || [];
+    }
     if (scopeBbox) feats = this._filterByScope(feats, scopeBbox);
     if (!feats.length) return null;
     return [this._featureToPoint(this._pickBest(feats, anchor.text))];
