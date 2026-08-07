@@ -353,14 +353,14 @@ class MapboxMCPClient {
   // ═══════════════════════════════════════════════════════════════
 
   /** Bus stop tileset (10da032y.busstop_gov_0608) — the sole bus-stop data source now (streets-v8 transit_stop_label variant retired), used identically for target and condition category_busstop. */
-  async _busStopFallback(lat, lng, radius) {
+  async _busStopFallback(lat, lng, radius, nameFilter = null) {
     const url = `https://api.mapbox.com/v4/10da032y.busstop_gov_0608/tilequery/${lng},${lat}.json` +
       `?access_token=${this.token}&radius=${Math.round(radius)}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true`;
     try {
       const res = await this._fetchTilequeryWithCache(url, 'バス停検索(10da032y.busstop_gov_0608)');
       if (!res.ok) return [];
       const data = await res.json();
-      return (data.features || [])
+      let items = (data.features || [])
         .filter(f => f.properties?.name)
         .map(f => ({
           name: MapboxMCPClient._cleanName(f.properties.name),
@@ -369,6 +369,11 @@ class MapboxMCPClient {
           distance: Math.round(f.properties?.tilequery?.distance || 0),
         }))
         .filter(f => f.longitude != null && f.latitude != null);
+      if (nameFilter) {
+        const filter = MapboxMCPClient._normalizeName(nameFilter);
+        items = items.filter(f => MapboxMCPClient._normalizeName(f.name).includes(filter));
+      }
+      return items;
     } catch { return []; }
   }
 
@@ -782,7 +787,7 @@ class MapboxMCPClient {
     const isBusStop = queryIntent === 'category_busstop' || (!queryIntent && this._isBusStopQuery(queries));
     if (isBusStop && effectiveProximity) {
       const [lng, lat] = effectiveProximity;
-      const busStops = await this._busStopFallback(lat, lng, TQ_RADIUS);
+      const busStops = await this._busStopFallback(lat, lng, TQ_RADIUS, queries?.[0] || null);
       const seen = new Map();
       busStops.forEach(item => { if (!seen.has(item.name)) seen.set(item.name, item); });
       const out = this._assignIds([...seen.values()]);
