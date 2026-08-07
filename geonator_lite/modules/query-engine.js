@@ -563,10 +563,34 @@ class QueryEngine {
 
   async _resolvePoiOrAddress(anchor, scopeBbox, requestProximity) {
     const opts = { types: 'poi,address,place,locality', limit: this.mcp._searchBoxLimitFor(anchor.specificity) };
-    if (scopeBbox) opts.proximity = [(scopeBbox[0] + scopeBbox[2]) / 2, (scopeBbox[1] + scopeBbox[3]) / 2];
-    else if (requestProximity) opts.proximity = [requestProximity.lng, requestProximity.lat];
-    const sb = await this.mcp.searchBox(anchor.text, opts);
-    let feats = sb?.features || [];
+    let feats;
+    if (scopeBbox) {
+      // Unlike a bare anchor (see _resolveProximity's "no hard bbox pre-filter" comment),
+      // an anchor with an explicit outer-landmark scope ("北千住駅近くのバンビという店" —
+      // see _resolveScopeBbox) has a user-stated search area, so narrowing the Search Box
+      // call itself to that area is safe and necessary: a branch-name POI ("バンビ
+      // 北千住西口店") can lose to same-named POIs elsewhere in Japan on relevance/soft-
+      // proximity ranking alone within a small `limit`, never even entering the candidate
+      // pool for _filterByScope to check. Same slack (config.NEAR_POI_M) as _filterByScope,
+      // so the boundary-approximation allowance stays consistent between the two. `bbox` is
+      // mcp's own global per-request state (this.mcp._bbox, read by _searchBoxRequest), not
+      // a per-call opts field, so it's saved/restored around this one call — intersected
+      // with whatever the caller already had set (e.g. an explicit UI bbox) rather than
+      // clobbering it.
+      opts.proximity = [(scopeBbox[0] + scopeBbox[2]) / 2, (scopeBbox[1] + scopeBbox[3]) / 2];
+      const prevBbox = this.mcp._bbox;
+      this.mcp._bbox = this._intersectBbox(prevBbox, this._expandBbox(scopeBbox, this.config.NEAR_POI_M ?? 400));
+      try {
+        const sb = await this.mcp.searchBox(anchor.text, opts);
+        feats = sb?.features || [];
+      } finally {
+        this.mcp._bbox = prevBbox;
+      }
+    } else {
+      if (requestProximity) opts.proximity = [requestProximity.lng, requestProximity.lat];
+      const sb = await this.mcp.searchBox(anchor.text, opts);
+      feats = sb?.features || [];
+    }
     if (!feats.length) return null;
     if (scopeBbox) feats = this._filterByScope(feats, scopeBbox);
     if (!feats.length) return null;
