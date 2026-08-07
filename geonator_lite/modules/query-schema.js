@@ -18,8 +18,8 @@
 const SCHEMA_ENUMS = {
   anchor_type:    ['station', 'poi', 'address', 'locality', 'intersection'],
   specificity:    ['unique', 'brand', 'generic'],
-  query_intent:   ['category_mansion', 'category_apartment', 'category_building', 'poi', 'category_busstop', 'intersection', 'signal', 'transit_entrance'],
-  condition_type: ['poi', 'road', 'water', 'rail', 'intersection', 'signal', 'transit_entrance', 'category_busstop'],
+  query_intent:   ['category_mansion', 'category_apartment', 'category_building', 'poi', 'category_busstop', 'category_shelter', 'intersection', 'signal', 'transit_entrance'],
+  condition_type: ['poi', 'road', 'water', 'rail', 'intersection', 'signal', 'transit_entrance', 'category_busstop', 'category_shelter'],
   // L1 の「地名寄りか施設寄りか」自己申告（Search Boxのtypesパラメータ選択専用 — query_intentとは別軸）。
   // 'ambiguous'（省略時の既定）は「鎌倉」のように地名／同名施設のどちらもあり得るケースの安全策で、
   // 従来の classifyQueryType の 'both' フォールバックと同じ意味（poi/place両方のtypesで検索する）。

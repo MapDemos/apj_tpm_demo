@@ -23,7 +23,7 @@ const isLineCond = (type) => LINE_COND_TYPES.has(type);
 // the collection itself already guarantees category+identity correctness, so L2 adds
 // no value as a *target* filter. (As poi *conditions* these already skip L2 — only
 // c.type === 'poi' conditions are rated — so this only needs handling on the target side.)
-const SKIP_L2_TARGET_INTENTS = new Set(['transit_entrance', 'intersection', 'signal', 'category_busstop']);
+const SKIP_L2_TARGET_INTENTS = new Set(['transit_entrance', 'intersection', 'signal', 'category_busstop', 'category_shelter']);
 
 // Building targets: Tilequery's building layer has no mansion/apartment/office
 // distinction (`class` is always 'building'), so the category-domain half of L2 is

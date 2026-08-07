@@ -16,18 +16,19 @@
  * LLM tool-calling loop, so collection functions just return arrays directly.
  *
  * Kept essentially as-is: Search Box request logic, category_tag resolution,
- * road/rail/intersection/signal/transit_entrance/busstop Tilequery helpers
+ * road/rail/intersection/signal/transit_entrance/busstop/shelter Tilequery helpers
  * (now single-shot instead of grid-based), name normalization/dedup helpers,
  * same-building / floors / isochrone / distance-evaluation spatial helpers.
  */
 
 const REACH_SPEED_M_PER_MIN = { walking: 80, cycling: 250, driving: 500 };
 
-// 交差点/信号/駅出口/バス停等、Tilequery専用レイヤーだけを引く検索で、名前フィルタとして
+// 交差点/信号/駅出口/バス停/避難所等、Tilequery専用レイヤーだけを引く検索で、名前フィルタとして
 // 渡してはいけない一般語（GENERIC_WORDS自体を名前フィルタにすると実データに一致せず全滅する）。
 const GENERIC_WORDS = [
   '交差点', '信号', '信号機', 'バス停', 'バス停留所', '停留所',
   '川', '海', '運河', '橋', '道', '道路', '通り', '大通り', '駅出口', '出口',
+  '避難所', '避難場所', '指定緊急避難所', '指定緊急避難場所', '避難施設',
 ];
 
 class MapboxMCPClient {
@@ -302,6 +303,11 @@ class MapboxMCPClient {
     return queries.some(q => MapboxMCPClient.BUS_STOP_KEYWORDS.some(kw => q.toLowerCase().includes(kw.toLowerCase())));
   }
 
+  static SHELTER_KEYWORDS = ['避難所', '避難場所', '指定緊急避難所', '指定緊急避難場所', '避難施設', 'shelter'];
+  _isShelterQuery(queries) {
+    return queries.some(q => MapboxMCPClient.SHELTER_KEYWORDS.some(kw => q.toLowerCase().includes(kw.toLowerCase())));
+  }
+
   static BUILDING_KEYWORDS = ['マンション', 'アパート', 'ビル', '邸', 'タワー', 'レジデンス', 'ハイツ', 'コーポ', 'テラス', '荘', '館', 'プレイス', 'コート', 'ガーデン', 'ヴィラ', 'パレス', 'ハウス'];
   _isBuildingQuery(queries) {
     return queries.some(q => MapboxMCPClient.BUILDING_KEYWORDS.some(kw => q.includes(kw)));
@@ -365,6 +371,30 @@ class MapboxMCPClient {
         .map(f => ({
           name: MapboxMCPClient._cleanName(f.properties.name),
           operator: f.properties.operator || null,
+          longitude: f.geometry?.coordinates?.[0], latitude: f.geometry?.coordinates?.[1],
+          distance: Math.round(f.properties?.tilequery?.distance || 0),
+        }))
+        .filter(f => f.longitude != null && f.latitude != null);
+      if (nameFilter) {
+        const filter = MapboxMCPClient._normalizeName(nameFilter);
+        items = items.filter(f => MapboxMCPClient._normalizeName(f.name).includes(filter));
+      }
+      return items;
+    } catch { return []; }
+  }
+
+  /** Designated emergency shelter tileset (10da032y.1ajgtvqwdtz6), used identically for target and condition category_shelter. */
+  async _shelterFallback(lat, lng, radius, nameFilter = null) {
+    const url = `https://api.mapbox.com/v4/10da032y.1ajgtvqwdtz6/tilequery/${lng},${lat}.json` +
+      `?access_token=${this.token}&radius=${Math.round(radius)}&limit=${this.config.TILEQUERY_LIMIT}&dedupe=true`;
+    try {
+      const res = await this._fetchTilequeryWithCache(url, '避難所検索(10da032y.1ajgtvqwdtz6)');
+      if (!res.ok) return [];
+      const data = await res.json();
+      let items = (data.features || [])
+        .filter(f => f.properties?.name)
+        .map(f => ({
+          name: MapboxMCPClient._cleanName(f.properties.name),
           longitude: f.geometry?.coordinates?.[0], latitude: f.geometry?.coordinates?.[1],
           distance: Math.round(f.properties?.tilequery?.distance || 0),
         }))
@@ -794,7 +824,17 @@ class MapboxMCPClient {
       this._searchResultCache.set(cacheKey, out);
       return out;
     }
-    const isBuilding = BUILDING_INTENTS.includes(queryIntent) || (!queryIntent && !isBusStop && this._isBuildingQuery(queries));
+    const isShelter = queryIntent === 'category_shelter' || (!queryIntent && this._isShelterQuery(queries));
+    if (isShelter && effectiveProximity) {
+      const [lng, lat] = effectiveProximity;
+      const shelters = await this._shelterFallback(lat, lng, TQ_RADIUS, queries?.[0] || null);
+      const seen = new Map();
+      shelters.forEach(item => { if (!seen.has(item.name)) seen.set(item.name, item); });
+      const out = this._assignIds([...seen.values()]);
+      this._searchResultCache.set(cacheKey, out);
+      return out;
+    }
+    const isBuilding = BUILDING_INTENTS.includes(queryIntent) || (!queryIntent && !isBusStop && !isShelter && this._isBuildingQuery(queries));
     if (isBuilding && effectiveProximity) {
       const [lng, lat] = effectiveProximity;
       const buildings = await this._findBuildings(lat, lng, TQ_RADIUS);
@@ -859,12 +899,12 @@ class MapboxMCPClient {
   async collectTarget(target, point, categoryTagPromise = null) {
     const proximity = point ? [point.lng, point.lat] : null;
     let queries = (target.queries?.length ? target.queries : [target.text]);
-    const GENERIC_INTENTS = ['intersection', 'signal', 'transit_entrance', 'category_busstop'];
+    const GENERIC_INTENTS = ['intersection', 'signal', 'transit_entrance', 'category_busstop', 'category_shelter'];
     if (GENERIC_INTENTS.includes(target.query_intent)) queries = queries.filter(q => !GENERIC_WORDS.includes(q.trim()));
     return this._collectPOI(queries, proximity, target.query_intent, categoryTagPromise, target.specificity, target.text_type);
   }
 
-  /** Collect condition candidates near a point. condition.type and target.query_intent now share the same vocabulary (poi/intersection/signal/transit_entrance/category_busstop), so it's passed straight through as the queryIntent. */
+  /** Collect condition candidates near a point. condition.type and target.query_intent now share the same vocabulary (poi/intersection/signal/transit_entrance/category_busstop/category_shelter), so it's passed straight through as the queryIntent. */
   async collectCondition(condition, point, categoryTagPromise = null) {
     const proximity = point ? [point.lng, point.lat] : null;
     let text = condition.text || null;

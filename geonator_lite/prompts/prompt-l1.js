@@ -68,7 +68,7 @@ tgt を省略するのは、ノイズ除去後に文字列が一切残らない�
 
 ### 必ず出す（常に含める）
 - \`prox.anc[]\`：場所の言及がテキスト中にあれば必ず出す。各 \`{ "ty", "tx" }\`。ty = station | poi | address | locality | intersection。**場所の言及が無ければ prox 自体を省略してよい**（JS側がリクエストのproximityまたは無バイアス検索にフォールバックする）。
-- \`tgt\`：\`{ "tx", "qi" }\`。qi = category_mansion | category_apartment | category_building | poi | category_busstop | intersection | signal | transit_entrance（**"poi" でも必ず出す**）
+- \`tgt\`：\`{ "tx", "qi" }\`。qi = category_mansion | category_apartment | category_building | poi | category_busstop | category_shelter | intersection | signal | transit_entrance（**"poi" でも必ず出す**）
 
 ### 値がある時だけ出す（無い/既定なら省略）
 - \`prox.anc[].spc\`：\`"unique"\` または \`"brand"\` の時だけ（既定 generic。tgt.spcと同じ3値・詳細は下記）
@@ -81,7 +81,7 @@ tgt を省略するのは、ノイズ除去後に文字列が一切残らない�
 - \`tgt.q\`：text 以外の検索語を足す QE 展開をする時だけ（tx と同一なら省略＝JSが [tx] を補完）
 - \`tgt.fl\`：階数指定がある時だけ。**必ず比較の向きを区別する**：完全一致「N階建て」→ \`{ "v": N }\`／「N階建て**以下**・N階**未満**・N階**まで**」→ \`{ "mx": N }\`／「N階建て**以上**・N階**超**・N階**より上**」→ \`{ "mn": N }\`（タワマン/超高層/高層→ \`{ "mn": 20 }\`、低層/平屋/背の低い→ \`{ "mx": 3 }\`）。反転「N階建てではない」→ \`{ "v": N, "ng": true }\`。**「以下」を \`v\` にしない（＝ちょうどN階に潰さない）**
 - \`tgt.cat\`：下記「category_tag(cat)」ルール参照
-- \`cond[]\`：近接条件がある時だけ。各条件は最小で \`{ "ty", "tx" }\`。ty = poi | road | water | rail | intersection | signal | transit_entrance | category_busstop
+- \`cond[]\`：近接条件がある時だけ。各条件は最小で \`{ "ty", "tx" }\`。ty = poi | road | water | rail | intersection | signal | transit_entrance | category_busstop | category_shelter
   - \`qi\`：category_busstop 等の時だけ（既定 poi）
   - \`spc\`：ty=poiで\`"unique"\`または\`"brand"\`の時だけ（既定 generic）
   - \`tt\`：ty=poiで\`"poi"\`または\`"place"\`と明確に判断できる時だけ（既定 ambiguous・tgt.ttと同じ基準）
@@ -133,7 +133,7 @@ scは**アンカーが実際に指すもの（施設・店舗等）を一意に�
 
 **最重要ルール（tgt・proxは常に各1つ）**:
 - **tgt は必ず1つ**（探しているもの＝文の最後の名詞。「マンション」「スーパー」「コメダ」等）。複数候補が出るのは"結果"であって、schemaのtgtは1つ。
-- **tgt.txと全く同じ固有名詞を prox.anc に重複させない**（自己言及の禁止。交差点の自己言及ケース＝後述の唯一の例外を除く）。探しているもの自体を目印にする必要はない。
+- **tgt.txと全く同じ固有名詞を prox.anc に重複させない**（自己言及の禁止。交差点・バス停・信号の自己言及ケース＝後述の例外を除く）。探しているもの自体を目印にする必要はない。
   - このルールが対象にするのは「文中の場所の言及が地名（都道府県・市区町村・エリア名）1つだけで、それ以外に基準にできる別の目印（駅・施設名等）が無い」場合のみ。この時は地名を prox.anc（ty=locality）に入れる（tgtと同じ固有名詞はancに入れない）。
     例:「京都の清水寺」「京都　清水寺」→ tgt=清水寺, prox.anc=[{ty:locality, tx:"京都"}]（清水寺自身をancに重複させない）
     例:「浅草の浅草寺」→ tgt=浅草寺, prox.anc=[{ty:locality, tx:"浅草"}]
@@ -203,8 +203,12 @@ scは**アンカーが実際に指すもの（施設・店舗等）を一意に�
 - qi=intersection / transit_entrance は、**探しているもの自体が交差点／駅出口の場合のみ**使う（他の目印の近くにある交差点・出口を探すケース）。基準点として使う場合（「○○駅の3番出口から徒歩1分の店」等）は従来どおり prox.anc（ty=intersection）／cond（ty=transit_entrance）にする。
   - 例:「渋谷駅の近くの交差点」→ prox.anc={ty:station, tx:"渋谷駅"}, tgt={tx:"交差点", qi:"intersection"}
   - 例:「上野駅の出口を教えて」→ prox.anc={ty:station, tx:"上野駅"}, tgt={tx:"出口", qi:"transit_entrance"}
-  - **交差点に具体名があり、他に基準点となる目印が無い自己言及的なクエリ**（「○○の交差点を探して」等）は、**「交差点」という接尾辞・単語だけを剥がし、具体名（○○）をtgt.txに残すこと**。prox.ancは同じ具体名をty=intersectionのアンカーとしてそのまま流用してよい（この自己言及ケースではtgt/ancが同じ交差点を指すのは正しい）。
+  - **交差点・バス停・信号・避難所（qi=intersection/category_busstop/signal/category_shelter）に具体名があり、他に基準点となる目印が無い自己言及的なクエリ**（「○○の交差点を探して」「○○バス停」「○○避難所」等）は、**カテゴリ語の接尾辞・単語自体（交差点/バス停/信号/避難所）だけを剥がし、具体名（○○）をtgt.txに残すこと**。prox.ancは同じ具体名を対応するty（intersectionはty=intersection、バス停/信号/避難所はty=locality）のアンカーとしてそのまま流用してよい（この自己言及ケースではtgt/ancが同じ対象を指すのは正しい）。
     - 例:「入谷二丁目の交差点を探して」→ prox.anc={ty:intersection, tx:"入谷二丁目"}, tgt={tx:"入谷二丁目", qi:"intersection"}（"交差点"という単語自体はtgt.txに含めない）
+    - 例:「仲御徒町のバス停」→ prox.anc={ty:locality, tx:"仲御徒町"}, tgt={tx:"仲御徒町", qi:"category_busstop"}（"バス停"という単語自体はtgt.txに含めない）
+  - **地名トークンが2つ以上あり、接続語（の／近くの等）を伴わず並んでいるだけの雑なクエリ**（例:「仲御徒町　台東三丁目　バス停」）で、対象がqi=intersection/category_busstop/signal/category_shelterの場合: 自己言及にはせず、**丁目・番地等の細かい地名（そのカテゴリの実際の命名慣習に近い方）をtgt.txに、それより広域な地名をprox.anc(ty=locality)にする**（結合しない）。どちらが細かいか判断できない場合はこの振り分けをせず、通常の解釈（地名はancのみにする等）に留める。
+    - 例:「仲御徒町　台東三丁目　バス停」→ prox.anc=[{ty:locality, tx:"仲御徒町"}], tgt={tx:"台東三丁目", qi:"category_busstop"}
+    - 例:「仲御徒町　バス停　台東三丁目」（語順が違っても同じ解釈）→ 同上
 - fl（階数指定・任意）: 建物の階数・高さに言及があれば設定。無ければ省略。厳密一致でなく目安。
   - 具体的な階数（**比較の向きを必ず区別**）:「12階建て/ちょうど12階」→ {"v": 12}／「10階建て**以下**・10階**まで**・10階**未満**」→ {"mx": 10}／「10階建て**以上**・10階**より上**・10階**超**」→ {"mn": 10}。**「以下」を v にしない**
   - 高い系 →「タワマン/高層/背の高いビル」→ {"mn": 20}、「背が高い」→ {"mn": 10}
@@ -230,6 +234,7 @@ scは**アンカーが実際に指すもの（施設・店舗等）を一意に�
   - signal: 信号機
   - transit_entrance: 駅出口・改札（「3番出口」「B1出口」「南口」等）
   - category_busstop: バス停（名称問わず）
+  - category_shelter: 指定緊急避難所・避難場所（自治体指定の避難所・避難場所。名称問わず）
 - **spc（ty=poiの時だけ・任意）**: tgtのspcと同じ基準（"unique"/"brand"/generic時は省略）。例:「ドミノピザ」の条件 → {ty:poi, tx:"ドミノピザ", spc:"brand", ...}
 
 **駅＋出口の扱い（重要）**:
