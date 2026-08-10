@@ -630,4 +630,4 @@ async function runPlainSearch(text) {
 }
 
 document.getElementById('searchBtn').addEventListener('click', runSearch);
-document.getElementById('queryInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
+document.getElementById('queryInput').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) runSearch(); });
