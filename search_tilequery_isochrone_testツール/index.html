@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tilequery + Search Demo</title>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.11.0/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.11.0/mapbox-gl.js"></script>
+  <script src="https://unpkg.com/@turf/turf@7/turf.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { height: 100vh; display: flex; flex-direction: column; background: #121212; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
+
+    /* Setup Modal */
+    #setup-overlay { display: flex; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 9999; align-items: center; justify-content: center; }
+    #setup-modal { background: #1e1e1e; border: 1px solid #444; border-radius: 10px; width: 480px; padding: 32px; display: flex; flex-direction: column; gap: 20px; }
+    #setup-modal h2 { font-size: 16px; color: #ddd; }
+    #setup-modal p.note { font-size: 11px; color: #555; line-height: 1.6; }
+    .setup-field { display: flex; flex-direction: column; gap: 6px; }
+    .setup-field label { font-size: 11px; color: #888; font-family: monospace; }
+    .setup-field input { padding: 9px 12px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 12px; font-family: monospace; outline: none; }
+    .setup-field input:focus { border-color: #2563eb; }
+    .setup-field .show-toggle { position: relative; }
+    .setup-field .show-toggle input { width: 100%; padding-right: 60px; }
+    .setup-field .show-toggle button { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #666; cursor: pointer; font-size: 11px; padding: 2px 4px; }
+    .setup-field .show-toggle button:hover { color: #aaa; }
+    #setup-start { padding: 11px; background: #2563eb; border: none; border-radius: 4px; color: #fff; font-size: 13px; cursor: pointer; font-weight: bold; }
+    #setup-start:hover { background: #1d4ed8; }
+    #setup-start:disabled { background: #333; color: #555; cursor: not-allowed; }
+    #setup-clear { background: none; border: none; color: #555; font-size: 11px; cursor: pointer; text-align: center; text-decoration: underline; }
+    #setup-clear:hover { color: #aaa; }
+
+    /* Header */
+    #header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; background: #1a1a1a; border-bottom: 1px solid #333; flex-shrink: 0; }
+    #header .title { font-size: 13px; font-weight: bold; color: #aaa; white-space: nowrap; }
+    #header label.fld { font-size: 11px; color: #888; font-family: monospace; display: flex; align-items: center; gap: 6px; }
+    #header input, #header select { padding: 6px 10px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 12px; outline: none; font-family: monospace; }
+    #header input:focus, #header select:focus { border-color: #2563eb; }
+    .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-secondary { background: #2d2d2d; border: 1px solid #444; color: #ccc; }
+    .btn-secondary:hover { background: #3a3a3a; }
+    .mode-toggle { display: flex; border: 1px solid #444; border-radius: 4px; overflow: hidden; flex-shrink: 0; }
+    .mode-btn { padding: 5px 11px; border: none; background: #2a2a2a; color: #666; font-size: 11px; cursor: pointer; font-family: monospace; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+    .mode-btn:hover { background: #3a3a3a; color: #aaa; }
+    .mode-btn.active.tilequery { background: #1a3055; color: #60a5fa; font-weight: bold; }
+    .mode-btn.active.qrf { background: #2a1a4a; color: #c084fc; font-weight: bold; }
+    .mode-btn.active.iso { background: #0d2a1a; color: #10b981; font-weight: bold; }
+    .iso-marker-el { width: 18px; height: 18px; background: #10b981; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+    .sep { width: 1px; height: 22px; background: #333; }
+
+    /* Config bars */
+    .config-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 16px; background: #141414; border-bottom: 1px solid #333; flex-shrink: 0; }
+    .config-bar .cfg-label { font-size: 11px; font-weight: bold; }
+    .config-bar .fld { font-size: 11px; color: #888; font-family: monospace; display: flex; align-items: center; gap: 6px; }
+    .config-bar select, .config-bar input { padding: 5px 9px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 12px; outline: none; font-family: monospace; }
+    .cfg-prox { font-size: 11px; color: #888; font-family: monospace; margin-left: auto; }
+    .dropdown { position: relative; }
+    .dropdown-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 50; background: #1e1e1e; border: 1px solid #444; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.6); padding: 8px; min-width: 260px; max-height: 320px; overflow-y: auto; }
+    .dropdown-panel.open { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+    .dropdown-panel label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #ccc; font-family: monospace; cursor: pointer; white-space: nowrap; }
+
+    /* Main */
+    #main { flex: 1; display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); min-height: 0; }
+    #map { height: 100%; min-width: 0; border-right: 1px solid #333; }
+
+    #right-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+    .console-section { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: #161616; }
+    #search-section { border-bottom: 2px solid #333; }
+    .console-header { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 11px; color: #888; background: #1a1a1a; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
+    .console-header .title-s { font-weight: bold; }
+    .console-header .spacer { flex: 1; }
+    .console-search { padding: 4px 9px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 11px; outline: none; width: 150px; }
+    .console-search:focus { border-color: #2563eb; }
+    .console-body { flex: 1; overflow-y: auto; padding: 8px; min-width: 0; }
+
+    .log-entry { margin-bottom: 12px; }
+    .log-head { font-size: 11px; font-family: monospace; color: #60a5fa; background: #1a2744; padding: 6px 10px; border-radius: 5px; white-space: pre-wrap; word-break: break-all; }
+    .log-head.err { color: #fca5a5; background: #3a1a1a; }
+    .log-head.search { color: #6ee7b7; background: #10241a; }
+    .log-url { font-size: 10px; font-family: monospace; color: #7a8aa0; background: #0d0d0d; padding: 6px 10px; margin-top: 4px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+
+    .feature-block { border: 1px solid #2a2a2a; border-radius: 5px; margin: 6px 0 6px 8px; overflow: hidden; transition: box-shadow 0.2s; }
+    .feature-head { font-size: 11px; font-family: monospace; color: #fca5a5; background: #241414; padding: 5px 9px; cursor: pointer; }
+    .feature-block.search .feature-head { color: #93c5fd; background: #101a2a; }
+    .feature-json { margin: 0; padding: 8px; font-size: 10px; line-height: 1.4; font-family: 'SFMono-Regular', Consolas, monospace; color: #cdd6e4; white-space: pre; overflow-x: auto; background: #101010; }
+    .feature-block.flash { box-shadow: 0 0 0 2px #f59e0b; }
+    .feature-block.flash .feature-head { background: #3a2a14; color: #fbbf24; }
+    .feature-block.iso-match { box-shadow: inset 3px 0 0 #10b981; border-color: #1a3a2a; }
+    .feature-block.iso-match .feature-head { border-left: none; }
+
+    /* projection view */
+    .proj { padding: 6px 8px; background: #101010; }
+    .proj-row { display: flex; gap: 8px; font-size: 11px; font-family: monospace; padding: 2px 0; border-bottom: 1px solid #1a1a1a; }
+    .proj-key { color: #7aa2d6; min-width: 150px; flex-shrink: 0; }
+    .proj-val { color: #cdd6e4; white-space: pre-wrap; word-break: break-all; }
+    .proj-val.proj-null { color: #555; font-style: italic; }
+
+    .hint { font-size: 11px; color: #555; }
+    .layer-count-bar { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 10px; background: #111; border-top: 1px solid #222; }
+    .layer-count-tag { font-size: 10px; font-family: monospace; padding: 2px 7px; border-radius: 10px; background: #1e2a3a; color: #7aa2d6; cursor: pointer; white-space: nowrap; border: 1px solid #2a3a4a; }
+    .layer-count-tag:hover { background: #2a3a4a; color: #93c5fd; }
+    .mapboxgl-popup-content { padding: 6px 10px !important; }
+  </style>
+</head>
+<body>
+
+<!-- Setup Modal -->
+<div id="setup-overlay">
+  <div id="setup-modal">
+    <h2>📍 Tilequery + Search Demo</h2>
+    <div class="setup-field">
+      <label>Mapbox Access Token</label>
+      <div class="show-toggle">
+        <input type="password" id="setup-mapbox-token" placeholder="pk...." autocomplete="off" spellcheck="false" />
+        <button type="button" onclick="toggleVis('setup-mapbox-token', this)">表示</button>
+      </div>
+    </div>
+    <p class="note">※ トークンはこのブラウザの localStorage にのみ保存されます。<br>※ サーバーには一切送信されません。</p>
+    <button id="setup-start" disabled>Start</button>
+    <button id="setup-clear">保存済みトークンを削除</button>
+  </div>
+</div>
+
+<!-- Header -->
+<div id="header">
+  <span class="title">📍 Tilequery</span>
+  <div class="mode-toggle">
+    <button class="mode-btn active tilequery" id="mode-tilequery">Tilequery</button>
+    <button class="mode-btn qrf" id="mode-qrf">queryRenderedFeatures</button>
+  </div>
+  <input id="search-input" type="text" placeholder="Search Box API で検索..." style="width:220px;" />
+  <button class="btn btn-primary" id="search-btn">Search</button>
+  <span class="sep"></span>
+  <label class="fld">Radius(m)
+    <input id="radius-input" type="number" min="0" value="100" style="width:80px;" />
+  </label>
+  <span id="tq-only-controls" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <label class="fld">Geometry
+      <select id="geometry-select">
+        <option value="" selected>all</option>
+        <option value="point">point</option>
+        <option value="linestring">linestring</option>
+        <option value="polygon">polygon</option>
+      </select>
+    </label>
+    <label class="fld">Tileset
+      <select id="tileset-select" style="min-width:240px;"></select>
+    </label>
+    <input id="tileset-add-input" type="text" placeholder="mapbox.xxxx を追加" style="width:200px;" />
+    <button class="btn btn-secondary" id="tileset-add-btn">＋ 追加</button>
+  </span>
+  <span class="hint" id="header-hint">地図クリックで proximity 設定 + Tilequery</span>
+</div>
+
+<!-- Search Config -->
+<div class="config-bar" id="search-config">
+  <span class="cfg-label" style="color:#6ee7b7;">🔍 Search設定</span>
+  <span class="fld">固定: language=ja / country=jp / limit=10</span>
+  <span class="sep"></span>
+  <div class="dropdown" id="types-dropdown">
+    <button class="btn btn-secondary" id="types-btn">types ▾</button>
+    <div class="dropdown-panel" id="types-panel"></div>
+  </div>
+  <label class="fld">nav_profile
+    <select id="navprofile-select">
+      <option value="" selected>（指定なし）</option>
+      <option value="driving">driving</option>
+      <option value="walking">walking</option>
+      <option value="cycling">cycling</option>
+    </select>
+  </label>
+  <button class="btn btn-secondary" id="bbox-toggle-btn">BBOX: OFF</button>
+  <label class="fld">bbox半径(m)
+    <input id="bbox-radius" type="number" min="0" value="2000" style="width:90px;" />
+  </label>
+  <span class="cfg-prox" id="prox-display">proximity: -</span>
+</div>
+
+<!-- Isochrone Config -->
+<div class="config-bar" id="iso-config">
+  <span class="cfg-label" style="color:#10b981;">🟢 Isochrone設定</span>
+  <label class="fld">profile
+    <select id="iso-profile">
+      <option value="walking" selected>walking</option>
+      <option value="driving">driving</option>
+      <option value="cycling">cycling</option>
+      <option value="driving-traffic">driving-traffic</option>
+    </select>
+  </label>
+  <span class="sep"></span>
+  <div class="mode-toggle">
+    <button class="mode-btn active iso" id="iso-mode-minutes">時間(分)</button>
+    <button class="mode-btn iso" id="iso-mode-meters">距離(m)</button>
+  </div>
+  <label class="fld" id="iso-minutes-field">contours_minutes
+    <input id="iso-minutes" type="number" min="1" max="60" value="1" style="width:60px;" />
+  </label>
+  <label class="fld" id="iso-meters-field" style="display:none;">contours_meters
+    <input id="iso-meters" type="number" min="1" max="100000" value="50" style="width:80px;" />
+  </label>
+  <span class="hint">地図を右クリックで Isochrone 実行</span>
+</div>
+
+<!-- Tilequery / QRF Config -->
+<div class="config-bar" id="tq-config">
+  <span class="cfg-label" style="color:#60a5fa;" id="tq-config-label">🖥 Tilequery設定</span>
+  <div class="dropdown" id="tqlayers-dropdown">
+    <button class="btn btn-secondary" id="tqlayers-btn">layers ▾</button>
+    <div class="dropdown-panel" id="tqlayers-panel"></div>
+  </div>
+  <span class="sep"></span>
+  <span class="fld">表示フィールド抽出</span>
+  <div class="dropdown" id="fields-dropdown">
+    <button class="btn btn-secondary" id="fields-btn">表示フィールド ▾</button>
+    <div class="dropdown-panel" id="fields-panel"></div>
+  </div>
+  <button class="btn btn-secondary" id="fields-clear-btn">全フィールド表示</button>
+  <span class="fld">凡例:
+    <span style="color:#e74c3c;">●point</span>
+    <span style="color:#f59e0b;">●line</span>
+    <span style="color:#a855f7;">●polygon</span>
+  </span>
+  <span class="fld" id="tq-filter-stat" style="color:#fbbf24;"></span>
+</div>
+
+<!-- Main -->
+<div id="main">
+  <div id="map"></div>
+  <div id="right-pane">
+    <div class="console-section" id="search-section">
+      <div class="console-header">
+        <span class="title-s" style="color:#6ee7b7;">🔍 Search Box API</span>
+        <input class="console-search" id="search-filter" type="text" placeholder="🔍 テキスト絞り込み..." />
+        <span class="spacer"></span>
+        <button class="btn btn-secondary" id="search-clear-btn">Clear</button>
+      </div>
+      <div class="console-body" id="search-body">
+        <p class="hint" style="padding:8px;">上の検索ボックスで Search Box API を実行（青の丸数字マーカー）。proximity は地図クリックで設定。</p>
+      </div>
+    </div>
+    <div class="console-section" id="iso-section" style="border-top: 2px solid #333;">
+      <div class="console-header">
+        <span class="title-s" style="color:#10b981;">🟢 Isochrone</span>
+        <input class="console-search" id="iso-filter" type="text" placeholder="🔍 テキスト絞り込み..." />
+        <span class="spacer"></span>
+        <button class="btn btn-secondary" id="iso-clear-btn">Clear</button>
+      </div>
+      <div class="console-body" id="iso-body">
+        <p class="hint" style="padding:8px;">地図を右クリックすると Isochrone を実行します。</p>
+      </div>
+    </div>
+    <div class="console-section" id="tq-section">
+      <div class="console-header">
+        <span class="title-s" style="color:#60a5fa;" id="tq-section-title">🖥 Tilequery</span>
+        <input class="console-search" id="tq-filter" type="text" placeholder="🔍 テキスト絞り込み..." />
+        <span class="spacer"></span>
+        <button class="btn btn-secondary" id="tq-clear-btn">Clear</button>
+      </div>
+      <div class="console-body" id="tq-body">
+        <p class="hint" id="tq-hint" style="padding:8px;">地図をクリックすると Tilequery を実行。表示フィールドを選ぶと、そのフィールドだけ抽出表示します。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// TOKEN / STYLE
+// ============================================================
+let MAPBOX_TOKEN = '';
+const LS_MBTOKEN   = 'apc_mapbox_token';
+const MAPBOX_STYLE = 'mapbox://styles/10da032y/cmp29b79d001601so7q6d07ls';
+const PRESET_MAPBOX_TOKEN = "pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21xenh6aHhoMDYxczJ0c2JqNHRiY3V5MiJ9.5l2MhlYwz0vqKNZ9bPcDyQ";
+
+const DEFAULT_LAT = 35.6631696325232;
+const DEFAULT_LNG = 139.75565770549306;
+const TQ_LIMIT = 50;
+const INTERACTIVE = ['tq-results'];
+
+const SEARCH_TYPES = ['country','region','postcode','district','place','city','locality','neighborhood','street','address','poi','category'];
+const STREETS_LAYERS = ['admin','aeroway','airport_label','building','housenum_label','landuse_overlay','landuse','motorway_junction','natural_label','place_label','poi_label','road','structure','transit_stop_label','water','waterway'];
+
+const FIELD_CANDIDATES = (() => {
+  const common = ['name','name_ar','name_en','name_es','name_fr','name_de','name_it','name_pt','name_ru','name_zh-Hans','name_zh-Hant','name_ja','name_ko','name_vi','name_script','sizerank','filterrank','maki','maki_beta','worldview','disputed'];
+  const perLayer = ['admin_level','maritime','iso_3166_1','iso_3166_2','type','ref','class','underground','building_id','height','min_height','extrude','house_num','reflen','elevation_m','elevation_ft','symbolrank','capital','abbr','text_anchor','maki_modifier','brand','category_en','category_zh-Hans','oneway','dual_carriageway','access','structure','bike_lane','toll','shield','shield_text_color','layer','len','lane_count','stop_type','mode','network','network_beta'];
+  const meta = ['tilequery.layer','tilequery.geometry','tilequery.distance'];
+  return [...new Set([...common, ...perLayer, ...meta])];
+})();
+
+// ============================================================
+// SETUP MODAL
+// ============================================================
+function toggleVis(inputId, btn) {
+  const input = document.getElementById(inputId);
+  input.type = input.type === 'password' ? 'text' : 'password';
+  btn.textContent = input.type === 'password' ? '表示' : '隠す';
+}
+function initSetup() {
+  const mInput = document.getElementById('setup-mapbox-token');
+  const startBtn = document.getElementById('setup-start');
+  const clearBtn = document.getElementById('setup-clear');
+  const isPk = (t) => typeof t === 'string' && t.trim().startsWith('pk.');
+  mInput.value = isPk(PRESET_MAPBOX_TOKEN) ? PRESET_MAPBOX_TOKEN : (localStorage.getItem(LS_MBTOKEN) ?? '');
+  const validate = () => { startBtn.disabled = !mInput.value.trim(); };
+  mInput.addEventListener('input', validate);
+  validate();
+  startBtn.addEventListener('click', () => {
+    MAPBOX_TOKEN = mInput.value.trim();
+    localStorage.setItem(LS_MBTOKEN, MAPBOX_TOKEN);
+    document.getElementById('setup-overlay').style.display = 'none';
+    startApp();
+  });
+  clearBtn.addEventListener('click', () => {
+    localStorage.removeItem(LS_MBTOKEN);
+    mInput.value = isPk(PRESET_MAPBOX_TOKEN) ? PRESET_MAPBOX_TOKEN : '';
+    validate();
+    clearBtn.textContent = '✅ 削除しました';
+    setTimeout(() => clearBtn.textContent = '保存済みトークンを削除', 2000);
+  });
+  mInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !startBtn.disabled) startBtn.click(); });
+}
+
+// ============================================================
+// TILESET DROPDOWN
+// ============================================================
+const DEFAULT_TILESETS = ['mapbox.mapbox-streets-v8'];
+function initTilesetDropdown() {
+  const sel = document.getElementById('tileset-select');
+  DEFAULT_TILESETS.forEach(addTilesetOption);
+  sel.value = DEFAULT_TILESETS[0];
+  document.getElementById('tileset-add-btn').addEventListener('click', addTilesetFromInput);
+  document.getElementById('tileset-add-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addTilesetFromInput(); });
+}
+function addTilesetOption(ts) {
+  const sel = document.getElementById('tileset-select');
+  if ([...sel.options].some(o => o.value === ts)) { sel.value = ts; return; }
+  const opt = document.createElement('option');
+  opt.value = ts; opt.textContent = ts;
+  sel.appendChild(opt); sel.value = ts;
+}
+function addTilesetFromInput() {
+  const input = document.getElementById('tileset-add-input');
+  const ts = input.value.trim();
+  if (!ts) return;
+  addTilesetOption(ts); input.value = '';
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+function emptyFC() { return { type: 'FeatureCollection', features: [] }; }
+function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function time() { return new Date().toLocaleTimeString(); }
+function circledNum(n) { return (n >= 1 && n <= 20) ? String.fromCharCode(0x2460 + n - 1) : `(${n})`; }
+
+function metersToPixels(lngLat, radiusM) {
+  const center = map.project([lngLat.lng, lngLat.lat]);
+  const eastLng = lngLat.lng + radiusM / (111320 * Math.cos(lngLat.lat * Math.PI / 180));
+  const east = map.project([eastLng, lngLat.lat]);
+  return Math.abs(east.x - center.x);
+}
+
+function geoCircle(lng, lat, radiusM, points = 64) {
+  const coords = [];
+  const km = radiusM / 1000;
+  const dX = km / (111.320 * Math.cos(lat * Math.PI / 180));
+  const dY = km / 110.574;
+  for (let i = 0; i < points; i++) {
+    const t = (i / points) * 2 * Math.PI;
+    coords.push([lng + dX * Math.cos(t), lat + dY * Math.sin(t)]);
+  }
+  coords.push(coords[0]);
+  return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] } };
+}
+function firstCoord(geom) {
+  let c = geom?.coordinates;
+  while (Array.isArray(c) && Array.isArray(c[0])) c = c[0];
+  return c;
+}
+function getFieldValue(feature, field) {
+  if (field.startsWith('tilequery.')) return feature.properties?.tilequery?.[field.slice('tilequery.'.length)];
+  return feature.properties?.[field];
+}
+
+// ============================================================
+// SEARCH CONFIG STATE
+// ============================================================
+let proximityPoint = { lng: DEFAULT_LNG, lat: DEFAULT_LAT };
+const searchConfig = { types: [], navProfile: '', bboxEnabled: false, bboxRadius: 2000 };
+
+function initSearchConfig() {
+  const panel = document.getElementById('types-panel');
+  panel.innerHTML = SEARCH_TYPES.map(t => `<label><input type="checkbox" value="${t}" /> ${t}</label>`).join('');
+  panel.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      searchConfig.types = [...panel.querySelectorAll('input:checked')].map(c => c.value);
+      updateTypesBtn();
+    });
+  });
+  const typesBtn = document.getElementById('types-btn');
+  typesBtn.addEventListener('click', (e) => { e.stopPropagation(); panel.classList.toggle('open'); });
+  document.addEventListener('click', (e) => {
+    if (!document.getElementById('types-dropdown').contains(e.target)) panel.classList.remove('open');
+  });
+  document.getElementById('navprofile-select').addEventListener('change', (e) => { searchConfig.navProfile = e.target.value; });
+  document.getElementById('bbox-toggle-btn').addEventListener('click', () => {
+    searchConfig.bboxEnabled = !searchConfig.bboxEnabled; updateBboxBtn(); drawSearchBbox();
+  });
+  document.getElementById('bbox-radius').addEventListener('input', (e) => {
+    searchConfig.bboxRadius = Math.max(0, Number(e.target.value) || 0); drawSearchBbox();
+  });
+  updateTypesBtn(); updateBboxBtn(); updateProximityDisplay();
+}
+function updateTypesBtn() {
+  const n = searchConfig.types.length;
+  document.getElementById('types-btn').textContent = n ? `types (${n}) ▾` : 'types ▾';
+}
+function updateBboxBtn() {
+  const b = document.getElementById('bbox-toggle-btn');
+  b.textContent = `BBOX: ${searchConfig.bboxEnabled ? 'ON' : 'OFF'}`;
+  b.style.borderColor = searchConfig.bboxEnabled ? '#6ee7b7' : '#444';
+  b.style.color = searchConfig.bboxEnabled ? '#6ee7b7' : '#ccc';
+}
+function updateProximityDisplay() {
+  document.getElementById('prox-display').textContent =
+    `proximity: ${proximityPoint.lng.toFixed(6)}, ${proximityPoint.lat.toFixed(6)}`;
+}
+function searchBboxArray() {
+  if (!searchConfig.bboxEnabled) return null;
+  const { lng, lat } = proximityPoint;
+  const offset = searchConfig.bboxRadius / 111000;
+  return [ +(lng-offset).toFixed(6), +(lat-offset).toFixed(6), +(lng+offset).toFixed(6), +(lat+offset).toFixed(6) ];
+}
+function drawSearchBbox() {
+  const src = map?.getSource('search-bbox-src');
+  if (!src) return;
+  const bbox = searchBboxArray();
+  if (!bbox) { src.setData(emptyFC()); return; }
+  const [w, s, e, n] = bbox;
+  src.setData({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[w,s],[e,s],[e,n],[w,n],[w,s]]] } });
+}
+
+// ============================================================
+// TILEQUERY CONFIG STATE
+// ============================================================
+let tqLayers = [];            // リクエストの layers
+let projectionFields = [];    // 表示抽出フィールド（複数）
+let lastTq = null;            // { qid, headText, feats, entry, mode }
+let styleLayers = [];         // QRF用: スタイルレイヤーID一覧
+
+function populateTqLayersPanel(layerList) {
+  tqLayers = [];
+  const lpanel = document.getElementById('tqlayers-panel');
+  lpanel.innerHTML = layerList.map(l => `<label><input type="checkbox" value="${l}" /> ${l}</label>`).join('');
+  lpanel.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      tqLayers = [...lpanel.querySelectorAll('input:checked')].map(c => c.value);
+      updateTqLayersBtn();
+    });
+  });
+  updateTqLayersBtn();
+}
+
+function initTqConfig() {
+  // layers (複数)
+  populateTqLayersPanel(STREETS_LAYERS);
+  const lbtn = document.getElementById('tqlayers-btn');
+  lbtn.addEventListener('click', (e) => { e.stopPropagation(); document.getElementById('tqlayers-panel').classList.toggle('open'); });
+  document.addEventListener('click', (e) => {
+    if (!document.getElementById('tqlayers-dropdown').contains(e.target)) document.getElementById('tqlayers-panel').classList.remove('open');
+  });
+
+  // 表示フィールド (複数)
+  const fpanel = document.getElementById('fields-panel');
+  fpanel.innerHTML = FIELD_CANDIDATES.map(f => `<label><input type="checkbox" value="${f}" /> ${f}</label>`).join('');
+  fpanel.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      projectionFields = [...fpanel.querySelectorAll('input:checked')].map(c => c.value);
+      updateFieldsBtn();
+      renderLastTq();
+    });
+  });
+  const fbtn = document.getElementById('fields-btn');
+  fbtn.addEventListener('click', (e) => { e.stopPropagation(); fpanel.classList.toggle('open'); });
+  document.addEventListener('click', (e) => {
+    if (!document.getElementById('fields-dropdown').contains(e.target)) fpanel.classList.remove('open');
+  });
+  document.getElementById('fields-clear-btn').addEventListener('click', () => {
+    projectionFields = [];
+    fpanel.querySelectorAll('input:checked').forEach(c => c.checked = false);
+    updateFieldsBtn();
+    renderLastTq();
+  });
+
+  updateTqLayersBtn(); updateFieldsBtn();
+}
+function updateTqLayersBtn() {
+  const n = tqLayers.length;
+  const label = queryMode === 'qrf' ? 'style layers' : 'layers';
+  document.getElementById('tqlayers-btn').textContent = n ? `${label} (${n}) ▾` : `${label} ▾`;
+}
+function updateFieldsBtn() {
+  const n = projectionFields.length;
+  document.getElementById('fields-btn').textContent = n ? `表示フィールド (${n}) ▾` : '表示フィールド ▾';
+}
+
+// 直近のTilequery/QRF結果を再描画（projection適用）
+function renderLastTq() {
+  if (!lastTq) { document.getElementById('tq-filter-stat').textContent = ''; return; }
+  const { qid, headText, feats, entry, mode } = lastTq;
+
+  if (map.getSource('tq-results-src')) {
+    map.getSource('tq-results-src').setData({
+      type: 'FeatureCollection',
+      features: feats.map((f, i) => {
+        const geomRaw = mode === 'qrf'
+          ? (f.geometry?.type?.toLowerCase() ?? 'point')
+          : (f.properties?.tilequery?.geometry ?? 'point');
+        const normGeom = geomRaw.includes('polygon') ? 'polygon' : geomRaw.includes('line') ? 'linestring' : 'point';
+        const c = firstCoord(f.geometry);
+        const displayGeom = c ? { type: 'Point', coordinates: c } : f.geometry;
+        return {
+          type: 'Feature', geometry: displayGeom,
+          properties: { __qid: qid, __idx: i, __geom: normGeom },
+        };
+      }),
+    });
+  }
+  if (map.getSource('tq-highlight-src')) map.getSource('tq-highlight-src').setData(emptyFC());
+
+  const projDesc = projectionFields.length ? ` | fields: ${projectionFields.join(', ')}` : '';
+  renderTqEntry(entry, qid, `${headText} | ${feats.length} features${projDesc}`, feats, mode);
+
+  document.getElementById('tq-filter-stat').textContent =
+    `${feats.length} 件` + (projectionFields.length ? ` / 抽出 ${projectionFields.length} フィールド` : '（全フィールド表示）');
+  applyIsochroneHighlight();
+}
+
+// ============================================================
+// MAP
+// ============================================================
+let map = null;
+let queryMarker = null;
+let hoverPopup = null;
+const featureStore = {};
+const queryModeStore = {}; // qid -> 'tilequery' | 'qrf'
+let queryMode = 'tilequery';
+let queryCounter = 0;
+
+function initMap() {
+  mapboxgl.accessToken = MAPBOX_TOKEN;
+  map = new mapboxgl.Map({ container: 'map', style: MAPBOX_STYLE, center: [DEFAULT_LNG, DEFAULT_LAT], zoom: 15 });
+  hoverPopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, offset: 8 });
+
+  map.on('style.load', () => {
+    map.resize();
+    styleLayers = map.getStyle().layers.map(l => l.id);
+    if (queryMode === 'qrf') populateTqLayersPanel(styleLayers);
+
+    // search bbox (緑破線)
+    map.addSource('search-bbox-src', { type: 'geojson', data: emptyFC() });
+    map.addLayer({ id: 'search-bbox-fill', slot: 'top', type: 'fill', source: 'search-bbox-src',
+      paint: { 'fill-color': '#10b981', 'fill-opacity': 0.06 } });
+    map.addLayer({ id: 'search-bbox-line', slot: 'top', type: 'line', source: 'search-bbox-src',
+      paint: { 'line-color': '#10b981', 'line-width': 2, 'line-dasharray': [2, 1], 'line-opacity': 0.9 } });
+
+    // isochrone polygon (緑)
+    map.addSource('isochrone-src', { type: 'geojson', data: emptyFC() });
+    map.addLayer({ id: 'isochrone-fill', slot: 'top', type: 'fill', source: 'isochrone-src',
+      paint: { 'fill-color': '#10b981', 'fill-opacity': 0.15 } });
+    map.addLayer({ id: 'isochrone-line', slot: 'top', type: 'line', source: 'isochrone-src',
+      paint: { 'line-color': '#10b981', 'line-width': 2, 'line-opacity': 0.9 } });
+
+    // isochrone 内フィーチャーハイライト (緑の大きい丸)
+    map.addSource('tq-iso-match-src', { type: 'geojson', data: emptyFC() });
+    map.addLayer({ id: 'tq-iso-match', slot: 'top', type: 'circle', source: 'tq-iso-match-src',
+      paint: { 'circle-radius': 9, 'circle-color': '#10b981', 'circle-opacity': 0.85,
+               'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+
+    // tilequery radius (青)
+    map.addSource('radius-src', { type: 'geojson', data: emptyFC() });
+    map.addLayer({ id: 'radius-fill', slot: 'top', type: 'fill', source: 'radius-src', paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.08 } });
+    map.addLayer({ id: 'radius-line', slot: 'top', type: 'line', source: 'radius-src', paint: { 'line-color': '#2563eb', 'line-width': 2, 'line-opacity': 0.8 } });
+
+    // tilequery results (常にPoint。元ジオメトリ種別で色分け)
+    map.addSource('tq-results-src', { type: 'geojson', data: emptyFC() });
+    map.addLayer({ id: 'tq-results', slot: 'top', type: 'circle', source: 'tq-results-src',
+      paint: {
+        'circle-radius': 5,
+        'circle-color': ['match', ['get', '__geom'], 'polygon', '#a855f7', 'linestring', '#f59e0b', '#e74c3c'],
+        'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5,
+      } });
+
+    // highlight (橙)
+    map.addSource('tq-highlight-src', { type: 'geojson', data: emptyFC() });
+    map.addLayer({ id: 'tq-highlight-circle', slot: 'top', type: 'circle', source: 'tq-highlight-src',
+      paint: { 'circle-radius': 9, 'circle-color': '#f59e0b', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+
+    drawSearchBbox();
+
+    // hover: layer / geom
+    map.on('mousemove', (e) => {
+      const layers = INTERACTIVE.filter(l => map.getLayer(l));
+      const hits = layers.length ? map.queryRenderedFeatures(e.point, { layers }) : [];
+      if (hits.length) {
+        map.getCanvas().style.cursor = 'pointer';
+        const p = hits[0].properties;
+        const orig = featureStore[p.__qid]?.[p.__idx];
+        const featMode = queryModeStore[p.__qid] ?? 'tilequery';
+        const layerName = featMode === 'qrf' ? (orig?.layer?.id ?? '(layer不明)') : (orig?.properties?.tilequery?.layer ?? '(layer不明)');
+        const geom = featMode === 'qrf' ? (orig?.geometry?.type ?? '?') : (orig?.properties?.tilequery?.geometry ?? '?');
+        hoverPopup.setLngLat(e.lngLat)
+          .setHTML(`<div style="font-size:12px;font-family:monospace;color:#222;">${escapeHtml(layerName)} <span style="color:#888;">(${escapeHtml(geom)})</span></div>`)
+          .addTo(map);
+      } else {
+        map.getCanvas().style.cursor = '';
+        hoverPopup.remove();
+      }
+    });
+  });
+
+  map.on('contextmenu', (e) => {
+    runIsochrone(e.lngLat.lng, e.lngLat.lat);
+  });
+
+  map.on('click', (e) => {
+    const layers = INTERACTIVE.filter(l => map.getLayer(l));
+    const hits = layers.length ? map.queryRenderedFeatures(e.point, { layers }) : [];
+    if (hits.length) { handleFeatureClick(hits[0]); return; }
+
+    proximityPoint = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+    updateProximityDisplay();
+    drawSearchBbox();
+    if (queryMode === 'tilequery') {
+      runTilequery(e.lngLat.lat, e.lngLat.lng);
+    } else {
+      runQueryRenderedFeatures(e.point, e.lngLat);
+    }
+  });
+}
+
+function handleFeatureClick(f) {
+  const qid = f.properties.__qid, idx = f.properties.__idx;
+  const orig = featureStore[qid]?.[idx];
+  if (orig && map.getSource('tq-highlight-src')) {
+    const c = firstCoord(orig.geometry);
+    const highlightGeom = c ? { type: 'Point', coordinates: c } : orig.geometry;
+    map.getSource('tq-highlight-src').setData({ type: 'Feature', geometry: highlightGeom, properties: {} });
+  }
+  const el = document.getElementById(`feat-${qid}-${idx}`);
+  if (el) {
+    el.style.display = '';
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.querySelectorAll('.feature-block.flash').forEach(b => b.classList.remove('flash'));
+    el.classList.add('flash');
+  }
+}
+
+// ============================================================
+// SEARCH BOX API
+// ============================================================
+let searchCounter = 0;
+let searchMarkers = [];
+let latestSearchSid = 0;
+let latestSearchResults = [];
+
+function buildSearchParams(query) {
+  const params = new URLSearchParams({
+    q: query, language: 'ja', country: 'jp', limit: '30',
+    proximity: `${proximityPoint.lng},${proximityPoint.lat}`,
+  });
+  const bbox = searchBboxArray();
+  if (bbox) params.set('bbox', bbox.join(','));
+  if (searchConfig.types.length) params.set('types', searchConfig.types.join(','));
+  if (searchConfig.navProfile)   params.set('navigation_profile', searchConfig.navProfile);
+  return params;
+}
+
+function buildSearchUrl(query) {
+  const params = buildSearchParams(query);
+  params.set('access_token', MAPBOX_TOKEN);
+  return `https://api.mapbox.com/search/searchbox/v1/forward?${params}`;
+}
+function buildSearchUrlForDisplay(query) {
+  const params = buildSearchParams(query);
+  params.set('access_token', '****');
+  return `GET https://api.mapbox.com/search/searchbox/v1/forward?${params}`;
+}
+
+async function searchMapbox(query) {
+  const res = await fetch(buildSearchUrl(query));
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.features ?? []).map(f => ({
+    ...f.properties,
+    coordinates: {
+      longitude: f.geometry?.coordinates?.[0] ?? 0,
+      latitude:  f.geometry?.coordinates?.[1] ?? 0,
+    },
+  }));
+}
+
+function plotSearchMarkers(results) {
+  searchMarkers.forEach(m => m && m.remove());
+  searchMarkers = [];
+  const bounds = new mapboxgl.LngLatBounds();
+  let validCount = 0;
+
+  results.forEach((r, i) => {
+    const lng = r.coordinates.longitude, lat = r.coordinates.latitude;
+    const valid = Number.isFinite(lng) && Number.isFinite(lat) && !(lng === 0 && lat === 0);
+    if (!valid) { searchMarkers.push(null); return; }
+
+    const el = document.createElement('div');
+    Object.assign(el.style, {
+      width: '26px', height: '26px', background: '#2563eb', borderRadius: '50%',
+      color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: '16px', fontWeight: 'bold', border: '2px solid white',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.4)', cursor: 'pointer', lineHeight: '1',
+    });
+    el.textContent = circledNum(i + 1);
+    const marker = new mapboxgl.Marker({ element: el })
+      .setLngLat([lng, lat])
+      .setPopup(new mapboxgl.Popup({ offset: 16 })
+        .setHTML(`<b>${escapeHtml(r.name ?? '')}</b><br/><span style="font-size:11px">${escapeHtml(r.full_address ?? '')}</span>`))
+      .addTo(map);
+
+    searchMarkers.push(marker);
+    bounds.extend([lng, lat]);
+    validCount++;
+  });
+  return { bounds, validCount };
+}
+
+async function doSearch() {
+  const query = document.getElementById('search-input').value.trim();
+  if (!query) return;
+  const sid = ++searchCounter;
+  const entry = logPlaceholder(searchBody(), `⏳ 検索中... "${query}"`, 'search');
+  try {
+    const results = await searchMapbox(query);
+    latestSearchSid = sid;
+    latestSearchResults = results;
+    const { bounds, validCount } = plotSearchMarkers(results);
+    if (validCount === 1) {
+      map.flyTo({ center: bounds.getCenter(), zoom: 15 });
+    } else if (validCount > 1) {
+      map.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 800 });
+    }
+    renderSearchEntry(entry, sid, query, results);
+  } catch (e) {
+    renderError(entry, `❌ 検索失敗: ${e.message}`);
+  }
+}
+
+function renderSearchEntry(entry, sid, query, results) {
+  entry.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'log-head search';
+  head.textContent = `[${time()}] 🔍 "${query}" | ${results.length} results`;
+  entry.appendChild(head);
+
+  const urlLine = document.createElement('div');
+  urlLine.className = 'log-url';
+  urlLine.textContent = buildSearchUrlForDisplay(query);
+  entry.appendChild(urlLine);
+
+  results.forEach((r, i) => {
+    const json = JSON.stringify(r, null, 2);
+    const block = document.createElement('div');
+    block.className = 'feature-block search';
+    block.id = `sr-${sid}-${i}`;
+    block.dataset.search = json.toLowerCase();
+
+    const fhead = document.createElement('div');
+    fhead.className = 'feature-head';
+    const cat = [r.feature_type, ...(r.poi_category ?? [])].filter(Boolean).join(' · ');
+    fhead.textContent = `${circledNum(i + 1)}  ${r.name ?? ''}${cat ? '  [' + cat + ']' : ''}`;
+    fhead.addEventListener('click', () => {
+      if (sid === latestSearchSid && searchMarkers[i]) {
+        map.flyTo({ center: [r.coordinates.longitude, r.coordinates.latitude], zoom: 16 });
+        if (!searchMarkers[i].getPopup().isOpen()) searchMarkers[i].togglePopup();
+      }
+    });
+
+    const pre = document.createElement('pre');
+    pre.className = 'feature-json';
+    pre.textContent = json;
+
+    block.appendChild(fhead);
+    block.appendChild(pre);
+    entry.appendChild(block);
+  });
+  filterPane(searchBody(), document.getElementById('search-filter').value);
+  applyIsochroneHighlight();
+}
+
+// ============================================================
+// TILEQUERY
+// ============================================================
+async function runTilequery(lat, lng) {
+  const radius   = Math.max(0, Number(document.getElementById('radius-input').value) || 0);
+  const tileset  = document.getElementById('tileset-select').value;
+  const geometry = document.getElementById('geometry-select').value;
+
+  if (queryMarker) queryMarker.remove();
+  queryMarker = new mapboxgl.Marker({ color: '#f59e0b' }).setLngLat([lng, lat]).addTo(map);
+  if (map.getSource('radius-src')) map.getSource('radius-src').setData(radius > 0 ? geoCircle(lng, lat, radius) : emptyFC());
+  if (map.getSource('tq-highlight-src')) map.getSource('tq-highlight-src').setData(emptyFC());
+
+  let url = `https://api.mapbox.com/v4/${tileset}/tilequery/${lng},${lat}.json`
+          + `?radius=${radius}&limit=${TQ_LIMIT}&dedupe&access_token=${MAPBOX_TOKEN}`;
+  if (geometry) url += `&geometry=${geometry}`;
+  if (tqLayers.length) url += `&layers=${encodeURIComponent(tqLayers.join(','))}`;
+
+  const qid = ++queryCounter;
+  const baseHead = `${lng.toFixed(6)},${lat.toFixed(6)} | ${tileset} | radius=${radius}m | geom=${geometry || 'all'}`
+                 + (tqLayers.length ? ` | layers=${tqLayers.join(',')}` : '');
+  const entry = logPlaceholder(tqBody(), `⏳ 実行中... ${baseHead}`);
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    const data  = await res.json();
+    const feats = data.features ?? [];
+    featureStore[qid] = feats;
+    queryModeStore[qid] = 'tilequery';
+
+    lastTq = { qid, headText: `📍 ${baseHead}`, feats, entry, mode: 'tilequery' };
+    renderLastTq();
+  } catch (err) {
+    renderError(entry, `❌ Tilequery 失敗: ${err.message}`);
+    lastTq = null;
+  }
+}
+
+function renderTqEntry(entry, qid, headText, feats, mode = 'tilequery') {
+  entry.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'log-head';
+  head.textContent = `[${time()}] ${headText}`;
+  entry.appendChild(head);
+
+  // レイヤー別カウント
+  if (feats.length > 0) {
+    const counts = {};
+    feats.forEach(f => {
+      const l = mode === 'qrf' ? (f.layer?.id ?? '?') : (f.properties?.tilequery?.layer ?? '?');
+      counts[l] = (counts[l] ?? 0) + 1;
+    });
+    const bar = document.createElement('div');
+    bar.className = 'layer-count-bar';
+    Object.entries(counts).sort((a, b) => b[1] - a[1]).forEach(([layer, count]) => {
+      const tag = document.createElement('span');
+      tag.className = 'layer-count-tag';
+      tag.textContent = `${layer}: ${count}`;
+      tag.title = `${layer} のフィーチャーだけ表示`;
+      tag.addEventListener('click', () => {
+        const filterInput = document.getElementById('tq-filter');
+        filterInput.value = layer;
+        filterPane(tqBody(), layer);
+      });
+      bar.appendChild(tag);
+    });
+    entry.appendChild(bar);
+  }
+
+  feats.forEach((f, i) => {
+    const json = JSON.stringify(f, null, 2);
+    const layerName = mode === 'qrf' ? (f.layer?.id ?? '?') : (f.properties?.tilequery?.layer ?? '?');
+    const geomType  = mode === 'qrf' ? (f.geometry?.type ?? '?') : (f.properties?.tilequery?.geometry ?? '?');
+    const name = f.properties?.name_ja || f.properties?.name || f.properties?.type || '';
+
+    const block = document.createElement('div');
+    block.className = 'feature-block';
+    block.id = `feat-${qid}-${i}`;
+    block.dataset.search = json.toLowerCase();   // テキスト絞り込みは全文対象
+
+    const fhead = document.createElement('div');
+    fhead.className = 'feature-head';
+    fhead.textContent = `#${i}  [${layerName}/${geomType}] ${name}`;
+    fhead.addEventListener('click', () => {
+      const orig = featureStore[qid]?.[i];
+      if (orig && map.getSource('tq-highlight-src')) {
+        const c = firstCoord(orig.geometry);
+        const highlightGeom = c ? { type: 'Point', coordinates: c } : orig.geometry;
+        map.getSource('tq-highlight-src').setData({ type: 'Feature', geometry: highlightGeom, properties: {} });
+        if (c) map.easeTo({ center: c });
+      }
+    });
+    block.appendChild(fhead);
+
+    if (projectionFields.length) {
+      // 指定フィールドだけ抽出表示
+      const proj = document.createElement('div');
+      proj.className = 'proj';
+      proj.innerHTML = projectionFields.map(field => {
+        const v = getFieldValue(f, field);
+        const isNull = (v === undefined || v === null);
+        const valStr = isNull ? 'null' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+        return `<div class="proj-row"><span class="proj-key">${escapeHtml(field)}</span><span class="proj-val${isNull ? ' proj-null' : ''}">${escapeHtml(valStr)}</span></div>`;
+      }).join('');
+      block.appendChild(proj);
+    } else {
+      // 全フィールド(JSON)
+      const pre = document.createElement('pre');
+      pre.className = 'feature-json';
+      pre.textContent = json;
+      block.appendChild(pre);
+    }
+
+    entry.appendChild(block);
+  });
+
+  filterPane(tqBody(), document.getElementById('tq-filter').value);
+}
+
+// ============================================================
+// CONSOLE (汎用)
+// ============================================================
+function searchBody() { return document.getElementById('search-body'); }
+function tqBody()     { return document.getElementById('tq-body'); }
+
+function logPlaceholder(bodyEl, text, headClass = '') {
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  const head = document.createElement('div');
+  head.className = 'log-head' + (headClass ? ' ' + headClass : '');
+  head.textContent = `[${time()}] ${text}`;
+  entry.appendChild(head);
+  bodyEl.prepend(entry);
+  return entry;
+}
+function renderError(entry, msg) {
+  entry.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'log-head err';
+  head.textContent = `[${time()}] ${msg}`;
+  entry.appendChild(head);
+}
+
+function filterPane(bodyEl, rawQ) {
+  const q = (rawQ || '').trim().toLowerCase();
+  bodyEl.querySelectorAll('.feature-block').forEach(b => {
+    b.style.display = (!q || (b.dataset.search || '').includes(q)) ? '' : 'none';
+  });
+  bodyEl.querySelectorAll('.log-entry').forEach(entry => {
+    const blocks = entry.querySelectorAll('.feature-block');
+    if (blocks.length === 0) return;
+    entry.style.display = [...blocks].some(b => b.style.display !== 'none') ? '' : 'none';
+  });
+}
+
+document.getElementById('search-filter').addEventListener('input', (e) => filterPane(searchBody(), e.target.value));
+document.getElementById('tq-filter').addEventListener('input', (e) => filterPane(tqBody(), e.target.value));
+
+document.getElementById('search-clear-btn').addEventListener('click', () => {
+  searchBody().innerHTML = '<p class="hint" style="padding:8px;">クリアしました。</p>';
+});
+document.getElementById('tq-clear-btn').addEventListener('click', () => {
+  clearTqResults();
+});
+
+document.getElementById('search-btn').addEventListener('click', doSearch);
+document.getElementById('search-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+
+// ============================================================
+// ISOCHRONE
+// ============================================================
+const isoConfig = { profile: 'walking', mode: 'minutes', minutes: 1, meters: 50 };
+let isoMarker = null;
+let isoCounter = 0;
+let currentIsochrone = null; // 最新の isochrone GeoJSON
+
+function isoBody() { return document.getElementById('iso-body'); }
+
+function initIsoConfig() {
+  document.getElementById('iso-profile').addEventListener('change', (e) => { isoConfig.profile = e.target.value; });
+  document.getElementById('iso-minutes').addEventListener('input', (e) => { isoConfig.minutes = Math.max(1, Number(e.target.value) || 1); });
+  document.getElementById('iso-meters').addEventListener('input', (e) => { isoConfig.meters = Math.max(1, Number(e.target.value) || 1); });
+  document.getElementById('iso-mode-minutes').addEventListener('click', () => setIsoMode('minutes'));
+  document.getElementById('iso-mode-meters').addEventListener('click', () => setIsoMode('meters'));
+  document.getElementById('iso-clear-btn').addEventListener('click', clearIsochrone);
+  document.getElementById('iso-filter').addEventListener('input', (e) => filterPane(isoBody(), e.target.value));
+}
+
+function setIsoMode(mode) {
+  isoConfig.mode = mode;
+  document.getElementById('iso-mode-minutes').classList.toggle('active', mode === 'minutes');
+  document.getElementById('iso-mode-meters').classList.toggle('active', mode === 'meters');
+  document.getElementById('iso-minutes-field').style.display = mode === 'minutes' ? '' : 'none';
+  document.getElementById('iso-meters-field').style.display = mode === 'meters' ? '' : 'none';
+}
+
+function clearIsoHighlights() {
+  document.querySelectorAll('.feature-block.iso-match').forEach(b => b.classList.remove('iso-match'));
+  searchMarkers.forEach(m => {
+    if (!m) return;
+    const el = m.getElement();
+    el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.4)';
+    el.style.borderColor = 'white';
+  });
+  if (map?.getSource('tq-iso-match-src')) map.getSource('tq-iso-match-src').setData(emptyFC());
+}
+
+function applyIsochroneHighlight() {
+  if (!currentIsochrone?.features?.length) return;
+  const isoPolygons = currentIsochrone.features.filter(f =>
+    f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon'
+  );
+  if (!isoPolygons.length) return;
+
+  const isInside = (lng, lat) => {
+    const pt = turf.point([lng, lat]);
+    return isoPolygons.some(poly => turf.booleanPointInPolygon(pt, poly));
+  };
+
+  // Tilequery / QRF フィーチャー
+  const matchGeoms = [];
+  if (lastTq) {
+    lastTq.feats.forEach((f, i) => {
+      const c = firstCoord(f.geometry);
+      const inside = c ? isInside(c[0], c[1]) : false;
+      const el = document.getElementById(`feat-${lastTq.qid}-${i}`);
+      if (el) el.classList.toggle('iso-match', inside);
+      if (inside && c) matchGeoms.push({ type: 'Feature', geometry: { type: 'Point', coordinates: c }, properties: {} });
+    });
+  }
+  if (map?.getSource('tq-iso-match-src')) {
+    map.getSource('tq-iso-match-src').setData({ type: 'FeatureCollection', features: matchGeoms });
+  }
+
+  // Search Box 結果
+  latestSearchResults.forEach((r, i) => {
+    const { longitude: lng, latitude: lat } = r.coordinates;
+    if (!Number.isFinite(lng) || !Number.isFinite(lat) || (lng === 0 && lat === 0)) return;
+    const inside = isInside(lng, lat);
+    const marker = searchMarkers[i];
+    if (marker) {
+      const el = marker.getElement();
+      el.style.boxShadow = inside ? '0 0 0 3px #10b981, 0 2px 4px rgba(0,0,0,0.4)' : '0 2px 4px rgba(0,0,0,0.4)';
+      el.style.borderColor = inside ? '#10b981' : 'white';
+    }
+    const block = document.getElementById(`sr-${latestSearchSid}-${i}`);
+    if (block) block.classList.toggle('iso-match', inside);
+  });
+}
+
+function clearIsochrone() {
+  currentIsochrone = null;
+  isoBody().innerHTML = '<p class="hint" style="padding:8px;">クリアしました。</p>';
+  if (map?.getSource('isochrone-src')) map.getSource('isochrone-src').setData(emptyFC());
+  if (isoMarker) { isoMarker.remove(); isoMarker = null; }
+  clearIsoHighlights();
+}
+
+async function runIsochrone(lng, lat) {
+  if (isoMarker) isoMarker.remove();
+  const el = document.createElement('div');
+  el.className = 'iso-marker-el';
+  isoMarker = new mapboxgl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
+
+  const { profile, mode, minutes, meters } = isoConfig;
+  const contourParam = mode === 'minutes' ? `contours_minutes=${minutes}` : `contours_meters=${meters}`;
+  const contourDesc  = mode === 'minutes' ? `${minutes}分` : `${meters}m`;
+
+  const url        = `https://api.mapbox.com/isochrone/v1/mapbox/${profile}/${lng},${lat}?${contourParam}&polygons=true&access_token=${MAPBOX_TOKEN}`;
+  const displayUrl = `GET https://api.mapbox.com/isochrone/v1/mapbox/${profile}/${lng.toFixed(6)},${lat.toFixed(6)}?${contourParam}&polygons=true&access_token=****`;
+
+  const baseHead = `${lng.toFixed(6)},${lat.toFixed(6)} | ${profile} | ${contourDesc}`;
+  const entry = logPlaceholder(isoBody(), `⏳ 実行中... ${baseHead}`);
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    const data = await res.json();
+
+    currentIsochrone = data;
+    if (map.getSource('isochrone-src')) map.getSource('isochrone-src').setData(data);
+    clearIsoHighlights();
+    applyIsochroneHighlight();
+
+    entry.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'log-head';
+    head.style.cssText = 'color:#6ee7b7;background:#0d2a1a;';
+    head.textContent = `[${time()}] 🟢 ${baseHead} | ${data.features?.length ?? 0} contours`;
+    entry.appendChild(head);
+
+    const urlLine = document.createElement('div');
+    urlLine.className = 'log-url';
+    urlLine.textContent = displayUrl;
+    entry.appendChild(urlLine);
+
+    (data.features ?? []).forEach((f, i) => {
+      const json = JSON.stringify(f, null, 2);
+      const block = document.createElement('div');
+      block.className = 'feature-block';
+      block.dataset.search = json.toLowerCase();
+
+      const fhead = document.createElement('div');
+      fhead.className = 'feature-head';
+      fhead.style.cssText = 'color:#6ee7b7;background:#0d2a1a;';
+      const metric = f.properties?.contour_meters != null
+        ? `${f.properties.contour_meters}m`
+        : `${f.properties?.contour ?? '?'}min`;
+      fhead.textContent = `#${i}  [${f.geometry?.type ?? '?'}] ${metric}`;
+
+      const pre = document.createElement('pre');
+      pre.className = 'feature-json';
+      pre.textContent = json;
+      pre.style.display = 'none';
+      fhead.addEventListener('click', () => { pre.style.display = pre.style.display === 'none' ? '' : 'none'; });
+
+      block.appendChild(fhead);
+      block.appendChild(pre);
+      entry.appendChild(block);
+    });
+
+    filterPane(isoBody(), document.getElementById('iso-filter').value);
+  } catch (err) {
+    renderError(entry, `❌ Isochrone 失敗: ${err.message}`);
+  }
+}
+
+// ============================================================
+// QUERY MODE SWITCH
+// ============================================================
+function clearTqResults() {
+  const hint = queryMode === 'tilequery'
+    ? '地図をクリックすると Tilequery を実行。表示フィールドを選ぶと、そのフィールドだけ抽出表示します。'
+    : '地図をクリックすると queryRenderedFeatures を実行。現在表示中のレイヤーからフィーチャーを取得します。';
+  tqBody().innerHTML = `<p class="hint" id="tq-hint" style="padding:8px;">${hint}</p>`;
+  lastTq = null;
+  document.getElementById('tq-filter-stat').textContent = '';
+  if (map?.getSource('tq-results-src'))  map.getSource('tq-results-src').setData(emptyFC());
+  if (map?.getSource('tq-highlight-src')) map.getSource('tq-highlight-src').setData(emptyFC());
+  if (map?.getSource('radius-src')) map.getSource('radius-src').setData(emptyFC());
+  if (queryMarker) { queryMarker.remove(); queryMarker = null; }
+}
+
+function setQueryMode(mode) {
+  queryMode = mode;
+
+  const isTq = mode === 'tilequery';
+  const accentColor = isTq ? '#60a5fa' : '#c084fc';
+
+  document.getElementById('mode-tilequery').classList.toggle('active', isTq);
+  document.getElementById('mode-qrf').classList.toggle('active', !isTq);
+  document.getElementById('tq-only-controls').style.display = isTq ? '' : 'none';
+
+  document.getElementById('tq-config-label').textContent = isTq ? '🖥 Tilequery設定' : '🖥 QRF設定';
+  document.getElementById('tq-config-label').style.color = accentColor;
+  document.getElementById('tq-section-title').textContent = isTq ? '🖥 Tilequery' : '🖥 queryRenderedFeatures';
+  document.getElementById('tq-section-title').style.color = accentColor;
+  document.getElementById('header-hint').textContent = isTq
+    ? '地図クリックで proximity 設定 + Tilequery'
+    : '地図クリックで queryRenderedFeatures 実行（現在描画中のフィーチャーを取得）';
+
+  populateTqLayersPanel(isTq ? STREETS_LAYERS : (styleLayers.length ? styleLayers : []));
+  clearTqResults();
+}
+
+// ============================================================
+// QUERY RENDERED FEATURES
+// ============================================================
+async function runQueryRenderedFeatures(point, lngLat) {
+  if (queryMarker) queryMarker.remove();
+  queryMarker = new mapboxgl.Marker({ color: '#f59e0b' }).setLngLat([lngLat.lng, lngLat.lat]).addTo(map);
+  if (map.getSource('tq-highlight-src')) map.getSource('tq-highlight-src').setData(emptyFC());
+
+  const radius = Math.max(0, Number(document.getElementById('radius-input').value) || 0);
+  if (map.getSource('radius-src')) map.getSource('radius-src').setData(radius > 0 ? geoCircle(lngLat.lng, lngLat.lat, radius) : emptyFC());
+
+  const pixelRadius = radius > 0 ? metersToPixels(lngLat, radius) : 0;
+  const screenCenter = map.project([lngLat.lng, lngLat.lat]);
+  const queryGeometry = radius > 0
+    ? [[screenCenter.x - pixelRadius, screenCenter.y - pixelRadius], [screenCenter.x + pixelRadius, screenCenter.y + pixelRadius]]
+    : point;
+
+  const qid = ++queryCounter;
+  const layerDesc = tqLayers.length ? ` | layers=${tqLayers.join(',')}` : ' | all layers';
+  const rangeDesc = radius > 0 ? ` | bbox(r=${radius}m ≈ ${Math.round(pixelRadius)}px)` : ' | point';
+  const baseHead = `${lngLat.lng.toFixed(6)},${lngLat.lat.toFixed(6)} | queryRenderedFeatures${rangeDesc}${layerDesc}`;
+  const entry = logPlaceholder(tqBody(), `⏳ 実行中... ${baseHead}`);
+
+  try {
+    const options = {};
+    if (tqLayers.length) options.layers = tqLayers;
+    const feats = map.queryRenderedFeatures(queryGeometry, options);
+    featureStore[qid] = feats;
+    queryModeStore[qid] = 'qrf';
+
+    lastTq = { qid, headText: `📍 ${baseHead}`, feats, entry, mode: 'qrf' };
+    renderLastTq();
+  } catch (err) {
+    renderError(entry, `❌ queryRenderedFeatures 失敗: ${err.message}`);
+    lastTq = null;
+  }
+}
+
+// ============================================================
+// APP START
+// ============================================================
+function startApp() {
+  initTilesetDropdown();
+  initSearchConfig();
+  initTqConfig();
+  initIsoConfig();
+  initMap();
+
+  document.getElementById('mode-tilequery').addEventListener('click', () => setQueryMode('tilequery'));
+  document.getElementById('mode-qrf').addEventListener('click', () => setQueryMode('qrf'));
+}
+initSetup();
+</script>
+</body>
+</html>
