@@ -38,5 +38,15 @@
     "title": "Geonator Lite",
     "description": "Headless one-shot POI search — single query in, ranked results out, no dialogue loop (Claude + Mapbox)",
     "path": "./geonator_lite/"
+  },
+  {
+    "title": "search_ai_compare_demo",
+    "description": "search_compareのAI比較版 — CSV取込対応",
+    "path": "./search_ai_compare/"
+  },
+  {
+    "title": "tilequery_isochrone_test",
+    "description": "Tilequery / Isochrone APIのテストツール",
+    "path": "./search_tilequery_isochrone_testツール/"
   }
 ]
