@@ -356,7 +356,7 @@ def cmd_analyze_ai(args: argparse.Namespace) -> None:
     analyze_trends_lib.write_long_tail_csv(long_tail_path, long_tail, order)
 
     # AIに渡すのはこの集計結果(summary_payload)だけ。元CSVの生データは渡さない。
-    summary_payload = ai_analyze_lib.build_summary_payload(order, top_queries, daily, usage)
+    summary_payload = ai_analyze_lib.build_summary_payload(order, top_queries, daily, usage, long_tail)
     try:
         ai_commentary = ai_analyze_lib.generate_commentary(summary_payload)
     except Exception as e:

@@ -170,15 +170,20 @@ analyze-ai  [suffix: trend_top_queries_result / trend_daily_category_result / tr
 --------------------------------------------------------------
 概要:
   analyze と同じA/B/C/D集計を行った上で、その集計結果をもとにLLM（Claude Sonnet 5、
-  プロキシ経由）にクエリ傾向のコメンタリーを書かせ、HTMLレポート上部に追加する版。
-  CSV4種の内容・出力先はanalyzeと全く同じ（HTMLだけ suffix が trend_report_ai になる）。
+  プロキシ経由）にクエリ傾向のコメンタリーを書かせる版。CSV4種の内容・出力先は
+  analyzeと全く同じ（HTMLだけ suffix が trend_report_ai になる）。
+
+  AIコメンタリーは2種類:
+  - レポート冒頭の全体サマリー（2〜3行の短い概況、overview）
+  - A〜D各セクションに埋め込む「AI Insight」枠（Aはセクション全体に1つ＋
+    カテゴリごとに1つずつ、B/C/Dはそれぞれセクション全体に1つ）
+  いずれも平易・簡潔な英語で書くようプロンプトで指示している。
 
   鉄則: AIに渡すのは analyze が計算する集計結果（カテゴリ別頻出クエリ上位N件・
-  日別カテゴリ件数・列指定率。ロングテール分布は現状AIコメンタリーの入力には
-  含めていない）だけで、入力CSVの生データ（行そのもの・query全件）は一切AIに
-  渡さない。集計データの組み立ては lib/ai_analyze.py の build_summary_payload を
-  参照。AI呼び出しに失敗した場合はコメンタリーなしでレポートを出力する
-  （処理全体は止まらない）。
+  日別カテゴリ件数・列指定率・ロングテール分布）だけで、入力CSVの生データ
+  （行そのもの・query全件）は一切AIに渡さない。集計データの組み立ては
+  lib/ai_analyze.py の build_summary_payload を参照。AI呼び出しに失敗した場合は
+  コメンタリー・AI Insightなしでレポートを出力する（処理全体は止まらない）。
 
 実行例:
   python3 main.py analyze-ai classified.csv

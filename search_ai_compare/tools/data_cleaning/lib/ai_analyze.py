@@ -2,12 +2,21 @@
 main.py analyze-ai サブコマンドが使う、クエリ傾向のAIコメンタリー生成ロジック。
 
 鉄則: AIへの入力は必ず、analyze相当の集計結果（カテゴリ別頻出クエリ・
-日別カテゴリ推移・列指定率クロス集計の要約）のみ。入力CSVの生データ
-（各行のqueryやdatetimeの全件など）は一切AIに渡さない。
-集計自体はlib/analyze_trends.pyの既存関数（compute_top_queries等）を
-そのまま使う（この集計はPython側のETLであり、AI呼び出しではない）。
+日別カテゴリ推移・列指定率クロス集計・ロングテール分布の要約）のみ。入力CSVの
+生データ（各行のqueryやdatetimeの全件など）は一切AIに渡さない。集計自体は
+lib/analyze_trends.pyの既存関数（compute_top_queries等）をそのまま使う
+（この集計はPython側のETLであり、AI呼び出しではない）。
 
 モデルはClaude Sonnet 5（プロキシ経由）。
+
+出力は2種類:
+  - overview: レポート冒頭に載せる2〜3行の全体サマリー
+  - insights: A/B/C/D各セクションに埋め込む短いコメンタリー
+      top_queries_overall        : Aセクション全体への一言
+      top_queries_by_category    : カテゴリごとの一言（{category: str}）
+      daily_trend                : Bセクション全体への一言
+      column_usage                : Cセクション全体への一言
+      long_tail                   : Dセクション全体への一言
 """
 
 import json
@@ -20,19 +29,29 @@ MODEL = "claude-sonnet-5"
 PROXY_URL = "https://okqfpyxf4oe6htegrlcgrwdssa0yoxcr.lambda-url.us-east-1.on.aws/"
 
 SYSTEM_PROMPT = """You are a data analyst reviewing aggregated search query log statistics.
-You will receive a JSON summary with three parts:
+You will receive a JSON summary with four parts:
   - top_queries_by_category: the most frequent queries per classification category
   - daily_category_counts: query counts per category per date
   - column_usage_rate: how often bbox/proximity/near were specified, per category
+  - long_tail_distribution: for the whole dataset and per category, how total search
+    volume breaks down by how often each query repeats (buckets like "1000+", "1")
 
-Write a short analysis of query trends based only on this summary. Respond with a
-JSON object with exactly two keys:
-  "overview": a 1-2 sentence summary of the overall picture
-  "highlights": a list of 3-6 short bullet-point strings, each one concrete
-    observation (a trend, spike, imbalance, or notable correlation) grounded in
-    the numbers given
+Write short, concrete observations grounded only in the numbers given. Use plain,
+simple, concise English — short sentences, no jargon, no filler words.
 
-Respond in English. Output JSON only, no markdown code fences, no extra text.
+Respond with a JSON object with exactly these keys:
+  "overview": 2-3 short sentences summarizing the overall picture across everything.
+  "insights": an object with exactly these keys:
+    "top_queries_overall": 1 short sentence about frequent queries overall.
+    "top_queries_by_category": an object with one short sentence for EACH category
+      listed in "categories" (use the exact category names as keys), about that
+      category's frequent queries.
+    "daily_trend": 1 short sentence about the daily category trend.
+    "column_usage": 1 short sentence about bbox/proximity/near usage differences.
+    "long_tail": 1 short sentence about the long-tail distribution (what share of
+      volume comes from rarely-repeated queries).
+
+Output JSON only, no markdown code fences, no extra text.
 """
 
 
@@ -41,6 +60,7 @@ def build_summary_payload(
     top_queries: dict[str, list[tuple[str, int]]],
     daily: dict[str, dict[str, int]],
     usage: dict[str, dict[str, int]],
+    long_tail: dict[str, dict],
     top_n_for_ai: int = 10,
 ) -> dict:
     """AIに渡す要約データを組み立てる。渡すのはこの関数が返す集計結果だけで、
@@ -65,17 +85,25 @@ def build_summary_payload(
             "near_rate_pct": round(stats.get("near", 0) / total * 100, 1) if total else 0.0,
         }
 
+    long_tail_summary = {}
+    for scope, data in long_tail.items():
+        long_tail_summary[scope] = {
+            label: {"unique_queries": b["unique_queries"], "volume_pct": round(b["volume_pct"], 1)}
+            for label, b in data["buckets"].items()
+        }
+
     return {
         "categories": order,
         "date_range": {"from": dates[0], "to": dates[-1]} if dates else {},
         "top_queries_by_category": top_queries_summary,
         "daily_category_counts": daily_summary,
         "column_usage_rate": usage_summary,
+        "long_tail_distribution": long_tail_summary,
     }
 
 
 def generate_commentary(summary_payload: dict) -> dict:
-    """要約データをLLMに送り、{"overview": str, "highlights": [str, ...]} を返す。"""
+    """要約データをLLMに送り、{"overview": str, "insights": {...}} を返す。"""
     body = {
         "model": MODEL,
         "max_tokens": 2048,
@@ -106,11 +134,11 @@ def generate_commentary(summary_payload: dict) -> dict:
     text = "".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
     text = parse_response_text(text)
 
-    # strict=False: "overview"/"highlights"の文中に生の改行等の制御文字が
+    # strict=False: overview/insightsの文中に生の改行等の制御文字が
     # そのまま混じっていても許容してパースする（strict=Trueだと
     # "Unterminated string" エラーになるケースがあった）
     result = json.loads(text, strict=False)
-    if not isinstance(result, dict) or "overview" not in result or "highlights" not in result:
+    if not isinstance(result, dict) or "overview" not in result or "insights" not in result:
         raise ValueError(f"LLM応答の形式が不正です: {result!r}")
 
     return result

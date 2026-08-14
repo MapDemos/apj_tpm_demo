@@ -225,7 +225,23 @@ def esc(s) -> str:
     return html.escape(str(s), quote=True)
 
 
-def render_top_queries_section(top_queries: dict[str, list[tuple[str, int]]], order: list[str], top_n: int) -> str:
+def render_ai_insight(text: str | None) -> str:
+    """A/B/C/D各セクションに埋め込む短いAIコメンタリー1本分のHTML。
+    textが無ければ何も出さない（analyzeの場合や生成失敗時はAI Insightごと非表示）。"""
+    if not text:
+        return ""
+    return f'<p class="ai-insight"><span class="ai-badge">AI</span> {esc(text)}</p>'
+
+
+def render_top_queries_section(
+    top_queries: dict[str, list[tuple[str, int]]],
+    order: list[str],
+    top_n: int,
+    insights: dict | None = None,
+) -> str:
+    overall_insight = insights.get("top_queries_overall") if insights else None
+    by_category_insights = (insights.get("top_queries_by_category") or {}) if insights else {}
+
     blocks = []
     for category in order:
         items = top_queries.get(category, [])
@@ -237,6 +253,7 @@ def render_top_queries_section(top_queries: dict[str, list[tuple[str, int]]], or
         <details class="card" {"open" if category == order[0] else ""}>
           <summary><span class="cat-dot" style="background:var(--cat-{esc(category)})"></span>{esc(category)}
             <span class="muted">({len(items)} queries)</span></summary>
+          {render_ai_insight(by_category_insights.get(category))}
           <table class="data-table">
             <thead><tr><th>#</th><th>query</th><th class="num">count</th></tr></thead>
             <tbody>{rows_html if rows_html else '<tr><td colspan="3" class="muted">No data</td></tr>'}</tbody>
@@ -245,11 +262,12 @@ def render_top_queries_section(top_queries: dict[str, list[tuple[str, int]]], or
     return f"""
     <section>
       <h2>A. Top Queries by Category (top {top_n})</h2>
+      {render_ai_insight(overall_insight)}
       {"".join(blocks)}
     </section>"""
 
 
-def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[str]) -> str:
+def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[str], insight: str | None = None) -> str:
     dates = sorted(daily.keys())
     legend = "".join(
         f'<span class="legend-item"><span class="swatch" style="background:var(--cat-{esc(c)})"></span>{esc(c)}</span>'
@@ -328,6 +346,7 @@ def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[
     return f"""
     <section>
       <h2>B. Daily Category Trend</h2>
+      {render_ai_insight(insight)}
       <div class="legend">{legend}</div>
       <div class="chart-frame">{svg}</div>
       <details class="card">
@@ -342,7 +361,7 @@ def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[
     </section>"""
 
 
-def render_column_usage_section(usage: dict[str, dict[str, int]], order: list[str]) -> str:
+def render_column_usage_section(usage: dict[str, dict[str, int]], order: list[str], insight: str | None = None) -> str:
     def metric_chart(col: str, label: str) -> str:
         rated = []
         for category in order:
@@ -382,6 +401,7 @@ def render_column_usage_section(usage: dict[str, dict[str, int]], order: list[st
     return f"""
     <section>
       <h2>C. Column Usage Rate by Category</h2>
+      {render_ai_insight(insight)}
       <div class="hbar-grid">
         {metric_chart("bbox", "bbox specified rate")}
         {metric_chart("proximity", "proximity specified rate")}
@@ -432,7 +452,7 @@ def _pie_slice_paths(data: dict, cx: float, cy: float, r: float) -> list[str]:
     return slices
 
 
-def render_long_tail_section(long_tail: dict[str, dict], order: list[str]) -> str:
+def render_long_tail_section(long_tail: dict[str, dict], order: list[str], insight: str | None = None) -> str:
     scopes = [ALL_CATEGORIES_SCOPE] + order
 
     legend = "".join(
@@ -470,6 +490,7 @@ def render_long_tail_section(long_tail: dict[str, dict], order: list[str]) -> st
     return f"""
     <section>
       <h2>D. Long-tail Distribution</h2>
+      {render_ai_insight(insight)}
       <p class="muted">Share of total search volume by how often each query repeats
         (bucketed by each query's total occurrence count). A high share in the
         low-frequency buckets means a lot of volume comes from queries that rarely
@@ -490,14 +511,14 @@ def render_long_tail_section(long_tail: dict[str, dict], order: list[str]) -> st
 
 
 def render_ai_commentary_section(commentary: dict) -> str:
+    """レポート冒頭の全体サマリー。2〜3行程度の短いoverviewだけを表示する
+    （個別の観察はA〜D各セクションのAI Insightに分散させているため、ここでは
+    箇条書きは持たない）。"""
     overview = esc(commentary.get("overview", ""))
-    highlights = commentary.get("highlights", []) or []
-    items = "".join(f"<li>{esc(h)}</li>" for h in highlights)
     return f"""
     <section class="ai-summary">
       <h2><span class="ai-badge">AI</span> Analysis Summary</h2>
       <p>{overview}</p>
-      <ul>{items}</ul>
     </section>"""
 
 
@@ -513,6 +534,8 @@ def render_html_report(
     long_tail: dict[str, dict] | None = None,
     ai_commentary: dict | None = None,
 ) -> str:
+    insights = ai_commentary.get("insights") if ai_commentary else None
+
     cat_vars_light = "\n".join(
         f"      --cat-{esc(c)}: {CATEGORY_COLORS_LIGHT[i % len(CATEGORY_COLORS_LIGHT)]};" for i, c in enumerate(order)
     )
@@ -611,6 +634,14 @@ def render_html_report(
   .ai-summary ul {{ margin: 0; padding-left: 1.25em; }}
   .ai-summary li {{ margin-bottom: 4px; font-size: 0.9375rem; }}
 
+  .ai-insight {{
+    display: flex; align-items: baseline; gap: 8px;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-left: 3px solid var(--series-1, #2a78d6); border-radius: 6px;
+    padding: 8px 12px; margin: 0 0 12px; font-size: 0.875rem; color: var(--text-primary);
+  }}
+  .ai-insight .ai-badge {{ flex-shrink: 0; }}
+
   .data-table {{
     width: 100%;
     border-collapse: collapse;
@@ -666,10 +697,10 @@ def render_html_report(
   <div class="meta">Input file: {esc(input_path)} / Total rows: {total_rows} / Generated at: {esc(generated_at)}</div>
 
   {render_ai_commentary_section(ai_commentary) if ai_commentary else ""}
-  {render_top_queries_section(top_queries, order, top_n)}
-  {render_daily_category_section(daily, order)}
-  {render_column_usage_section(usage, order)}
-  {render_long_tail_section(long_tail, order) if long_tail else ""}
+  {render_top_queries_section(top_queries, order, top_n, insights=insights)}
+  {render_daily_category_section(daily, order, insight=insights.get("daily_trend") if insights else None)}
+  {render_column_usage_section(usage, order, insight=insights.get("column_usage") if insights else None)}
+  {render_long_tail_section(long_tail, order, insight=insights.get("long_tail") if insights else None) if long_tail else ""}
 </main>
 </body>
 </html>
