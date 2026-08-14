@@ -79,7 +79,9 @@ def generate_commentary(summary_payload: dict) -> dict:
     body = {
         "model": MODEL,
         "max_tokens": 1024,
-        "temperature": 0,
+        # temperatureはこのモデル(Sonnet 5)では非推奨のパラメータで、指定すると
+        # 400 invalid_request_errorになる（Haiku用のai_classify.pyでは許容されるが
+        # 揃えて渡さない。詳細はモデルごとの対応状況次第）
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": json.dumps(summary_payload, ensure_ascii=False)}],
     }
