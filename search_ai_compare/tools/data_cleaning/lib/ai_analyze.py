@@ -91,8 +91,14 @@ def generate_commentary(summary_payload: dict) -> dict:
         method="POST",
     )
 
-    with urllib.request.urlopen(req, timeout=120) as res:
-        data = json.loads(res.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=120) as res:
+            data = json.loads(res.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        # プロキシ/Anthropic側が返す実際のエラー本文（モデル拒否・クレジット不足等の
+        # 具体的な理由）を握りつぶさずに例外メッセージへ含める
+        error_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {e.code} {e.reason}: {error_body}") from e
 
     content_blocks = data.get("content") or []
     text = "".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
