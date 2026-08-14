@@ -141,6 +141,27 @@ lib/output_utils.py
 
 
 --------------------------------------------------------------
+analyze_query_trends.py  [suffix: trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_report(html)]
+--------------------------------------------------------------
+概要:
+  classify_queries.py（または retry_others_queries.py）の出力CSV
+  （"ai_classification" 列付き）を対象に、クエリ傾向を3観点で分析する。
+  AIは呼ばない（分類済みCSVの集計のみ）。
+
+  A. カテゴリ別頻出クエリ（各カテゴリ上位N件。--top-n で指定、デフォルト20）
+  B. 日別のカテゴリ比率推移（datetime列の日付部分でグループ化）
+  C. カテゴリ×列指定率クロス集計（bbox/proximity/near の指定率をカテゴリ別に集計）
+
+  1回の実行でCSV3種＋HTMLレポート1種（同一タイムスタンプ）を output/ に出力する。
+  HTMLレポートはCSVと同じ内容をグラフ・テーブル付きでまとめたもの
+  （ブラウザでそのまま開けるスタンドアロンファイル。ライト/ダークモード対応）。
+
+実行例:
+  python3 analyze_query_trends.py classified.csv
+  python3 analyze_query_trends.py classified.csv --top-n 30
+
+
+--------------------------------------------------------------
 想定の処理フロー（一例）
 --------------------------------------------------------------
 1. dedup_queries.py     で重複除去（元フォーマット保持）
@@ -148,3 +169,4 @@ lib/output_utils.py
 3. count_classifications.py で分類結果の件数・割合を確認
 4. othersが多ければ retry_others_queries.py で再分類
    （必要なら classification_common.py のプロンプトを見直してから）
+5. analyze_query_trends.py でクエリ傾向を分析（HTMLレポート込み）
