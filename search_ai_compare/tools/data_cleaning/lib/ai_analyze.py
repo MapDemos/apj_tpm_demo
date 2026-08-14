@@ -32,7 +32,9 @@ SYSTEM_PROMPT = """You are a data analyst reviewing aggregated search query log 
 You will receive a JSON summary with four parts:
   - top_queries_by_category: the most frequent queries per classification category
   - daily_category_counts: query counts per category per date
-  - column_usage_rate: how often bbox/proximity/near were specified, per category
+  - column_usage_rate: how often each request parameter (bbox, proximity,
+    poi_category, poi_category_exclusions, near, navigation_profile) was specified,
+    across all queries (not split by category)
   - long_tail_distribution: for the whole dataset and per category, how total search
     volume breaks down by how often each query repeats (buckets like "1000+", "1")
 
@@ -47,7 +49,8 @@ Respond with a JSON object with exactly these keys:
       listed in "categories" (use the exact category names as keys), about that
       category's frequent queries.
     "daily_trend": 1 short sentence about the daily category trend.
-    "column_usage": 1 short sentence about bbox/proximity/near usage differences.
+    "column_usage": 1 short sentence about which parameters are used most and
+      least often.
     "long_tail": 1 short sentence about the long-tail distribution (what share of
       volume comes from rarely-repeated queries).
 
@@ -59,7 +62,7 @@ def build_summary_payload(
     order: list[str],
     top_queries: dict[str, list[tuple[str, int]]],
     daily: dict[str, dict[str, int]],
-    usage: dict[str, dict[str, int]],
+    usage: dict,
     long_tail: dict[str, dict],
     top_n_for_ai: int = 10,
 ) -> dict:
@@ -74,16 +77,15 @@ def build_summary_payload(
 
     daily_summary = {date: {category: daily[date].get(category, 0) for category in order} for date in dates}
 
-    usage_summary = {}
-    for category in order:
-        stats = usage.get(category, {"total": 0, "bbox": 0, "proximity": 0, "near": 0})
-        total = stats.get("total", 0)
-        usage_summary[category] = {
-            "total": total,
-            "bbox_rate_pct": round(stats.get("bbox", 0) / total * 100, 1) if total else 0.0,
-            "proximity_rate_pct": round(stats.get("proximity", 0) / total * 100, 1) if total else 0.0,
-            "near_rate_pct": round(stats.get("near", 0) / total * 100, 1) if total else 0.0,
+    total = usage.get("total", 0)
+    counts = usage.get("counts", {})
+    usage_summary = {
+        col: {
+            "count": counts.get(col, 0),
+            "rate_pct": round(counts.get(col, 0) / total * 100, 1) if total else 0.0,
         }
+        for col in counts
+    }
 
     long_tail_summary = {}
     for scope, data in long_tail.items():

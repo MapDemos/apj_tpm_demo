@@ -4,8 +4,9 @@ main.py analyze サブコマンドが使うクエリ傾向分析ロジック（�
 分析する4観点:
   A. カテゴリ別頻出クエリ（各カテゴリ上位N件）
   B. 日別のカテゴリ比率推移（datetime列の日付部分でグループ化）
-  C. カテゴリ×列指定率クロス集計（bbox/proximity/near がそれぞれ
-     指定されている行の割合を、カテゴリごとに集計）
+  C. パラメータ利用率（bbox/proximity/poi_category/poi_category_exclusions/
+     near/navigation_profileがそれぞれ指定されている行の割合。カテゴリ別には
+     分けず、全体を通した単純な利用率）
   D. ロングテール分布（queryごとの総出現回数をバケット分けし、各バケットが
      総検索ボリュームの何%を占めるかを円グラフで示す。全体＋カテゴリ別）
 
@@ -22,7 +23,13 @@ from collections import Counter, defaultdict
 from lib.classification_common import CATEGORIES
 from lib.output_utils import make_output_path, current_timestamp
 
-REQUIRED_COLUMNS = ["query", "ai_classification", "datetime", "bbox", "proximity", "near"]
+REQUIRED_COLUMNS = [
+    "query", "ai_classification", "datetime",
+    "bbox", "proximity", "poi_category", "poi_category_exclusions", "near", "navigation_profile",
+]
+
+# C(パラメータ利用率)の対象列
+USAGE_COLUMNS = ["bbox", "proximity", "poi_category", "poi_category_exclusions", "near", "navigation_profile"]
 
 # classification_common.py のカテゴリ順（1〜7）に、
 # dataviz skillの参照カラーパレット（categorical, fixed order）のスロット1〜7を対応させる。
@@ -106,18 +113,16 @@ def compute_daily_category(rows: list[dict]) -> dict[str, dict[str, int]]:
     return dict(daily)
 
 
-# --- C. カテゴリ×列指定率クロス集計 ----------------------------------------
+# --- C. パラメータ利用率 ----------------------------------------------------
 
-def compute_column_usage(rows: list[dict]) -> dict[str, dict[str, int]]:
-    usage: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "bbox": 0, "proximity": 0, "near": 0})
+def compute_column_usage(rows: list[dict]) -> dict:
+    """カテゴリ別には分けず、全行を通した単純なパラメータ利用率を集計する。"""
+    counts = {col: 0 for col in USAGE_COLUMNS}
     for row in rows:
-        category = row.get("ai_classification", "")
-        stats = usage[category]
-        stats["total"] += 1
-        for col in ("bbox", "proximity", "near"):
+        for col in USAGE_COLUMNS:
             if (row.get(col) or "").strip():
-                stats[col] += 1
-    return dict(usage)
+                counts[col] += 1
+    return {"total": len(rows), "counts": counts}
 
 
 def category_order(seen_categories: set) -> list[str]:
@@ -192,18 +197,16 @@ def write_daily_category_csv(path: str, daily: dict[str, dict[str, int]], order:
                 writer.writerow([date, category, count, ratio])
 
 
-def write_column_usage_csv(path: str, usage: dict[str, dict[str, int]], order: list[str]) -> None:
+def write_column_usage_csv(path: str, usage: dict) -> None:
+    total = usage["total"]
+    counts = usage["counts"]
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["ai_classification", "total", "bbox_rate", "proximity_rate", "near_rate"])
-        for category in order:
-            stats = usage.get(category, {"total": 0, "bbox": 0, "proximity": 0, "near": 0})
-            total = stats["total"]
-
-            def rate(col: str) -> str:
-                return f"{stats[col] / total * 100:.1f}%" if total else "0.0%"
-
-            writer.writerow([category, total, rate("bbox"), rate("proximity"), rate("near")])
+        writer.writerow(["parameter", "count", "total", "rate_pct"])
+        for col in USAGE_COLUMNS:
+            count = counts[col]
+            rate = f"{count / total * 100:.1f}%" if total else "0.0%"
+            writer.writerow([col, count, total, rate])
 
 
 def write_long_tail_csv(path: str, long_tail: dict[str, dict], order: list[str]) -> None:
@@ -361,58 +364,39 @@ def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[
     </section>"""
 
 
-def render_column_usage_section(usage: dict[str, dict[str, int]], order: list[str], insight: str | None = None) -> str:
-    def metric_chart(col: str, label: str) -> str:
-        rated = []
-        for category in order:
-            stats = usage.get(category, {"total": 0, col: 0})
-            total = stats["total"]
-            rate = (stats[col] / total * 100) if total else 0.0
-            rated.append((category, rate))
-        rated.sort(key=lambda kv: -kv[1])
+def render_column_usage_section(usage: dict, insight: str | None = None) -> str:
+    total = usage["total"]
+    counts = usage["counts"]
 
-        rows_html = "".join(
-            f"""<div class="hbar-row">
-                  <div class="hbar-label">{esc(category)}</div>
-                  <div class="hbar-track"><div class="hbar-fill" style="width:{rate:.1f}%"></div></div>
-                  <div class="hbar-value">{rate:.1f}%</div>
-                </div>"""
-            for category, rate in rated
-        )
-        return f"""
-        <div class="hbar-chart">
-          <h3>{esc(label)}</h3>
-          {rows_html}
-        </div>"""
+    rated = [(col, counts[col], (counts[col] / total * 100) if total else 0.0) for col in USAGE_COLUMNS]
+    rated.sort(key=lambda t: -t[2])
 
-    table_rows = []
-    for category in order:
-        stats = usage.get(category, {"total": 0, "bbox": 0, "proximity": 0, "near": 0})
-        total = stats["total"]
+    rows_html = "".join(
+        f"""<div class="hbar-row">
+              <div class="hbar-label">{esc(col)}</div>
+              <div class="hbar-track"><div class="hbar-fill" style="width:{rate:.1f}%"></div></div>
+              <div class="hbar-value">{rate:.1f}%</div>
+            </div>"""
+        for col, count, rate in rated
+    )
 
-        def rate(col: str) -> str:
-            return f"{stats[col] / total * 100:.1f}%" if total else "0.0%"
-
-        table_rows.append(
-            f"<tr><td>{esc(category)}</td><td class='num'>{total}</td>"
-            f"<td class='num'>{rate('bbox')}</td><td class='num'>{rate('proximity')}</td><td class='num'>{rate('near')}</td></tr>"
-        )
+    table_rows = "".join(
+        f"<tr><td>{esc(col)}</td><td class='num'>{count}</td><td class='num'>{total}</td><td class='num'>{rate:.1f}%</td></tr>"
+        for col, count, rate in rated
+    )
 
     return f"""
     <section>
-      <h2>C. Column Usage Rate by Category</h2>
+      <h2>C. Parameter Usage Rate</h2>
       {render_ai_insight(insight)}
-      <div class="hbar-grid">
-        {metric_chart("bbox", "bbox specified rate")}
-        {metric_chart("proximity", "proximity specified rate")}
-        {metric_chart("near", "near specified rate")}
+      <div class="hbar-chart">
+        {rows_html}
       </div>
       <details class="card">
         <summary>Show data table</summary>
         <table class="data-table">
-          <thead><tr><th>ai_classification</th><th class="num">total</th>
-            <th class="num">bbox_rate</th><th class="num">proximity_rate</th><th class="num">near_rate</th></tr></thead>
-          <tbody>{"".join(table_rows)}</tbody>
+          <thead><tr><th>parameter</th><th class="num">count</th><th class="num">total</th><th class="num">rate_pct</th></tr></thead>
+          <tbody>{table_rows}</tbody>
         </table>
       </details>
     </section>"""
@@ -699,7 +683,7 @@ def render_html_report(
   {render_ai_commentary_section(ai_commentary) if ai_commentary else ""}
   {render_top_queries_section(top_queries, order, top_n, insights=insights)}
   {render_daily_category_section(daily, order, insight=insights.get("daily_trend") if insights else None)}
-  {render_column_usage_section(usage, order, insight=insights.get("column_usage") if insights else None)}
+  {render_column_usage_section(usage, insight=insights.get("column_usage") if insights else None)}
   {render_long_tail_section(long_tail, order, insight=insights.get("long_tail") if insights else None) if long_tail else ""}
 </main>
 </body>

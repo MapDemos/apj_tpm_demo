@@ -147,15 +147,18 @@ analyze  [suffix: trend_top_queries_result / trend_daily_category_result / trend
   A. カテゴリ別頻出クエリ（各カテゴリ上位N件。--top-n で指定、デフォルト20）
   B. 日別のカテゴリ推移（datetime列の日付部分でグループ化。折れ線グラフ＋
      行=ai_classification・列=dateのマトリクス表、セルは count(ratio%) 形式）
-  C. カテゴリ×列指定率クロス集計（bbox/proximity/near の指定率をカテゴリ別に集計）
+  C. パラメータ利用率（bbox/proximity/poi_category/poi_category_exclusions/
+     near/navigation_profileの6パラメータが指定されている行の割合。カテゴリ別
+     には分けない、全体を通した単純な利用率）
   D. ロングテール分布（queryごとの総出現回数を 1000+/500-999/100-499/10-99/2-9/1
      の6バケットに分け、各バケットが総検索ボリュームの何%を占めるかを円グラフで
      表示。全体＋カテゴリ別、計8枚。「何回も検索されるqueryだけが重要とは限らない
      （低頻度queryの集合が無視できないボリュームを持つ場合がある）」を可視化する狙い）
 
   1回の実行でCSV4種（Bの出力CSVはdate,ai_classification,count,ratioの
-  ロングフォーマット、Dはscope,bucket,unique_query_count,total_count,volume_pct）
-  ＋HTMLレポート1種（同一タイムスタンプ）を local_output/ に出力する。
+  ロングフォーマット、Cはparameter,count,total,rate_pct、Dはscope,bucket,
+  unique_query_count,total_count,volume_pct）＋HTMLレポート1種（同一タイムスタンプ）
+  を local_output/ に出力する。
   HTMLレポートはCSVと同じ内容をグラフ・テーブル付きでまとめたもの
   （ブラウザでそのまま開けるスタンドアロンファイル、英語表記、ライト/ダークモード対応。
   query・カテゴリ名などデータ由来の値は元の言語のまま）。

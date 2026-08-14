@@ -310,7 +310,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
 
     analyze_trends_lib.write_top_queries_csv(top_queries_path, top_queries, order)
     analyze_trends_lib.write_daily_category_csv(daily_path, daily, order)
-    analyze_trends_lib.write_column_usage_csv(usage_path, usage, order)
+    analyze_trends_lib.write_column_usage_csv(usage_path, usage)
     analyze_trends_lib.write_long_tail_csv(long_tail_path, long_tail, order)
 
     generated_at = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}"
@@ -352,7 +352,7 @@ def cmd_analyze_ai(args: argparse.Namespace) -> None:
 
     analyze_trends_lib.write_top_queries_csv(top_queries_path, top_queries, order)
     analyze_trends_lib.write_daily_category_csv(daily_path, daily, order)
-    analyze_trends_lib.write_column_usage_csv(usage_path, usage, order)
+    analyze_trends_lib.write_column_usage_csv(usage_path, usage)
     analyze_trends_lib.write_long_tail_csv(long_tail_path, long_tail, order)
 
     # AIに渡すのはこの集計結果(summary_payload)だけ。元CSVの生データは渡さない。
