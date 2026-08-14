@@ -1,11 +1,13 @@
 """
 main.py analyze サブコマンドが使うクエリ傾向分析ロジック（旧 analyze_query_trends.py）。
 
-分析する3観点:
+分析する4観点:
   A. カテゴリ別頻出クエリ（各カテゴリ上位N件）
   B. 日別のカテゴリ比率推移（datetime列の日付部分でグループ化）
   C. カテゴリ×列指定率クロス集計（bbox/proximity/near がそれぞれ
      指定されている行の割合を、カテゴリごとに集計）
+  D. ロングテール分布（queryごとの総出現回数をバケット分けし、各バケットが
+     総検索ボリュームの何%を占めるかを円グラフで示す。全体＋カテゴリ別）
 
 CSV出力・HTMLレポート生成の関数を提供する。ファイルパスの決定（output_utils）や
 CLI引数の処理は main.py 側が担当し、このモジュールは集計・整形ロジックに専念する。
@@ -13,6 +15,7 @@ CLI引数の処理は main.py 側が担当し、このモジュールは集計�
 
 import csv
 import html
+import math
 import sys
 from collections import Counter, defaultdict
 
@@ -26,6 +29,30 @@ REQUIRED_COLUMNS = ["query", "ai_classification", "datetime", "bbox", "proximity
 # スロット8(red)は今回使わない。
 CATEGORY_COLORS_LIGHT = ["#2a78d6", "#008300", "#e87ba4", "#eda100", "#1baf7a", "#eb6834", "#4a3aa7"]
 CATEGORY_COLORS_DARK = ["#3987e5", "#008300", "#d55181", "#c98500", "#199e70", "#d95926", "#9085e9"]
+
+# D(ロングテール分布)のバケット定義。(ラベル, 下限, 上限。上限Noneは上限なし)
+# 頻度が高いほど濃い色になるよう、blue系の単色グラデーション(sequential hue)を割り当てる
+# （バケットはカテゴリ識別ではなく頻度という順序尺度なので、categoricalではなくsequentialを使う）。
+LONG_TAIL_BUCKETS = [
+    ("1000+", 1000, None),
+    ("500-999", 500, 999),
+    ("100-499", 100, 499),
+    ("10-99", 10, 99),
+    ("2-9", 2, 9),
+    ("1", 1, 1),
+]
+LONG_TAIL_COLORS_LIGHT = ["#0d366b", "#184f95", "#256abf", "#3987e5", "#6da7ec", "#9ec5f4"]
+LONG_TAIL_COLORS_DARK = ["#104281", "#1c5cab", "#256abf", "#3987e5", "#6da7ec", "#86b6ef"]
+
+
+def _bucket_for_count(count: int) -> str:
+    for label, lo, hi in LONG_TAIL_BUCKETS:
+        if hi is None:
+            if count >= lo:
+                return label
+        elif lo <= count <= hi:
+            return label
+    return "unknown"
 
 
 def read_rows(input_path: str) -> tuple[list[str], list[dict]]:
@@ -102,6 +129,46 @@ def category_order(seen_categories: set) -> list[str]:
     return ordered + unknown
 
 
+# --- D. ロングテール分布 ---------------------------------------------------
+
+ALL_CATEGORIES_SCOPE = "All categories"
+
+
+def compute_long_tail_distribution(queries: list[str]) -> dict:
+    """queries全体を対象に、各queryの総出現回数をバケット分けし、
+    バケットごとのユニークquery数・検索ボリューム(count合計)・
+    総検索ボリュームに対する割合(volume_pct)を集計する。"""
+    counts = Counter(queries)
+    total_volume = sum(counts.values())
+
+    buckets = {label: {"unique_queries": 0, "volume": 0} for label, _, _ in LONG_TAIL_BUCKETS}
+    for query, c in counts.items():
+        label = _bucket_for_count(c)
+        buckets[label]["unique_queries"] += 1
+        buckets[label]["volume"] += c
+
+    for label in buckets:
+        volume = buckets[label]["volume"]
+        buckets[label]["volume_pct"] = (volume / total_volume * 100) if total_volume else 0.0
+
+    return {"total_volume": total_volume, "buckets": buckets}
+
+
+def compute_long_tail_by_scope(rows: list[dict], order: list[str]) -> dict[str, dict]:
+    """"All categories"(全体)＋カテゴリごとに compute_long_tail_distribution を計算する。"""
+    per_category_queries: dict[str, list[str]] = defaultdict(list)
+    all_queries: list[str] = []
+    for row in rows:
+        query = row.get("query", "")
+        per_category_queries[row.get("ai_classification", "")].append(query)
+        all_queries.append(query)
+
+    result = {ALL_CATEGORIES_SCOPE: compute_long_tail_distribution(all_queries)}
+    for category in order:
+        result[category] = compute_long_tail_distribution(per_category_queries.get(category, []))
+    return result
+
+
 # --- CSV出力 ---------------------------------------------------------------
 
 def write_top_queries_csv(path: str, top_queries: dict[str, list[tuple[str, int]]], order: list[str]) -> None:
@@ -137,6 +204,19 @@ def write_column_usage_csv(path: str, usage: dict[str, dict[str, int]], order: l
                 return f"{stats[col] / total * 100:.1f}%" if total else "0.0%"
 
             writer.writerow([category, total, rate("bbox"), rate("proximity"), rate("near")])
+
+
+def write_long_tail_csv(path: str, long_tail: dict[str, dict], order: list[str]) -> None:
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["scope", "bucket", "unique_query_count", "total_count", "volume_pct"])
+        for scope in [ALL_CATEGORIES_SCOPE] + order:
+            data = long_tail.get(scope)
+            if not data:
+                continue
+            for label, _, _ in LONG_TAIL_BUCKETS:
+                b = data["buckets"][label]
+                writer.writerow([scope, label, b["unique_queries"], b["volume"], f"{b['volume_pct']:.1f}%"])
 
 
 # --- HTMLレポート ------------------------------------------------------------
@@ -318,6 +398,97 @@ def render_column_usage_section(usage: dict[str, dict[str, int]], order: list[st
     </section>"""
 
 
+def _pie_slice_paths(data: dict, cx: float, cy: float, r: float) -> list[str]:
+    """1つのscope(全体 or カテゴリ)分の円グラフをSVG pathのリストとして組み立てる。
+    バケットの volume_pct をそのまま弧の角度に変換する（時計回り、12時位置から開始）。"""
+    total_volume = data["total_volume"]
+    if not total_volume:
+        return []
+
+    slices = []
+    start_angle = -90.0
+    for i, (label, _, _) in enumerate(LONG_TAIL_BUCKETS):
+        b = data["buckets"][label]
+        frac = b["volume"] / total_volume
+        if frac <= 0:
+            continue
+        # 360度ぴったりだと始点と終点が一致し弧が消えるため、わずかに手前で止める
+        angle = min(frac * 360, 359.999)
+        end_angle = start_angle + angle
+
+        x1 = cx + r * math.cos(math.radians(start_angle))
+        y1 = cy + r * math.sin(math.radians(start_angle))
+        x2 = cx + r * math.cos(math.radians(end_angle))
+        y2 = cy + r * math.sin(math.radians(end_angle))
+        large_arc = 1 if angle > 180 else 0
+
+        path_d = f"M{cx:.1f},{cy:.1f} L{x1:.2f},{y1:.2f} A{r:.1f},{r:.1f} 0 {large_arc} 1 {x2:.2f},{y2:.2f} Z"
+        slices.append(
+            f'<path d="{path_d}" fill="var(--lt-{i})" stroke="var(--surface-1)" stroke-width="2">'
+            f'<title>{esc(label)}: {b["unique_queries"]} unique queries, {b["volume"]} searches ({b["volume_pct"]:.1f}%)</title>'
+            f"</path>"
+        )
+        start_angle = end_angle
+    return slices
+
+
+def render_long_tail_section(long_tail: dict[str, dict], order: list[str]) -> str:
+    scopes = [ALL_CATEGORIES_SCOPE] + order
+
+    legend = "".join(
+        f'<span class="legend-item"><span class="swatch" style="background:var(--lt-{i})"></span>{esc(label)}</span>'
+        for i, (label, _, _) in enumerate(LONG_TAIL_BUCKETS)
+    )
+
+    pies = []
+    for scope in scopes:
+        data = long_tail.get(scope)
+        if not data or not data["total_volume"]:
+            continue
+        slices = _pie_slice_paths(data, cx=60, cy=60, r=56)
+        pies.append(f"""
+          <div class="pie-cell">
+            <svg viewBox="0 0 120 120" class="pie-chart" role="img" aria-label="Long-tail distribution for {esc(scope)}">
+              {"".join(slices)}
+            </svg>
+            <div class="pie-label">{esc(scope)}</div>
+          </div>""")
+
+    table_rows = []
+    for scope in scopes:
+        data = long_tail.get(scope)
+        if not data:
+            continue
+        for label, _, _ in LONG_TAIL_BUCKETS:
+            b = data["buckets"][label]
+            table_rows.append(
+                f"<tr><td>{esc(scope)}</td><td>{esc(label)}</td>"
+                f"<td class='num'>{b['unique_queries']}</td><td class='num'>{b['volume']}</td>"
+                f"<td class='num'>{b['volume_pct']:.1f}%</td></tr>"
+            )
+
+    return f"""
+    <section>
+      <h2>D. Long-tail Distribution</h2>
+      <p class="muted">Share of total search volume by how often each query repeats
+        (bucketed by each query's total occurrence count). A high share in the
+        low-frequency buckets means a lot of volume comes from queries that rarely
+        repeat individually &mdash; frequency alone understates their importance.</p>
+      <div class="legend">{legend}</div>
+      <div class="pie-grid">{"".join(pies)}</div>
+      <details class="card">
+        <summary>Show data table</summary>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>scope</th><th>bucket</th><th class="num">unique_queries</th>
+              <th class="num">total_count</th><th class="num">volume_pct</th></tr></thead>
+            <tbody>{"".join(table_rows)}</tbody>
+          </table>
+        </div>
+      </details>
+    </section>"""
+
+
 def render_ai_commentary_section(commentary: dict) -> str:
     overview = esc(commentary.get("overview", ""))
     highlights = commentary.get("highlights", []) or []
@@ -339,6 +510,7 @@ def render_html_report(
     daily: dict[str, dict[str, int]],
     usage: dict[str, dict[str, int]],
     top_n: int,
+    long_tail: dict[str, dict] | None = None,
     ai_commentary: dict | None = None,
 ) -> str:
     cat_vars_light = "\n".join(
@@ -347,6 +519,8 @@ def render_html_report(
     cat_vars_dark = "\n".join(
         f"      --cat-{esc(c)}: {CATEGORY_COLORS_DARK[i % len(CATEGORY_COLORS_DARK)]};" for i, c in enumerate(order)
     )
+    lt_vars_light = "\n".join(f"      --lt-{i}: {c};" for i, c in enumerate(LONG_TAIL_COLORS_LIGHT))
+    lt_vars_dark = "\n".join(f"      --lt-{i}: {c};" for i, c in enumerate(LONG_TAIL_COLORS_DARK))
 
     return f"""<!doctype html>
 <html lang="en">
@@ -364,6 +538,7 @@ def render_html_report(
     --gridline: #e1e0d9;
     --border: rgba(11,11,11,0.10);
 {cat_vars_light}
+{lt_vars_light}
   }}
   @media (prefers-color-scheme: dark) {{
     :root:where(:not([data-theme="light"])) {{
@@ -376,6 +551,7 @@ def render_html_report(
       --gridline: #2c2c2a;
       --border: rgba(255,255,255,0.10);
 {cat_vars_dark}
+{lt_vars_dark}
     }}
   }}
   :root[data-theme="dark"] {{
@@ -388,6 +564,7 @@ def render_html_report(
     --gridline: #2c2c2a;
     --border: rgba(255,255,255,0.10);
 {cat_vars_dark}
+{lt_vars_dark}
   }}
 
   * {{ box-sizing: border-box; }}
@@ -472,6 +649,15 @@ def render_html_report(
   .hbar-track {{ flex: 1; height: 10px; background: var(--gridline); border-radius: 4px; overflow: hidden; }}
   .hbar-fill {{ height: 100%; background: var(--series-1, #2a78d6); border-radius: 4px; }}
   .hbar-value {{ width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }}
+
+  .pie-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }}
+  .pie-cell {{
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+  }}
+  .pie-chart {{ width: 100%; max-width: 120px; height: auto; }}
+  .pie-chart path {{ cursor: default; }}
+  .pie-label {{ font-size: 0.8125rem; color: var(--text-secondary); text-align: center; }}
 </style>
 </head>
 <body>
@@ -483,6 +669,7 @@ def render_html_report(
   {render_top_queries_section(top_queries, order, top_n)}
   {render_daily_category_section(daily, order)}
   {render_column_usage_section(usage, order)}
+  {render_long_tail_section(long_tail, order) if long_tail else ""}
 </main>
 </body>
 </html>

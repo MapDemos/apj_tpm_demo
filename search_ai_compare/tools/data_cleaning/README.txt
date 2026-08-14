@@ -138,19 +138,24 @@ count-classifications  [suffix: classification_count_analysis_result]
 
 
 --------------------------------------------------------------
-analyze  [suffix: trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_report(html)]
+analyze  [suffix: trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_long_tail_result / trend_report(html)]
 --------------------------------------------------------------
 概要:
   ai-classify（または ai-retry）の出力CSV（"ai_classification" 列付き）を
-  対象に、クエリ傾向を3観点で分析する。AIは呼ばない（分類済みCSVの集計のみ）。
+  対象に、クエリ傾向を4観点で分析する。AIは呼ばない（分類済みCSVの集計のみ）。
 
   A. カテゴリ別頻出クエリ（各カテゴリ上位N件。--top-n で指定、デフォルト20）
   B. 日別のカテゴリ推移（datetime列の日付部分でグループ化。折れ線グラフ＋
      行=ai_classification・列=dateのマトリクス表、セルは count(ratio%) 形式）
   C. カテゴリ×列指定率クロス集計（bbox/proximity/near の指定率をカテゴリ別に集計）
+  D. ロングテール分布（queryごとの総出現回数を 1000+/500-999/100-499/10-99/2-9/1
+     の6バケットに分け、各バケットが総検索ボリュームの何%を占めるかを円グラフで
+     表示。全体＋カテゴリ別、計8枚。「何回も検索されるqueryだけが重要とは限らない
+     （低頻度queryの集合が無視できないボリュームを持つ場合がある）」を可視化する狙い）
 
-  1回の実行でCSV3種（Bの出力CSVはdate,ai_classification,count,ratioの
-  ロングフォーマット）＋HTMLレポート1種（同一タイムスタンプ）を local_output/ に出力する。
+  1回の実行でCSV4種（Bの出力CSVはdate,ai_classification,count,ratioの
+  ロングフォーマット、Dはscope,bucket,unique_query_count,total_count,volume_pct）
+  ＋HTMLレポート1種（同一タイムスタンプ）を local_output/ に出力する。
   HTMLレポートはCSVと同じ内容をグラフ・テーブル付きでまとめたもの
   （ブラウザでそのまま開けるスタンドアロンファイル、英語表記、ライト/ダークモード対応。
   query・カテゴリ名などデータ由来の値は元の言語のまま）。
@@ -161,17 +166,18 @@ analyze  [suffix: trend_top_queries_result / trend_daily_category_result / trend
 
 
 --------------------------------------------------------------
-analyze-ai  [suffix: trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_report_ai(html)]
+analyze-ai  [suffix: trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_long_tail_result / trend_report_ai(html)]
 --------------------------------------------------------------
 概要:
-  analyze と同じA/B/C集計を行った上で、その集計結果をもとにLLM（Claude Sonnet 5、
+  analyze と同じA/B/C/D集計を行った上で、その集計結果をもとにLLM（Claude Sonnet 5、
   プロキシ経由）にクエリ傾向のコメンタリーを書かせ、HTMLレポート上部に追加する版。
-  CSV3種の内容・出力先はanalyzeと全く同じ（HTMLだけ suffix が trend_report_ai になる）。
+  CSV4種の内容・出力先はanalyzeと全く同じ（HTMLだけ suffix が trend_report_ai になる）。
 
   鉄則: AIに渡すのは analyze が計算する集計結果（カテゴリ別頻出クエリ上位N件・
-  日別カテゴリ件数・列指定率）だけで、入力CSVの生データ（行そのもの・query全件）は
-  一切AIに渡さない。集計データの組み立ては lib/ai_analyze.py の build_summary_payload
-  を参照。AI呼び出しに失敗した場合はコメンタリーなしでレポートを出力する
+  日別カテゴリ件数・列指定率。ロングテール分布は現状AIコメンタリーの入力には
+  含めていない）だけで、入力CSVの生データ（行そのもの・query全件）は一切AIに
+  渡さない。集計データの組み立ては lib/ai_analyze.py の build_summary_payload を
+  参照。AI呼び出しに失敗した場合はコメンタリーなしでレポートを出力する
   （処理全体は止まらない）。
 
 実行例:

@@ -299,20 +299,24 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     top_queries = analyze_trends_lib.compute_top_queries(rows, args.top_n)
     daily = analyze_trends_lib.compute_daily_category(rows)
     usage = analyze_trends_lib.compute_column_usage(rows)
+    long_tail = analyze_trends_lib.compute_long_tail_by_scope(rows, order)
 
     ts = current_timestamp()
     top_queries_path = make_output_path(args.input_csv, "trend_top_queries_result", timestamp=ts)
     daily_path = make_output_path(args.input_csv, "trend_daily_category_result", timestamp=ts)
     usage_path = make_output_path(args.input_csv, "trend_column_usage_result", timestamp=ts)
+    long_tail_path = make_output_path(args.input_csv, "trend_long_tail_result", timestamp=ts)
     report_path = make_output_path(args.input_csv, "trend_report", timestamp=ts, ext="html")
 
     analyze_trends_lib.write_top_queries_csv(top_queries_path, top_queries, order)
     analyze_trends_lib.write_daily_category_csv(daily_path, daily, order)
     analyze_trends_lib.write_column_usage_csv(usage_path, usage, order)
+    analyze_trends_lib.write_long_tail_csv(long_tail_path, long_tail, order)
 
     generated_at = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}"
     html_report = analyze_trends_lib.render_html_report(
-        args.input_csv, generated_at, total_rows, order, top_queries, daily, usage, args.top_n
+        args.input_csv, generated_at, total_rows, order, top_queries, daily, usage, args.top_n,
+        long_tail=long_tail,
     )
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html_report)
@@ -323,6 +327,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     print(f"  {top_queries_path}")
     print(f"  {daily_path}")
     print(f"  {usage_path}")
+    print(f"  {long_tail_path}")
     print(f"  {report_path}  ← HTMLレポート")
 
 
@@ -336,16 +341,19 @@ def cmd_analyze_ai(args: argparse.Namespace) -> None:
     top_queries = analyze_trends_lib.compute_top_queries(rows, args.top_n)
     daily = analyze_trends_lib.compute_daily_category(rows)
     usage = analyze_trends_lib.compute_column_usage(rows)
+    long_tail = analyze_trends_lib.compute_long_tail_by_scope(rows, order)
 
     ts = current_timestamp()
     top_queries_path = make_output_path(args.input_csv, "trend_top_queries_result", timestamp=ts)
     daily_path = make_output_path(args.input_csv, "trend_daily_category_result", timestamp=ts)
     usage_path = make_output_path(args.input_csv, "trend_column_usage_result", timestamp=ts)
+    long_tail_path = make_output_path(args.input_csv, "trend_long_tail_result", timestamp=ts)
     report_path = make_output_path(args.input_csv, "trend_report_ai", timestamp=ts, ext="html")
 
     analyze_trends_lib.write_top_queries_csv(top_queries_path, top_queries, order)
     analyze_trends_lib.write_daily_category_csv(daily_path, daily, order)
     analyze_trends_lib.write_column_usage_csv(usage_path, usage, order)
+    analyze_trends_lib.write_long_tail_csv(long_tail_path, long_tail, order)
 
     # AIに渡すのはこの集計結果(summary_payload)だけ。元CSVの生データは渡さない。
     summary_payload = ai_analyze_lib.build_summary_payload(order, top_queries, daily, usage)
@@ -358,6 +366,7 @@ def cmd_analyze_ai(args: argparse.Namespace) -> None:
     generated_at = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}"
     html_report = analyze_trends_lib.render_html_report(
         args.input_csv, generated_at, total_rows, order, top_queries, daily, usage, args.top_n,
+        long_tail=long_tail,
         ai_commentary=ai_commentary,
     )
     with open(report_path, "w", encoding="utf-8") as f:
@@ -370,6 +379,7 @@ def cmd_analyze_ai(args: argparse.Namespace) -> None:
     print(f"  {top_queries_path}")
     print(f"  {daily_path}")
     print(f"  {usage_path}")
+    print(f"  {long_tail_path}")
     print(f"  {report_path}  ← HTMLレポート（AIコメンタリー込み）")
 
 
