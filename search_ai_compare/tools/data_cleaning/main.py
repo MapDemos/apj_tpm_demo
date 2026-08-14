@@ -3,7 +3,9 @@
 data_cleaning/ のCSVクレンジング・AI分類・傾向分析を1つにまとめたCLI。
 
 サブコマンド:
-  dedup                  重複除去（--columns-onlyでquery列のみ抽出版）
+  dedup                  重複除去（--columns-onlyでquery列のみ抽出版。
+                          same_query_count列を自動付与）
+  add-query-count        same_query_count列だけを付与する（重複除去はしない、プログラム的カウントのみ、AI不使用）
   count-queries          query出現回数カウント
   ai-classify             AI分類（プロキシ経由・並行処理）
   ai-classify-batch       AI分類（Anthropic Message Batches API版、要ANTHROPIC_API_KEY）
@@ -28,28 +30,49 @@ from lib import analyze_trends as analyze_trends_lib
 from lib import count_classifications as count_classifications_lib
 from lib import count_queries as count_queries_lib
 from lib import dedup as dedup_lib
+from lib import query_count_column as query_count_column_lib
 from lib.output_utils import current_timestamp, make_output_path
 
 
 def cmd_dedup(args: argparse.Namespace) -> None:
+    fieldnames, rows = dedup_lib.extract_rows(args.input_csv)
+    before = len(rows)
+    # same_query_count は重複除去前の全行に対して数える
+    # （除去後は近傍の重複しか見えなくなるため、除去前の総出現回数を使う）
+    counts = query_count_column_lib.compute_counts(rows)
+
     if args.columns_only:
-        queries = dedup_lib.extract_queries(args.input_csv)
-        before = len(queries)
-        cleaned = dedup_lib.dedupe_within_window(queries, key=lambda q: q)
-        after = len(cleaned)
-        output_path = make_output_path(args.input_csv, "cleaning_queryonly")
-        dedup_lib.write_queries(output_path, cleaned)
-        print(f"抽出したquery件数: {before}")
-        print(f"重複除去後のquery件数: {after}（{before - after}件削除）")
+        target_rows = [{"query": r["query"]} for r in rows]
+        out_fieldnames = ["query", query_count_column_lib.COLUMN_NAME]
+        suffix = "cleaning_queryonly"
     else:
-        fieldnames, rows = dedup_lib.extract_rows(args.input_csv)
-        before = len(rows)
-        cleaned = dedup_lib.dedupe_within_window(rows, key=lambda r: r["query"])
-        after = len(cleaned)
-        output_path = make_output_path(args.input_csv, "cleaning")
-        dedup_lib.write_rows(output_path, fieldnames, cleaned)
-        print(f"入力行数: {before}")
-        print(f"重複除去後の行数: {after}（{before - after}件削除）")
+        target_rows = rows
+        out_fieldnames = fieldnames + [query_count_column_lib.COLUMN_NAME]
+        suffix = "cleaning"
+
+    cleaned = dedup_lib.dedupe_within_window(target_rows, key=lambda r: r["query"])
+    query_count_column_lib.annotate(cleaned, counts)
+    after = len(cleaned)
+
+    output_path = make_output_path(args.input_csv, suffix)
+    dedup_lib.write_rows(output_path, out_fieldnames, cleaned)
+
+    print(f"入力行数: {before}")
+    print(f"重複除去後の行数: {after}（{before - after}件削除）")
+    print(f"出力先: {output_path}")
+
+
+def cmd_add_query_count(args: argparse.Namespace) -> None:
+    fieldnames, rows = query_count_column_lib.read_rows(args.input_csv)
+    counts = query_count_column_lib.compute_counts(rows)
+    query_count_column_lib.annotate(rows, counts)
+    out_fieldnames = fieldnames + [query_count_column_lib.COLUMN_NAME]
+
+    output_path = make_output_path(args.input_csv, "query_count_annotated")
+    query_count_column_lib.write_rows(output_path, out_fieldnames, rows)
+
+    print(f"総行数: {len(rows)}")
+    print(f"ユニークなquery数: {len(counts)}")
     print(f"出力先: {output_path}")
 
 
@@ -358,10 +381,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("dedup", help="重複除去（後ろ5行以内・最初の出現を正とする）")
+    p = sub.add_parser("dedup", help="重複除去（後ろ5行以内・最初の出現を正とする。same_query_count列を自動付与）")
     p.add_argument("input_csv")
     p.add_argument("--columns-only", action="store_true", help="query列のみ抽出して出力する（他の列は捨てる）")
     p.set_defaults(func=cmd_dedup)
+
+    p = sub.add_parser(
+        "add-query-count",
+        help="重複除去はせず、query列の全体出現回数をsame_query_count列として全行に付与する（プログラム的カウント、AI不使用）",
+    )
+    p.add_argument("input_csv")
+    p.set_defaults(func=cmd_add_query_count)
 
     p = sub.add_parser("count-queries", help="query列の出現回数をカウントする")
     p.add_argument("input_csv")

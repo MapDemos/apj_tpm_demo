@@ -37,28 +37,8 @@ def extract_rows(input_path: str) -> tuple[list[str], list[dict]]:
     return fieldnames, rows
 
 
-def extract_queries(input_path: str) -> list[str]:
-    """入力CSVから query 列の値だけを、出現順のリストとして取り出す（query列のみ版）"""
-    queries: list[str] = []
-    with open(input_path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        if reader.fieldnames is None or "query" not in reader.fieldnames:
-            raise ValueError('入力CSVに "query" 列が見つかりません')
-        for row in reader:
-            queries.append(row["query"])
-    return queries
-
-
 def write_rows(output_path: str, fieldnames: list[str], rows: list[dict]) -> None:
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
-
-
-def write_queries(output_path: str, queries: list[str]) -> None:
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["query"])
-        for q in queries:
-            writer.writerow([q])

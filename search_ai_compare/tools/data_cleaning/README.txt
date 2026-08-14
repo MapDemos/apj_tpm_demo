@@ -7,8 +7,8 @@ tools/data_cleaning/ — CSVクレンジング・AI分類・傾向分析CLI
 "near","navigation_profile","datetime"
 
 全機能は main.py の1本のCLIにサブコマンドとしてまとまっている。
-サブコマンド一覧: dedup / count-queries / ai-classify / ai-classify-batch /
-ai-retry / count-classifications / analyze / analyze-ai
+サブコマンド一覧: dedup / add-query-count / count-queries / ai-classify /
+ai-classify-batch / ai-retry / count-classifications / analyze / analyze-ai
 
     python3 main.py <subcommand> input.csv [オプション]
     python3 main.py <subcommand> --help   # サブコマンドごとの詳細
@@ -40,9 +40,25 @@ dedup  [suffix: cleaning / cleaning_queryonly]
   --columns-only を付けると、全列を保持する代わりに "query" 列だけを
   抽出した1列のCSVを出力する（他の列は捨てられる）。
 
+  同時に "same_query_count" 列を自動付与する（重複除去する"前"の入力全体で
+  そのqueryが何回出現したかを、プログラム的にカウントするだけ。AIは使わない）。
+
 実行例:
   python3 main.py dedup input.csv
   python3 main.py dedup input.csv --columns-only
+
+
+--------------------------------------------------------------
+add-query-count  [suffix: query_count_annotated]
+--------------------------------------------------------------
+概要:
+  dedup の "same_query_count" 列付与だけを単体で行うサブコマンド。
+  重複除去はせず、全行をそのまま保持した上で、"query" 列の値が入力全体で
+  何回出現するかを数え、"same_query_count" 列として追加する。
+  プログラム的なカウントのみでAIは使わない。
+
+実行例:
+  python3 main.py add-query-count input.csv
 
 
 --------------------------------------------------------------
