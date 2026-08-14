@@ -78,7 +78,7 @@ def generate_commentary(summary_payload: dict) -> dict:
     """要約データをLLMに送り、{"overview": str, "highlights": [str, ...]} を返す。"""
     body = {
         "model": MODEL,
-        "max_tokens": 1024,
+        "max_tokens": 2048,
         # temperatureはこのモデル(Sonnet 5)では非推奨のパラメータで、指定すると
         # 400 invalid_request_errorになる（Haiku用のai_classify.pyでは許容されるが
         # 揃えて渡さない。詳細はモデルごとの対応状況次第）
@@ -106,7 +106,10 @@ def generate_commentary(summary_payload: dict) -> dict:
     text = "".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
     text = parse_response_text(text)
 
-    result = json.loads(text)
+    # strict=False: "overview"/"highlights"の文中に生の改行等の制御文字が
+    # そのまま混じっていても許容してパースする（strict=Trueだと
+    # "Unterminated string" エラーになるケースがあった）
+    result = json.loads(text, strict=False)
     if not isinstance(result, dict) or "overview" not in result or "highlights" not in result:
         raise ValueError(f"LLM応答の形式が不正です: {result!r}")
 
