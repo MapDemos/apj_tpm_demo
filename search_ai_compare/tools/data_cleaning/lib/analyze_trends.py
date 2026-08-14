@@ -318,6 +318,18 @@ def render_column_usage_section(usage: dict[str, dict[str, int]], order: list[st
     </section>"""
 
 
+def render_ai_commentary_section(commentary: dict) -> str:
+    overview = esc(commentary.get("overview", ""))
+    highlights = commentary.get("highlights", []) or []
+    items = "".join(f"<li>{esc(h)}</li>" for h in highlights)
+    return f"""
+    <section class="ai-summary">
+      <h2><span class="ai-badge">AI</span> Analysis Summary</h2>
+      <p>{overview}</p>
+      <ul>{items}</ul>
+    </section>"""
+
+
 def render_html_report(
     input_path: str,
     generated_at: str,
@@ -327,6 +339,7 @@ def render_html_report(
     daily: dict[str, dict[str, int]],
     usage: dict[str, dict[str, int]],
     top_n: int,
+    ai_commentary: dict | None = None,
 ) -> str:
     cat_vars_light = "\n".join(
         f"      --cat-{esc(c)}: {CATEGORY_COLORS_LIGHT[i % len(CATEGORY_COLORS_LIGHT)]};" for i, c in enumerate(order)
@@ -403,6 +416,24 @@ def render_html_report(
   .card summary {{ cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 8px; }}
   .cat-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; }}
 
+  .ai-summary {{
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--series-1, #2a78d6);
+    border-radius: 8px;
+    padding: 16px 20px;
+  }}
+  .ai-summary h2 {{ display: flex; align-items: center; gap: 8px; }}
+  .ai-badge {{
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.02em;
+    color: #fff; background: var(--series-1, #2a78d6);
+    border-radius: 4px; padding: 2px 6px;
+  }}
+  .ai-summary p {{ color: var(--text-primary); margin: 0 0 8px; }}
+  .ai-summary ul {{ margin: 0; padding-left: 1.25em; }}
+  .ai-summary li {{ margin-bottom: 4px; font-size: 0.9375rem; }}
+
   .data-table {{
     width: 100%;
     border-collapse: collapse;
@@ -448,6 +479,7 @@ def render_html_report(
   <h1>Query Trend Analysis Report</h1>
   <div class="meta">Input file: {esc(input_path)} / Total rows: {total_rows} / Generated at: {esc(generated_at)}</div>
 
+  {render_ai_commentary_section(ai_commentary) if ai_commentary else ""}
   {render_top_queries_section(top_queries, order, top_n)}
   {render_daily_category_section(daily, order)}
   {render_column_usage_section(usage, order)}

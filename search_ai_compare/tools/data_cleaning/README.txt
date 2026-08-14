@@ -7,6 +7,8 @@ tools/data_cleaning/ — CSVクレンジング・AI分類・傾向分析CLI
 "near","navigation_profile","datetime"
 
 全機能は main.py の1本のCLIにサブコマンドとしてまとまっている。
+サブコマンド一覧: dedup / count-queries / ai-classify / ai-classify-batch /
+ai-retry / count-classifications / analyze / analyze-ai
 
     python3 main.py <subcommand> input.csv [オプション]
     python3 main.py <subcommand> --help   # サブコマンドごとの詳細
@@ -140,6 +142,25 @@ analyze  [suffix: trend_top_queries_result / trend_daily_category_result / trend
 実行例:
   python3 main.py analyze classified.csv
   python3 main.py analyze classified.csv --top-n 30
+
+
+--------------------------------------------------------------
+analyze-ai  [suffix: trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_report_ai(html)]
+--------------------------------------------------------------
+概要:
+  analyze と同じA/B/C集計を行った上で、その集計結果をもとにLLM（Claude Sonnet 5、
+  プロキシ経由）にクエリ傾向のコメンタリーを書かせ、HTMLレポート上部に追加する版。
+  CSV3種の内容・出力先はanalyzeと全く同じ（HTMLだけ suffix が trend_report_ai になる）。
+
+  鉄則: AIに渡すのは analyze が計算する集計結果（カテゴリ別頻出クエリ上位N件・
+  日別カテゴリ件数・列指定率）だけで、入力CSVの生データ（行そのもの・query全件）は
+  一切AIに渡さない。集計データの組み立ては lib/ai_analyze.py の build_summary_payload
+  を参照。AI呼び出しに失敗した場合はコメンタリーなしでレポートを出力する
+  （処理全体は止まらない）。
+
+実行例:
+  python3 main.py analyze-ai classified.csv
+  python3 main.py analyze-ai classified.csv --top-n 30
 
 
 --------------------------------------------------------------

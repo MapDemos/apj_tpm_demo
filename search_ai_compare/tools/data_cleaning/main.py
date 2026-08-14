@@ -10,6 +10,7 @@ data_cleaning/ のCSVクレンジング・AI分類・傾向分析を1つにま�
   ai-retry                ai_classificationがothersの行だけAIで再分類
   count-classifications  分類結果の件数集計
   analyze                クエリ傾向分析（HTMLレポート込み）
+  analyze-ai              クエリ傾向分析＋AIコメンタリー（HTMLレポート上部にAI要約を追加）
 
 各サブコマンドの詳細は `python3 main.py <subcommand> --help` を参照。
 出力は全サブコマンド共通で local_output/ 配下に自動生成される
@@ -21,6 +22,7 @@ import csv
 import sys
 import time
 
+from lib import ai_analyze as ai_analyze_lib
 from lib import ai_classify as ai_classify_lib
 from lib import analyze_trends as analyze_trends_lib
 from lib import count_classifications as count_classifications_lib
@@ -301,6 +303,53 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     print(f"  {report_path}  ← HTMLレポート")
 
 
+def cmd_analyze_ai(args: argparse.Namespace) -> None:
+    fieldnames, rows = analyze_trends_lib.read_rows(args.input_csv)
+    total_rows = len(rows)
+
+    seen_categories = {row.get("ai_classification", "") for row in rows}
+    order = analyze_trends_lib.category_order(seen_categories)
+
+    top_queries = analyze_trends_lib.compute_top_queries(rows, args.top_n)
+    daily = analyze_trends_lib.compute_daily_category(rows)
+    usage = analyze_trends_lib.compute_column_usage(rows)
+
+    ts = current_timestamp()
+    top_queries_path = make_output_path(args.input_csv, "trend_top_queries_result", timestamp=ts)
+    daily_path = make_output_path(args.input_csv, "trend_daily_category_result", timestamp=ts)
+    usage_path = make_output_path(args.input_csv, "trend_column_usage_result", timestamp=ts)
+    report_path = make_output_path(args.input_csv, "trend_report_ai", timestamp=ts, ext="html")
+
+    analyze_trends_lib.write_top_queries_csv(top_queries_path, top_queries, order)
+    analyze_trends_lib.write_daily_category_csv(daily_path, daily, order)
+    analyze_trends_lib.write_column_usage_csv(usage_path, usage, order)
+
+    # AIに渡すのはこの集計結果(summary_payload)だけ。元CSVの生データは渡さない。
+    summary_payload = ai_analyze_lib.build_summary_payload(order, top_queries, daily, usage)
+    try:
+        ai_commentary = ai_analyze_lib.generate_commentary(summary_payload)
+    except Exception as e:
+        print(f"警告: AIコメンタリー生成に失敗したため、コメンタリーなしでレポートを出力します: {e}", file=sys.stderr)
+        ai_commentary = None
+
+    generated_at = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}"
+    html_report = analyze_trends_lib.render_html_report(
+        args.input_csv, generated_at, total_rows, order, top_queries, daily, usage, args.top_n,
+        ai_commentary=ai_commentary,
+    )
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(html_report)
+
+    print(f"総行数: {total_rows}")
+    print(f"カテゴリ数: {len(order)}（{', '.join(order)}）")
+    print(f"AIコメンタリー: {'生成成功' if ai_commentary else '生成失敗（レポートには含まれません）'}")
+    print("出力先:")
+    print(f"  {top_queries_path}")
+    print(f"  {daily_path}")
+    print(f"  {usage_path}")
+    print(f"  {report_path}  ← HTMLレポート（AIコメンタリー込み）")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="main.py",
@@ -345,6 +394,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("input_csv")
     p.add_argument("--top-n", type=int, default=20, help="カテゴリ別頻出クエリの上位何件を出すか（デフォルト20）")
     p.set_defaults(func=cmd_analyze)
+
+    p = sub.add_parser(
+        "analyze-ai",
+        help="クエリ傾向を分析し、AIコメンタリー付きHTMLレポートを出力する（Claude Sonnet 5、プロキシ経由）",
+    )
+    p.add_argument("input_csv")
+    p.add_argument("--top-n", type=int, default=20, help="カテゴリ別頻出クエリの上位何件を出すか（デフォルト20）")
+    p.set_defaults(func=cmd_analyze_ai)
 
     return parser
 
