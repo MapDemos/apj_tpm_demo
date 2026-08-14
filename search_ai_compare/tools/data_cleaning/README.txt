@@ -14,14 +14,14 @@ tools/data_cleaning/ — CSVクレンジング・AI分類・傾向分析CLI
 出力ファイルについて
 --------------------------------------------------------------
 全サブコマンドとも output_csv 引数は無く、input.csv 1本だけを渡す。
-出力先は自動的に output/ 配下、ファイル名は
+出力先は自動的に local_output/ 配下、ファイル名は
 
     <元のファイル名（拡張子なし）>_<何をしたか分かるsuffix>_<YYYYMMDD_HHMMSS>.csv
 
 という形式になる（lib/output_utils.py の make_output_path が生成）。
 パイプラインで前段の出力を次段の入力に渡していくと、ファイル名に
 suffixが積み重なっていくので、ファイル名だけで処理履歴を追える。
-output/ 配下のCSV・HTMLはgitignore対象（.gitignoreで除外）。
+local_output/ 配下のCSV・HTMLはgitignore対象（.gitignoreで除外）。
 
 フォルダ構成について
 --------------------------------------------------------------
@@ -132,7 +132,7 @@ analyze  [suffix: trend_top_queries_result / trend_daily_category_result / trend
   C. カテゴリ×列指定率クロス集計（bbox/proximity/near の指定率をカテゴリ別に集計）
 
   1回の実行でCSV3種（Bの出力CSVはdate,ai_classification,count,ratioの
-  ロングフォーマット）＋HTMLレポート1種（同一タイムスタンプ）を output/ に出力する。
+  ロングフォーマット）＋HTMLレポート1種（同一タイムスタンプ）を local_output/ に出力する。
   HTMLレポートはCSVと同じ内容をグラフ・テーブル付きでまとめたもの
   （ブラウザでそのまま開けるスタンドアロンファイル、英語表記、ライト/ダークモード対応。
   query・カテゴリ名などデータ由来の値は元の言語のまま）。

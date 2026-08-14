@@ -12,7 +12,7 @@ data_cleaning/ のCSVクレンジング・AI分類・傾向分析を1つにま�
   analyze                クエリ傾向分析（HTMLレポート込み）
 
 各サブコマンドの詳細は `python3 main.py <subcommand> --help` を参照。
-出力は全サブコマンド共通で output/ 配下に自動生成される
+出力は全サブコマンド共通で local_output/ 配下に自動生成される
 （<入力ファイル名>_<suffix>_<タイムスタンプ>.csv、詳細は lib/output_utils.py）。
 """
 

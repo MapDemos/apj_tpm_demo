@@ -1,7 +1,7 @@
 """
 data_cleaning/ 配下の各スクリプトが共有する、出力ファイルパスの命名ロジック（lib/配下）。
 
-出力は必ず data_cleaning/output/ 配下に、
+出力は必ず data_cleaning/local_output/ 配下に、
     <元のファイル名（拡張子なし）>_<suffix>_<YYYYMMDD_HHMMSS>.csv
 という名前で書き出す。output_csvの引数を各スクリプトから無くし、
 「何のツールで処理した結果か」がファイル名だけで分かるようにするための共通処理。
@@ -15,7 +15,7 @@ import os
 from datetime import datetime
 
 _DATA_CLEANING_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUTPUT_DIR = os.path.join(_DATA_CLEANING_DIR, "output")
+OUTPUT_DIR = os.path.join(_DATA_CLEANING_DIR, "local_output")
 
 
 def current_timestamp() -> str:
@@ -27,7 +27,7 @@ def current_timestamp() -> str:
 
 def make_output_path(input_path: str, suffix: str, timestamp: str | None = None, ext: str = "csv") -> str:
     """input_path のファイル名 + suffix + 秒までのフルタイムスタンプ から
-    output/ 配下の出力パスを組み立てる。output/ ディレクトリが無ければ作成する。
+    local_output/ 配下の出力パスを組み立てる。local_output/ ディレクトリが無ければ作成する。
 
     timestamp を省略した場合は呼び出し時点の時刻を使う。1回の実行で複数ファイルを
     出力する場合は current_timestamp() で1本生成し、共通で渡すとファイル名が揃う。
