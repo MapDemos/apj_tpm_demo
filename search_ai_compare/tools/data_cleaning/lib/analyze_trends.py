@@ -3,9 +3,11 @@ main.py analyze サブコマンドが使うクエリ傾向分析ロジック（�
 
 分析する7観点:
   A. 日別クエリ量（全カテゴリ合計、折れ線グラフ）
-  B. 時間帯別クエリ量（全日付を集計し、0〜23時の時間帯別に棒グラフで表示）
+  B. 時間帯別クエリ量（全日付を集計し、0〜23時（JST。元データはUTCなので変換）の
+     時間帯別に棒グラフで表示）
   C. 都道府県別proximity分布（proximity座標を最寄りの都道府県代表地点に
-     スナップして集計。代表地点は lib/jp_prefectures.py のハードコード値）
+     スナップして集計。代表地点名にはローマ字表記を併記。代表地点は
+     lib/jp_prefectures.py のハードコード値、北海道→沖縄の標準順で表示）
   D. カテゴリ別頻出クエリ（各カテゴリ上位N件）
   E. 日別のカテゴリ比率推移（datetime列の日付部分でグループ化）
   F. パラメータ利用率（bbox/proximity/poi_category/poi_category_exclusions/
@@ -89,17 +91,21 @@ def extract_date(datetime_str: str) -> str:
     return s[:10]
 
 
-def extract_hour(datetime_str: str) -> int | None:
-    """"2026-08-11 23:59:53 UTC" のような文字列から時(0〜23)だけを取り出す。
-    パースできない場合はNone。タイムゾーンは元データの表記のまま（変換しない）。"""
+def extract_hour_jst(datetime_str: str) -> int | None:
+    """"2026-08-11 23:59:53 UTC" のような文字列から時を取り出し、JST(UTC+9)に
+    変換した0〜23の時を返す。入力データのdatetime列は常にUTC表記という前提
+    （この集計ログの運用上、末尾に"UTC"が付く形式で統一されている）。
+    パースできない場合はNone。"""
     s = (datetime_str or "").strip()
     if len(s) < 13:
         return None
     try:
-        hour = int(s[11:13])
+        hour_utc = int(s[11:13])
     except ValueError:
         return None
-    return hour if 0 <= hour <= 23 else None
+    if not (0 <= hour_utc <= 23):
+        return None
+    return (hour_utc + 9) % 24
 
 
 # --- A. 日別クエリ量 ---------------------------------------------------------
@@ -115,11 +121,11 @@ def compute_daily_volume(rows: list[dict]) -> dict[str, int]:
 # --- B. 時間帯別クエリ量 -----------------------------------------------------
 
 def compute_hourly_volume(rows: list[dict]) -> dict:
-    """全日付をまとめて、0〜23時の時間帯別に総クエリ件数を集計する。"""
+    """全日付をまとめて、0〜23時（JST）の時間帯別に総クエリ件数を集計する。"""
     counts = {h: 0 for h in range(24)}
     unknown = 0
     for row in rows:
-        hour = extract_hour(row.get("datetime", ""))
+        hour = extract_hour_jst(row.get("datetime", ""))
         if hour is None:
             unknown += 1
             continue
@@ -155,7 +161,7 @@ def compute_proximity_by_prefecture(rows: list[dict]) -> dict:
     """各行のproximity座標を、最も近い都道府県代表地点(lib/jp_prefectures.py)に
     スナップして件数を集計する。proximity未指定・パース失敗の行は
     no_proximityとして別枠にする（分母には含む）。"""
-    counts = {name: 0 for name, _, _ in JP_PREFECTURES}
+    counts = {name: 0 for name, _, _, _ in JP_PREFECTURES}
     no_proximity = 0
     for row in rows:
         parsed = parse_proximity(row.get("proximity", ""))
@@ -272,7 +278,7 @@ def write_hourly_volume_csv(path: str, hourly_volume: dict) -> None:
     counts = hourly_volume["counts"]
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["hour", "count"])
+        writer.writerow(["hour_jst", "count"])
         for h in range(24):
             writer.writerow([f"{h:02d}", counts[h]])
         if hourly_volume["unknown"]:
@@ -284,14 +290,14 @@ def write_proximity_prefecture_csv(path: str, proximity_data: dict) -> None:
     counts = proximity_data["counts"]
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["prefecture", "count", "rate_pct"])
-        for name, _, _ in JP_PREFECTURES:
+        writer.writerow(["prefecture", "prefecture_romaji", "count", "rate_pct"])
+        for name, _, _, romaji in JP_PREFECTURES:
             count = counts[name]
             rate = f"{count / total * 100:.1f}%" if total else "0.0%"
-            writer.writerow([name, count, rate])
+            writer.writerow([name, romaji, count, rate])
         no_prox = proximity_data["no_proximity"]
         rate = f"{no_prox / total * 100:.1f}%" if total else "0.0%"
-        writer.writerow(["(no proximity)", no_prox, rate])
+        writer.writerow(["(no proximity)", "", no_prox, rate])
 
 
 def write_top_queries_csv(path: str, top_queries: dict[str, list[tuple[str, int]]], order: list[str]) -> None:
@@ -461,7 +467,7 @@ def render_hourly_volume_section(hourly_volume: dict) -> str:
             )
 
     svg = f"""
-      <svg class="line-chart" viewBox="0 0 {svg_w} {svg_h}" role="img" aria-label="Query volume by hour of day">
+      <svg class="line-chart" viewBox="0 0 {svg_w} {svg_h}" role="img" aria-label="Query volume by hour of day (JST)">
         {"".join(gridlines)}
         {"".join(bars)}
       </svg>"""
@@ -474,14 +480,15 @@ def render_hourly_volume_section(hourly_volume: dict) -> str:
 
     return f"""
     <section>
-      <h2>B. Query Volume by Hour of Day</h2>
-      <p class="muted">All dates combined, grouped by hour (timezone as recorded in the source data).</p>
+      <h2>B. Query Volume by Hour of Day (JST)</h2>
+      <p class="muted">All dates combined, grouped by hour. Source data is recorded in
+        UTC and converted to JST (UTC+9) here.</p>
       <div class="chart-frame">{svg}</div>
       <details class="card">
         <summary>Show data table</summary>
         <div class="table-scroll">
           <table class="data-table">
-            <thead><tr><th>hour</th><th class="num">count</th></tr></thead>
+            <thead><tr><th>hour (JST)</th><th class="num">count</th></tr></thead>
             <tbody>{table_rows}</tbody>
           </table>
         </div>
@@ -493,16 +500,19 @@ def render_proximity_prefecture_section(proximity_data: dict) -> str:
     total = proximity_data["total"]
     counts = proximity_data["counts"]
 
-    rated = [(name, counts[name], (counts[name] / total * 100) if total else 0.0) for name, _, _ in JP_PREFECTURES]
-    rated.sort(key=lambda t: -t[2])
+    # 件数順ではなく、JP_PREFECTURESの並び順（北海道→沖縄の標準的な都道府県順）で表示する
+    rated = [
+        (name, romaji, counts[name], (counts[name] / total * 100) if total else 0.0)
+        for name, _, _, romaji in JP_PREFECTURES
+    ]
 
     rows_html = "".join(
         f"""<div class="hbar-row">
-              <div class="hbar-label">{esc(name)}</div>
+              <div class="hbar-label">{esc(name)} ({esc(romaji)})</div>
               <div class="hbar-track"><div class="hbar-fill" style="width:{rate:.1f}%"></div></div>
               <div class="hbar-value">{rate:.1f}%</div>
             </div>"""
-        for name, count, rate in rated
+        for name, romaji, count, rate in rated
         if count > 0
     )
 
@@ -510,8 +520,8 @@ def render_proximity_prefecture_section(proximity_data: dict) -> str:
     no_prox_rate = (no_prox / total * 100) if total else 0.0
 
     table_rows = "".join(
-        f"<tr><td>{esc(name)}</td><td class='num'>{count}</td><td class='num'>{rate:.1f}%</td></tr>"
-        for name, count, rate in rated
+        f"<tr><td>{esc(name)} ({esc(romaji)})</td><td class='num'>{count}</td><td class='num'>{rate:.1f}%</td></tr>"
+        for name, romaji, count, rate in rated
     )
     table_rows += f"<tr><td>(no proximity)</td><td class='num'>{no_prox}</td><td class='num'>{no_prox_rate:.1f}%</td></tr>"
 
