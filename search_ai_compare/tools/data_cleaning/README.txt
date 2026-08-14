@@ -138,30 +138,37 @@ count-classifications  [suffix: classification_count_analysis_result]
 
 
 --------------------------------------------------------------
-analyze  [suffix: trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_long_tail_result / trend_report(html)]
+analyze  [suffix: trend_daily_volume_result / trend_hourly_volume_result / trend_proximity_prefecture_result / trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_long_tail_result / trend_report(html)]
 --------------------------------------------------------------
 概要:
   ai-classify（または ai-retry）の出力CSV（"ai_classification" 列付き）を
-  対象に、クエリ傾向を4観点で分析する。AIは呼ばない（分類済みCSVの集計のみ）。
+  対象に、クエリ傾向を7観点で分析する。AIは呼ばない（分類済みCSVの集計のみ）。
 
-  A. カテゴリ別頻出クエリ（各カテゴリ上位N件。--top-n で指定、デフォルト20）
-  B. 日別のカテゴリ推移（datetime列の日付部分でグループ化。折れ線グラフ＋
+  A. 日別クエリ量（全カテゴリ合計。折れ線グラフ）
+  B. 時間帯別クエリ量（全日付をまとめて0〜23時の時間帯別に集計。棒グラフ）
+  C. 都道府県別proximity分布（proximity座標を最寄りの都道府県代表地点に
+     スナップして集計。代表地点は lib/jp_prefectures.py にハードコードした
+     47都道府県庁所在地の概算緯度経度。外部API呼び出しなし。proximity未指定・
+     パース失敗の行は「(no proximity)」として別枠集計）
+  D. カテゴリ別頻出クエリ（各カテゴリ上位N件。--top-n で指定、デフォルト20）
+  E. 日別のカテゴリ推移（datetime列の日付部分でグループ化。折れ線グラフ＋
      行=ai_classification・列=dateのマトリクス表、セルは count(ratio%) 形式）
-  C. パラメータ利用率（bbox/proximity/poi_category/poi_category_exclusions/
+  F. パラメータ利用率（bbox/proximity/poi_category/poi_category_exclusions/
      near/navigation_profileの6パラメータが指定されている行の割合。カテゴリ別
      には分けない、全体を通した単純な利用率）
-  D. ロングテール分布（queryごとの総出現回数を 1000+/500-999/100-499/10-99/2-9/1
+  G. ロングテール分布（queryごとの総出現回数を 1000+/500-999/100-499/10-99/2-9/1
      の6バケットに分け、各バケットが総検索ボリュームの何%を占めるかを円グラフで
      表示。全体＋カテゴリ別、計8枚。「何回も検索されるqueryだけが重要とは限らない
      （低頻度queryの集合が無視できないボリュームを持つ場合がある）」を可視化する狙い）
 
-  1回の実行でCSV4種（Bの出力CSVはdate,ai_classification,count,ratioの
-  ロングフォーマット、Cはparameter,count,total,rate_pct、Dはscope,bucket,
-  unique_query_count,total_count,volume_pct）＋HTMLレポート1種（同一タイムスタンプ）
-  を local_output/ に出力する。
+  1回の実行でCSV7種（Aはdate,count、Bはhour,count、Cはprefecture,count,
+  rate_pct、Eはdate,ai_classification,count,ratioのロングフォーマット、
+  Fはparameter,count,total,rate_pct、Gはscope,bucket,unique_query_count,
+  total_count,volume_pct）＋HTMLレポート1種（同一タイムスタンプ）を
+  local_output/ に出力する。
   HTMLレポートはCSVと同じ内容をグラフ・テーブル付きでまとめたもの
   （ブラウザでそのまま開けるスタンドアロンファイル、英語表記、ライト/ダークモード対応。
-  query・カテゴリ名などデータ由来の値は元の言語のまま）。
+  query・カテゴリ名・都道府県名などデータ由来の値は元の言語のまま）。
 
 実行例:
   python3 main.py analyze classified.csv
@@ -169,17 +176,19 @@ analyze  [suffix: trend_top_queries_result / trend_daily_category_result / trend
 
 
 --------------------------------------------------------------
-analyze-ai  [suffix: trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_long_tail_result / trend_report_ai(html)]
+analyze-ai  [suffix: trend_daily_volume_result / trend_hourly_volume_result / trend_proximity_prefecture_result / trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_long_tail_result / trend_report_ai(html)]
 --------------------------------------------------------------
 概要:
-  analyze と同じA/B/C/D集計を行った上で、その集計結果をもとにLLM（Claude Sonnet 5、
-  プロキシ経由）にクエリ傾向のコメンタリーを書かせる版。CSV4種の内容・出力先は
+  analyze と同じA〜G集計を行った上で、その集計結果をもとにLLM（Claude Sonnet 5、
+  プロキシ経由）にクエリ傾向のコメンタリーを書かせる版。CSV7種の内容・出力先は
   analyzeと全く同じ（HTMLだけ suffix が trend_report_ai になる）。
 
   AIコメンタリーは2種類:
   - レポート冒頭の全体サマリー（2〜3行の短い概況、overview）
-  - A〜D各セクションに埋め込む「AI Insight」枠（Aはセクション全体に1つ＋
-    カテゴリごとに1つずつ、B/C/Dはそれぞれセクション全体に1つ）
+  - D〜G各セクションに埋め込む「AI Insight」枠（Dはセクション全体に1つ＋
+    カテゴリごとに1つずつ、E/F/Gはそれぞれセクション全体に1つ）
+    ※新設のA〜C（日別/時間帯別クエリ量・都道府県別proximity分布）には
+    現状AI Insightを付けていない
   いずれも平易・簡潔な英語で書くようプロンプトで指示している。
 
   鉄則: AIに渡すのは analyze が計算する集計結果（カテゴリ別頻出クエリ上位N件・

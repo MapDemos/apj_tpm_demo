@@ -1,13 +1,17 @@
 """
 main.py analyze サブコマンドが使うクエリ傾向分析ロジック（旧 analyze_query_trends.py）。
 
-分析する4観点:
-  A. カテゴリ別頻出クエリ（各カテゴリ上位N件）
-  B. 日別のカテゴリ比率推移（datetime列の日付部分でグループ化）
-  C. パラメータ利用率（bbox/proximity/poi_category/poi_category_exclusions/
+分析する7観点:
+  A. 日別クエリ量（全カテゴリ合計、折れ線グラフ）
+  B. 時間帯別クエリ量（全日付を集計し、0〜23時の時間帯別に棒グラフで表示）
+  C. 都道府県別proximity分布（proximity座標を最寄りの都道府県代表地点に
+     スナップして集計。代表地点は lib/jp_prefectures.py のハードコード値）
+  D. カテゴリ別頻出クエリ（各カテゴリ上位N件）
+  E. 日別のカテゴリ比率推移（datetime列の日付部分でグループ化）
+  F. パラメータ利用率（bbox/proximity/poi_category/poi_category_exclusions/
      near/navigation_profileがそれぞれ指定されている行の割合。カテゴリ別には
      分けず、全体を通した単純な利用率）
-  D. ロングテール分布（queryごとの総出現回数をバケット分けし、各バケットが
+  G. ロングテール分布（queryごとの総出現回数をバケット分けし、各バケットが
      総検索ボリュームの何%を占めるかを円グラフで示す。全体＋カテゴリ別）
 
 CSV出力・HTMLレポート生成の関数を提供する。ファイルパスの決定（output_utils）や
@@ -21,6 +25,7 @@ import sys
 from collections import Counter, defaultdict
 
 from lib.classification_common import CATEGORIES
+from lib.jp_prefectures import PREFECTURES as JP_PREFECTURES
 from lib.output_utils import make_output_path, current_timestamp
 
 REQUIRED_COLUMNS = [
@@ -84,7 +89,86 @@ def extract_date(datetime_str: str) -> str:
     return s[:10]
 
 
-# --- A. カテゴリ別頻出クエリ ---------------------------------------------
+def extract_hour(datetime_str: str) -> int | None:
+    """"2026-08-11 23:59:53 UTC" のような文字列から時(0〜23)だけを取り出す。
+    パースできない場合はNone。タイムゾーンは元データの表記のまま（変換しない）。"""
+    s = (datetime_str or "").strip()
+    if len(s) < 13:
+        return None
+    try:
+        hour = int(s[11:13])
+    except ValueError:
+        return None
+    return hour if 0 <= hour <= 23 else None
+
+
+# --- A. 日別クエリ量 ---------------------------------------------------------
+
+def compute_daily_volume(rows: list[dict]) -> dict[str, int]:
+    """カテゴリに関係なく、日付ごとの総クエリ件数を集計する。"""
+    counts: dict[str, int] = defaultdict(int)
+    for row in rows:
+        counts[extract_date(row.get("datetime", ""))] += 1
+    return dict(counts)
+
+
+# --- B. 時間帯別クエリ量 -----------------------------------------------------
+
+def compute_hourly_volume(rows: list[dict]) -> dict:
+    """全日付をまとめて、0〜23時の時間帯別に総クエリ件数を集計する。"""
+    counts = {h: 0 for h in range(24)}
+    unknown = 0
+    for row in rows:
+        hour = extract_hour(row.get("datetime", ""))
+        if hour is None:
+            unknown += 1
+            continue
+        counts[hour] += 1
+    return {"counts": counts, "unknown": unknown, "total": len(rows)}
+
+
+# --- C. 都道府県別proximity分布 ----------------------------------------------
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """2点間の直線距離（球面近似、km）。都道府県代表地点への最近傍判定にのみ使う。"""
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def parse_proximity(raw: str) -> tuple[float, float] | None:
+    """proximity列（"lng,lat"形式、Mapboxの座標順規約）をパースする。失敗時はNone。"""
+    parts = (raw or "").strip().split(",")
+    if len(parts) != 2:
+        return None
+    try:
+        lng, lat = float(parts[0]), float(parts[1])
+    except ValueError:
+        return None
+    return lng, lat
+
+
+def compute_proximity_by_prefecture(rows: list[dict]) -> dict:
+    """各行のproximity座標を、最も近い都道府県代表地点(lib/jp_prefectures.py)に
+    スナップして件数を集計する。proximity未指定・パース失敗の行は
+    no_proximityとして別枠にする（分母には含む）。"""
+    counts = {name: 0 for name, _, _ in JP_PREFECTURES}
+    no_proximity = 0
+    for row in rows:
+        parsed = parse_proximity(row.get("proximity", ""))
+        if parsed is None:
+            no_proximity += 1
+            continue
+        lng, lat = parsed
+        nearest_name = min(JP_PREFECTURES, key=lambda p: _haversine_km(lat, lng, p[1], p[2]))[0]
+        counts[nearest_name] += 1
+    return {"total": len(rows), "no_proximity": no_proximity, "counts": counts}
+
+
+# --- D. カテゴリ別頻出クエリ ---------------------------------------------
 
 def compute_top_queries(rows: list[dict], top_n: int) -> dict[str, list[tuple[str, int]]]:
     per_category_queries: dict[str, list[str]] = defaultdict(list)
@@ -102,7 +186,7 @@ def compute_top_queries(rows: list[dict], top_n: int) -> dict[str, list[tuple[st
     return result
 
 
-# --- B. 日別カテゴリ比率推移 -----------------------------------------------
+# --- E. 日別カテゴリ比率推移 -----------------------------------------------
 
 def compute_daily_category(rows: list[dict]) -> dict[str, dict[str, int]]:
     daily: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -113,7 +197,7 @@ def compute_daily_category(rows: list[dict]) -> dict[str, dict[str, int]]:
     return dict(daily)
 
 
-# --- C. パラメータ利用率 ----------------------------------------------------
+# --- F. パラメータ利用率 ----------------------------------------------------
 
 def compute_column_usage(rows: list[dict]) -> dict:
     """カテゴリ別には分けず、全行を通した単純なパラメータ利用率を集計する。"""
@@ -134,7 +218,7 @@ def category_order(seen_categories: set) -> list[str]:
     return ordered + unknown
 
 
-# --- D. ロングテール分布 ---------------------------------------------------
+# --- G. ロングテール分布 ---------------------------------------------------
 
 ALL_CATEGORIES_SCOPE = "All categories"
 
@@ -175,6 +259,40 @@ def compute_long_tail_by_scope(rows: list[dict], order: list[str]) -> dict[str, 
 
 
 # --- CSV出力 ---------------------------------------------------------------
+
+def write_daily_volume_csv(path: str, daily_volume: dict[str, int]) -> None:
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["date", "count"])
+        for date in sorted(daily_volume.keys()):
+            writer.writerow([date, daily_volume[date]])
+
+
+def write_hourly_volume_csv(path: str, hourly_volume: dict) -> None:
+    counts = hourly_volume["counts"]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["hour", "count"])
+        for h in range(24):
+            writer.writerow([f"{h:02d}", counts[h]])
+        if hourly_volume["unknown"]:
+            writer.writerow(["unknown", hourly_volume["unknown"]])
+
+
+def write_proximity_prefecture_csv(path: str, proximity_data: dict) -> None:
+    total = proximity_data["total"]
+    counts = proximity_data["counts"]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["prefecture", "count", "rate_pct"])
+        for name, _, _ in JP_PREFECTURES:
+            count = counts[name]
+            rate = f"{count / total * 100:.1f}%" if total else "0.0%"
+            writer.writerow([name, count, rate])
+        no_prox = proximity_data["no_proximity"]
+        rate = f"{no_prox / total * 100:.1f}%" if total else "0.0%"
+        writer.writerow(["(no proximity)", no_prox, rate])
+
 
 def write_top_queries_csv(path: str, top_queries: dict[str, list[tuple[str, int]]], order: list[str]) -> None:
     with open(path, "w", newline="", encoding="utf-8") as f:
@@ -229,11 +347,194 @@ def esc(s) -> str:
 
 
 def render_ai_insight(text: str | None) -> str:
-    """A/B/C/D各セクションに埋め込む短いAIコメンタリー1本分のHTML。
+    """各セクションに埋め込む短いAIコメンタリー1本分のHTML。
     textが無ければ何も出さない（analyzeの場合や生成失敗時はAI Insightごと非表示）。"""
     if not text:
         return ""
     return f'<p class="ai-insight"><span class="ai-badge">AI</span> {esc(text)}</p>'
+
+
+def render_daily_volume_section(daily_volume: dict[str, int]) -> str:
+    dates = sorted(daily_volume.keys())
+    svg_w, svg_h = 860, 220
+    pad_l, pad_r, pad_t, pad_b = 48, 16, 16, 28
+    plot_w = svg_w - pad_l - pad_r
+    plot_h = svg_h - pad_t - pad_b
+    n = len(dates)
+    max_count = max(daily_volume.values(), default=0) or 1
+
+    def x_at(i: int) -> float:
+        return pad_l + (i / (n - 1) * plot_w if n > 1 else plot_w / 2)
+
+    def y_at(count: int) -> float:
+        return pad_t + plot_h - (count / max_count * plot_h)
+
+    gridlines = []
+    for frac in (0.0, 0.5, 1.0):
+        y = pad_t + plot_h - frac * plot_h
+        value = round(max_count * frac)
+        gridlines.append(
+            f'<line x1="{pad_l}" y1="{y:.1f}" x2="{svg_w - pad_r}" y2="{y:.1f}" '
+            f'stroke="var(--gridline)" stroke-width="1"/>'
+            f'<text x="{pad_l - 6}" y="{y:.1f}" text-anchor="end" dominant-baseline="middle" '
+            f'class="axis-label">{value}</text>'
+        )
+
+    label_stride = max(1, n // 10)
+    x_labels = [
+        f'<text x="{x_at(i):.1f}" y="{svg_h - 6}" text-anchor="middle" class="axis-label">{esc(date[5:])}</text>'
+        for i, date in enumerate(dates)
+        if i % label_stride == 0 or i == n - 1
+    ]
+
+    points = [(x_at(i), y_at(daily_volume[date])) for i, date in enumerate(dates)]
+    path_d = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in points)
+    line = f'<path d="{path_d}" fill="none" stroke="var(--series-1, #2a78d6)" stroke-width="2"/>'
+    circles = "".join(
+        f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4" fill="var(--series-1, #2a78d6)">'
+        f'<title>{esc(date)}: {daily_volume[date]}</title></circle>'
+        for (x, y), date in zip(points, dates)
+    )
+
+    svg = f"""
+      <svg class="line-chart" viewBox="0 0 {svg_w} {svg_h}" role="img" aria-label="Daily query volume trend">
+        {"".join(gridlines)}
+        {"".join(x_labels)}
+        {line}
+        {circles}
+      </svg>"""
+
+    table_rows = "".join(f"<tr><td>{esc(date)}</td><td class='num'>{daily_volume[date]}</td></tr>" for date in dates)
+
+    return f"""
+    <section>
+      <h2>A. Daily Query Volume</h2>
+      <div class="chart-frame">{svg}</div>
+      <details class="card">
+        <summary>Show data table</summary>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>date</th><th class="num">count</th></tr></thead>
+            <tbody>{table_rows}</tbody>
+          </table>
+        </div>
+      </details>
+    </section>"""
+
+
+def render_hourly_volume_section(hourly_volume: dict) -> str:
+    counts = hourly_volume["counts"]
+    max_count = max(counts.values(), default=0) or 1
+    svg_w, svg_h = 860, 220
+    pad_l, pad_r, pad_t, pad_b = 48, 16, 16, 28
+    plot_w = svg_w - pad_l - pad_r
+    plot_h = svg_h - pad_t - pad_b
+    n = 24
+    bar_gap = 4
+    bar_w = (plot_w - bar_gap * (n - 1)) / n
+
+    gridlines = []
+    for frac in (0.0, 0.5, 1.0):
+        y = pad_t + plot_h - frac * plot_h
+        value = round(max_count * frac)
+        gridlines.append(
+            f'<line x1="{pad_l}" y1="{y:.1f}" x2="{svg_w - pad_r}" y2="{y:.1f}" '
+            f'stroke="var(--gridline)" stroke-width="1"/>'
+            f'<text x="{pad_l - 6}" y="{y:.1f}" text-anchor="end" dominant-baseline="middle" '
+            f'class="axis-label">{value}</text>'
+        )
+
+    bars = []
+    for h in range(24):
+        count = counts.get(h, 0)
+        bar_h = (count / max_count * plot_h) if max_count else 0
+        x = pad_l + h * (bar_w + bar_gap)
+        y = pad_t + plot_h - bar_h
+        bars.append(
+            f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" height="{bar_h:.1f}" '
+            f'fill="var(--series-1, #2a78d6)" rx="2"><title>{h:02d}:00 &ndash; {count}</title></rect>'
+        )
+        if h % 3 == 0:
+            bars.append(
+                f'<text x="{x + bar_w / 2:.1f}" y="{svg_h - 6}" text-anchor="middle" '
+                f'class="axis-label">{h:02d}</text>'
+            )
+
+    svg = f"""
+      <svg class="line-chart" viewBox="0 0 {svg_w} {svg_h}" role="img" aria-label="Query volume by hour of day">
+        {"".join(gridlines)}
+        {"".join(bars)}
+      </svg>"""
+
+    table_rows = "".join(
+        f"<tr><td>{h:02d}:00</td><td class='num'>{counts.get(h, 0)}</td></tr>" for h in range(24)
+    )
+    if hourly_volume["unknown"]:
+        table_rows += f"<tr><td>unknown</td><td class='num'>{hourly_volume['unknown']}</td></tr>"
+
+    return f"""
+    <section>
+      <h2>B. Query Volume by Hour of Day</h2>
+      <p class="muted">All dates combined, grouped by hour (timezone as recorded in the source data).</p>
+      <div class="chart-frame">{svg}</div>
+      <details class="card">
+        <summary>Show data table</summary>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>hour</th><th class="num">count</th></tr></thead>
+            <tbody>{table_rows}</tbody>
+          </table>
+        </div>
+      </details>
+    </section>"""
+
+
+def render_proximity_prefecture_section(proximity_data: dict) -> str:
+    total = proximity_data["total"]
+    counts = proximity_data["counts"]
+
+    rated = [(name, counts[name], (counts[name] / total * 100) if total else 0.0) for name, _, _ in JP_PREFECTURES]
+    rated.sort(key=lambda t: -t[2])
+
+    rows_html = "".join(
+        f"""<div class="hbar-row">
+              <div class="hbar-label">{esc(name)}</div>
+              <div class="hbar-track"><div class="hbar-fill" style="width:{rate:.1f}%"></div></div>
+              <div class="hbar-value">{rate:.1f}%</div>
+            </div>"""
+        for name, count, rate in rated
+        if count > 0
+    )
+
+    no_prox = proximity_data["no_proximity"]
+    no_prox_rate = (no_prox / total * 100) if total else 0.0
+
+    table_rows = "".join(
+        f"<tr><td>{esc(name)}</td><td class='num'>{count}</td><td class='num'>{rate:.1f}%</td></tr>"
+        for name, count, rate in rated
+    )
+    table_rows += f"<tr><td>(no proximity)</td><td class='num'>{no_prox}</td><td class='num'>{no_prox_rate:.1f}%</td></tr>"
+
+    return f"""
+    <section>
+      <h2>C. Proximity Distribution by Prefecture</h2>
+      <p class="muted">Each query's proximity coordinate snapped to the nearest of
+        Japan's 47 prefectural representative points (straight-line distance;
+        approximate, not an exact boundary lookup). {no_prox} of {total} queries
+        had no usable proximity ({no_prox_rate:.1f}%).</p>
+      <div class="hbar-chart hbar-chart-scroll">
+        {rows_html}
+      </div>
+      <details class="card">
+        <summary>Show data table</summary>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>prefecture</th><th class="num">count</th><th class="num">rate_pct</th></tr></thead>
+            <tbody>{table_rows}</tbody>
+          </table>
+        </div>
+      </details>
+    </section>"""
 
 
 def render_top_queries_section(
@@ -264,7 +565,7 @@ def render_top_queries_section(
         </details>""")
     return f"""
     <section>
-      <h2>A. Top Queries by Category (top {top_n})</h2>
+      <h2>D. Top Queries by Category (top {top_n})</h2>
       {render_ai_insight(overall_insight)}
       {"".join(blocks)}
     </section>"""
@@ -348,7 +649,7 @@ def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[
 
     return f"""
     <section>
-      <h2>B. Daily Category Trend</h2>
+      <h2>E. Daily Category Trend</h2>
       {render_ai_insight(insight)}
       <div class="legend">{legend}</div>
       <div class="chart-frame">{svg}</div>
@@ -387,7 +688,7 @@ def render_column_usage_section(usage: dict, insight: str | None = None) -> str:
 
     return f"""
     <section>
-      <h2>C. Parameter Usage Rate</h2>
+      <h2>F. Parameter Usage Rate</h2>
       {render_ai_insight(insight)}
       <div class="hbar-chart">
         {rows_html}
@@ -473,7 +774,7 @@ def render_long_tail_section(long_tail: dict[str, dict], order: list[str], insig
 
     return f"""
     <section>
-      <h2>D. Long-tail Distribution</h2>
+      <h2>G. Long-tail Distribution</h2>
       {render_ai_insight(insight)}
       <p class="muted">Share of total search volume by how often each query repeats
         (bucketed by each query's total occurrence count). A high share in the
@@ -515,6 +816,9 @@ def render_html_report(
     daily: dict[str, dict[str, int]],
     usage: dict[str, dict[str, int]],
     top_n: int,
+    daily_volume: dict[str, int] | None = None,
+    hourly_volume: dict | None = None,
+    proximity_data: dict | None = None,
     long_tail: dict[str, dict] | None = None,
     ai_commentary: dict | None = None,
 ) -> str:
@@ -664,6 +968,7 @@ def render_html_report(
   .hbar-track {{ flex: 1; height: 10px; background: var(--gridline); border-radius: 4px; overflow: hidden; }}
   .hbar-fill {{ height: 100%; background: var(--series-1, #2a78d6); border-radius: 4px; }}
   .hbar-value {{ width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }}
+  .hbar-chart-scroll {{ max-height: 480px; overflow-y: auto; }}
 
   .pie-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }}
   .pie-cell {{
@@ -681,6 +986,9 @@ def render_html_report(
   <div class="meta">Input file: {esc(input_path)} / Total rows: {total_rows} / Generated at: {esc(generated_at)}</div>
 
   {render_ai_commentary_section(ai_commentary) if ai_commentary else ""}
+  {render_daily_volume_section(daily_volume) if daily_volume else ""}
+  {render_hourly_volume_section(hourly_volume) if hourly_volume else ""}
+  {render_proximity_prefecture_section(proximity_data) if proximity_data else ""}
   {render_top_queries_section(top_queries, order, top_n, insights=insights)}
   {render_daily_category_section(daily, order, insight=insights.get("daily_trend") if insights else None)}
   {render_column_usage_section(usage, insight=insights.get("column_usage") if insights else None)}

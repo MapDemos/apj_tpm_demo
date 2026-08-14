@@ -300,22 +300,32 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     daily = analyze_trends_lib.compute_daily_category(rows)
     usage = analyze_trends_lib.compute_column_usage(rows)
     long_tail = analyze_trends_lib.compute_long_tail_by_scope(rows, order)
+    daily_volume = analyze_trends_lib.compute_daily_volume(rows)
+    hourly_volume = analyze_trends_lib.compute_hourly_volume(rows)
+    proximity_data = analyze_trends_lib.compute_proximity_by_prefecture(rows)
 
     ts = current_timestamp()
     top_queries_path = make_output_path(args.input_csv, "trend_top_queries_result", timestamp=ts)
     daily_path = make_output_path(args.input_csv, "trend_daily_category_result", timestamp=ts)
     usage_path = make_output_path(args.input_csv, "trend_column_usage_result", timestamp=ts)
     long_tail_path = make_output_path(args.input_csv, "trend_long_tail_result", timestamp=ts)
+    daily_volume_path = make_output_path(args.input_csv, "trend_daily_volume_result", timestamp=ts)
+    hourly_volume_path = make_output_path(args.input_csv, "trend_hourly_volume_result", timestamp=ts)
+    proximity_path = make_output_path(args.input_csv, "trend_proximity_prefecture_result", timestamp=ts)
     report_path = make_output_path(args.input_csv, "trend_report", timestamp=ts, ext="html")
 
     analyze_trends_lib.write_top_queries_csv(top_queries_path, top_queries, order)
     analyze_trends_lib.write_daily_category_csv(daily_path, daily, order)
     analyze_trends_lib.write_column_usage_csv(usage_path, usage)
     analyze_trends_lib.write_long_tail_csv(long_tail_path, long_tail, order)
+    analyze_trends_lib.write_daily_volume_csv(daily_volume_path, daily_volume)
+    analyze_trends_lib.write_hourly_volume_csv(hourly_volume_path, hourly_volume)
+    analyze_trends_lib.write_proximity_prefecture_csv(proximity_path, proximity_data)
 
     generated_at = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}"
     html_report = analyze_trends_lib.render_html_report(
         args.input_csv, generated_at, total_rows, order, top_queries, daily, usage, args.top_n,
+        daily_volume=daily_volume, hourly_volume=hourly_volume, proximity_data=proximity_data,
         long_tail=long_tail,
     )
     with open(report_path, "w", encoding="utf-8") as f:
@@ -328,6 +338,9 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     print(f"  {daily_path}")
     print(f"  {usage_path}")
     print(f"  {long_tail_path}")
+    print(f"  {daily_volume_path}")
+    print(f"  {hourly_volume_path}")
+    print(f"  {proximity_path}")
     print(f"  {report_path}  ← HTMLレポート")
 
 
@@ -342,18 +355,27 @@ def cmd_analyze_ai(args: argparse.Namespace) -> None:
     daily = analyze_trends_lib.compute_daily_category(rows)
     usage = analyze_trends_lib.compute_column_usage(rows)
     long_tail = analyze_trends_lib.compute_long_tail_by_scope(rows, order)
+    daily_volume = analyze_trends_lib.compute_daily_volume(rows)
+    hourly_volume = analyze_trends_lib.compute_hourly_volume(rows)
+    proximity_data = analyze_trends_lib.compute_proximity_by_prefecture(rows)
 
     ts = current_timestamp()
     top_queries_path = make_output_path(args.input_csv, "trend_top_queries_result", timestamp=ts)
     daily_path = make_output_path(args.input_csv, "trend_daily_category_result", timestamp=ts)
     usage_path = make_output_path(args.input_csv, "trend_column_usage_result", timestamp=ts)
     long_tail_path = make_output_path(args.input_csv, "trend_long_tail_result", timestamp=ts)
+    daily_volume_path = make_output_path(args.input_csv, "trend_daily_volume_result", timestamp=ts)
+    hourly_volume_path = make_output_path(args.input_csv, "trend_hourly_volume_result", timestamp=ts)
+    proximity_path = make_output_path(args.input_csv, "trend_proximity_prefecture_result", timestamp=ts)
     report_path = make_output_path(args.input_csv, "trend_report_ai", timestamp=ts, ext="html")
 
     analyze_trends_lib.write_top_queries_csv(top_queries_path, top_queries, order)
     analyze_trends_lib.write_daily_category_csv(daily_path, daily, order)
     analyze_trends_lib.write_column_usage_csv(usage_path, usage)
     analyze_trends_lib.write_long_tail_csv(long_tail_path, long_tail, order)
+    analyze_trends_lib.write_daily_volume_csv(daily_volume_path, daily_volume)
+    analyze_trends_lib.write_hourly_volume_csv(hourly_volume_path, hourly_volume)
+    analyze_trends_lib.write_proximity_prefecture_csv(proximity_path, proximity_data)
 
     # AIに渡すのはこの集計結果(summary_payload)だけ。元CSVの生データは渡さない。
     summary_payload = ai_analyze_lib.build_summary_payload(order, top_queries, daily, usage, long_tail)
@@ -366,6 +388,7 @@ def cmd_analyze_ai(args: argparse.Namespace) -> None:
     generated_at = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}"
     html_report = analyze_trends_lib.render_html_report(
         args.input_csv, generated_at, total_rows, order, top_queries, daily, usage, args.top_n,
+        daily_volume=daily_volume, hourly_volume=hourly_volume, proximity_data=proximity_data,
         long_tail=long_tail,
         ai_commentary=ai_commentary,
     )
@@ -380,6 +403,9 @@ def cmd_analyze_ai(args: argparse.Namespace) -> None:
     print(f"  {daily_path}")
     print(f"  {usage_path}")
     print(f"  {long_tail_path}")
+    print(f"  {daily_volume_path}")
+    print(f"  {hourly_volume_path}")
+    print(f"  {proximity_path}")
     print(f"  {report_path}  ← HTMLレポート（AIコメンタリー込み）")
 
 
