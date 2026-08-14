@@ -176,47 +176,88 @@ def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[
         for c in order
     )
 
-    bars = []
-    for date in dates:
-        day_total = sum(daily[date].values()) or 1
-        segments = []
-        for category in order:
-            count = daily[date].get(category, 0)
-            if count <= 0:
-                continue
-            ratio = count / day_total
-            pct = ratio * 100
-            segments.append(
-                f'<div class="segment" style="flex-grow:{ratio:.6f};background:var(--cat-{esc(category)})" '
-                f'title="{esc(date)} / {esc(category)}: {count} ({pct:.1f}%)"></div>'
-            )
-        bars.append(f"""
-          <div class="bar-col">
-            <div class="bar">{"".join(segments)}</div>
-            <div class="bar-label">{esc(date[5:])}</div>
-          </div>""")
+    # --- 折れ線グラフ（カテゴリごとに1本、x=日付、y=件数） ---
+    svg_w, svg_h = 860, 260
+    pad_l, pad_r, pad_t, pad_b = 48, 16, 16, 28
+    plot_w = svg_w - pad_l - pad_r
+    plot_h = svg_h - pad_t - pad_b
+    n = len(dates)
+    max_count = max((count for d in dates for count in daily[d].values()), default=0) or 1
 
-    table_rows = []
-    for date in dates:
-        day_total = sum(daily[date].values())
-        for category in order:
+    def x_at(i: int) -> float:
+        return pad_l + (i / (n - 1) * plot_w if n > 1 else plot_w / 2)
+
+    def y_at(count: int) -> float:
+        return pad_t + plot_h - (count / max_count * plot_h)
+
+    # 横方向のグリッド線＋y軸ラベル（0 / 50% / 100%目盛り）
+    gridlines = []
+    for frac in (0.0, 0.5, 1.0):
+        y = pad_t + plot_h - frac * plot_h
+        value = round(max_count * frac)
+        gridlines.append(
+            f'<line x1="{pad_l}" y1="{y:.1f}" x2="{svg_w - pad_r}" y2="{y:.1f}" '
+            f'stroke="var(--gridline)" stroke-width="1"/>'
+            f'<text x="{pad_l - 6}" y="{y:.1f}" text-anchor="end" dominant-baseline="middle" '
+            f'class="axis-label">{value}</text>'
+        )
+
+    # x軸ラベル（日付。込み合う場合は間引く）
+    label_stride = max(1, n // 10)
+    x_labels = [
+        f'<text x="{x_at(i):.1f}" y="{svg_h - 6}" text-anchor="middle" class="axis-label">{esc(date[5:])}</text>'
+        for i, date in enumerate(dates)
+        if i % label_stride == 0 or i == n - 1
+    ]
+
+    lines_svg = []
+    for category in order:
+        points = [(x_at(i), y_at(daily[date].get(category, 0))) for i, date in enumerate(dates)]
+        path_d = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in points)
+        lines_svg.append(f'<path d="{path_d}" fill="none" stroke="var(--cat-{esc(category)})" stroke-width="2"/>')
+        for i, date in enumerate(dates):
             count = daily[date].get(category, 0)
-            ratio = f"{count / day_total * 100:.1f}%" if day_total else "0.0%"
-            table_rows.append(
-                f"<tr><td>{esc(date)}</td><td>{esc(category)}</td><td class='num'>{count}</td><td class='num'>{ratio}</td></tr>"
+            day_total = sum(daily[date].values()) or 1
+            pct = count / day_total * 100
+            x, y = points[i]
+            lines_svg.append(
+                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4" fill="var(--cat-{esc(category)})">'
+                f'<title>{esc(date)} / {esc(category)}: {count} ({pct:.1f}%)</title></circle>'
             )
+
+    svg = f"""
+      <svg class="line-chart" viewBox="0 0 {svg_w} {svg_h}" role="img" aria-label="Daily category count trend">
+        {"".join(gridlines)}
+        {"".join(x_labels)}
+        {"".join(lines_svg)}
+      </svg>"""
+
+    # --- マトリクス表（行=ai_classification、列=date、セル=count(ratio%)） ---
+    header_cells = "".join(f'<th class="num">{esc(date)}</th>' for date in dates)
+    day_totals = {date: sum(daily[date].values()) for date in dates}
+    matrix_rows = []
+    for category in order:
+        cells = []
+        for date in dates:
+            count = daily[date].get(category, 0)
+            total = day_totals[date]
+            pct = (count / total * 100) if total else 0.0
+            cells.append(f'<td class="num">{count}({pct:.1f}%)</td>')
+        matrix_rows.append(f"<tr><td>{esc(category)}</td>{''.join(cells)}</tr>")
 
     return f"""
     <section>
-      <h2>B. Daily Category Ratio Trend</h2>
+      <h2>B. Daily Category Trend</h2>
       <div class="legend">{legend}</div>
-      <div class="chart stacked-bars">{"".join(bars)}</div>
+      <div class="chart-frame">{svg}</div>
       <details class="card">
         <summary>Show data table</summary>
-        <table class="data-table">
-          <thead><tr><th>date</th><th>ai_classification</th><th class="num">count</th><th class="num">ratio</th></tr></thead>
-          <tbody>{"".join(table_rows)}</tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>ai_classification</th>{header_cells}</tr></thead>
+            <tbody>{"".join(matrix_rows)}</tbody>
+          </table>
+        </div>
       </details>
     </section>"""
 
@@ -381,22 +422,17 @@ def render_html_report(
   .legend-item {{ display: flex; align-items: center; gap: 6px; color: var(--text-secondary); }}
   .swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; }}
 
-  .chart.stacked-bars {{
-    display: flex;
-    align-items: flex-end;
-    gap: 4px;
-    height: 240px;
-    padding: 8px 8px 0;
+  .chart-frame {{
     background: var(--surface-1);
     border: 1px solid var(--border);
     border-radius: 8px;
+    padding: 8px;
     overflow-x: auto;
   }}
-  .bar-col {{ display: flex; flex-direction: column; align-items: center; flex: 1 0 20px; min-width: 20px; height: 100%; }}
-  .bar {{ width: 100%; flex: 1; display: flex; flex-direction: column; border-radius: 3px 3px 0 0; overflow: hidden; }}
-  .segment {{ width: 100%; border-bottom: 2px solid var(--surface-1); }}
-  .segment:last-child {{ border-bottom: none; }}
-  .bar-label {{ font-size: 0.6875rem; color: var(--muted); margin-top: 6px; writing-mode: vertical-rl; }}
+  .line-chart {{ width: 100%; min-width: 560px; height: auto; display: block; }}
+  .line-chart .axis-label {{ font-size: 9px; fill: var(--muted); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }}
+  .line-chart circle {{ cursor: default; }}
+  .table-scroll {{ overflow-x: auto; }}
 
   .hbar-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 8px; }}
   .hbar-chart {{ background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }}

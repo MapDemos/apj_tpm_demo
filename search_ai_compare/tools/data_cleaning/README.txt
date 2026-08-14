@@ -127,10 +127,12 @@ analyze  [suffix: trend_top_queries_result / trend_daily_category_result / trend
   対象に、クエリ傾向を3観点で分析する。AIは呼ばない（分類済みCSVの集計のみ）。
 
   A. カテゴリ別頻出クエリ（各カテゴリ上位N件。--top-n で指定、デフォルト20）
-  B. 日別のカテゴリ比率推移（datetime列の日付部分でグループ化）
+  B. 日別のカテゴリ推移（datetime列の日付部分でグループ化。折れ線グラフ＋
+     行=ai_classification・列=dateのマトリクス表、セルは count(ratio%) 形式）
   C. カテゴリ×列指定率クロス集計（bbox/proximity/near の指定率をカテゴリ別に集計）
 
-  1回の実行でCSV3種＋HTMLレポート1種（同一タイムスタンプ）を output/ に出力する。
+  1回の実行でCSV3種（Bの出力CSVはdate,ai_classification,count,ratioの
+  ロングフォーマット）＋HTMLレポート1種（同一タイムスタンプ）を output/ に出力する。
   HTMLレポートはCSVと同じ内容をグラフ・テーブル付きでまとめたもの
   （ブラウザでそのまま開けるスタンドアロンファイル、英語表記、ライト/ダークモード対応。
   query・カテゴリ名などデータ由来の値は元の言語のまま）。
