@@ -37,13 +37,13 @@ import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from classification_common import (
+from lib.classification_common import (
     MODEL,
     SYSTEM_PROMPT,
     numbers_to_labels,
     parse_response_text,
 )
-from output_utils import make_output_path
+from lib.output_utils import make_output_path
 
 PROXY_URL = "https://okqfpyxf4oe6htegrlcgrwdssa0yoxcr.lambda-url.us-east-1.on.aws/"
 SUFFIX = "classified_analysis_result"

@@ -22,7 +22,7 @@ CSV重複除去スクリプト（元フォーマット保持版）
 import csv
 import sys
 
-from output_utils import make_output_path
+from lib.output_utils import make_output_path
 
 WINDOW = 5  # 「後ろ5行以内」の窓幅
 SUFFIX = "cleaning"

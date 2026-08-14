@@ -14,7 +14,7 @@ import csv
 import sys
 from collections import Counter
 
-from output_utils import make_output_path
+from lib.output_utils import make_output_path
 
 SUFFIX = "count_analysis_result"
 

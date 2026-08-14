@@ -39,13 +39,13 @@ import anthropic
 from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
 from anthropic.types.messages.batch_create_params import Request
 
-from classification_common import (
+from lib.classification_common import (
     MODEL,
     SYSTEM_PROMPT,
     numbers_to_labels,
     parse_response_text,
 )
-from output_utils import make_output_path
+from lib.output_utils import make_output_path
 
 MAX_REQUESTS_PER_JOB = 100_000
 POLL_INTERVAL_SECONDS = 30

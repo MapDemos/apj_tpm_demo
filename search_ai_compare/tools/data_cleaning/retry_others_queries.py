@@ -30,7 +30,7 @@ import sys
 import time
 
 from classify_queries import classify_all
-from output_utils import make_output_path
+from lib.output_utils import make_output_path
 
 SUFFIX = "classified_retry_analysis_result"
 

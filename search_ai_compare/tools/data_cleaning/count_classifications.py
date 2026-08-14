@@ -16,8 +16,8 @@ classify_queries.py（または retry_others_queries.py）の出力CSVにある
 import csv
 import sys
 
-from classification_common import CATEGORIES
-from output_utils import make_output_path
+from lib.classification_common import CATEGORIES
+from lib.output_utils import make_output_path
 
 SUFFIX = "classification_count_analysis_result"
 

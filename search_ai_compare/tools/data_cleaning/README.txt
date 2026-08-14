@@ -13,10 +13,17 @@ tools/data_cleaning/ 配下スクリプト一覧
 
     <元のファイル名（拡張子なし）>_<何をしたか分かるsuffix>_<YYYYMMDD_HHMMSS>.csv
 
-という形式になる（output_utils.py の make_output_path が生成）。
+という形式になる（lib/output_utils.py の make_output_path が生成）。
 パイプラインで前段の出力を次段の入力に渡していくと、ファイル名に
 suffixが積み重なっていくので、ファイル名だけで処理履歴を追える。
 output/ 配下のCSVはgitignore対象（.gitignoreで*.csvを除外）。
+
+フォルダ構成について
+--------------------------------------------------------------
+直接実行するスクリプト（python3 xxx.py として使うもの）は
+data_cleaning/ 直下に置き、他のスクリプトからimportされるだけの
+共有モジュール（classification_common.py, output_utils.py）は
+lib/ 配下にまとめている。
 
 
 --------------------------------------------------------------
@@ -52,12 +59,13 @@ count_queries.py  [suffix: count_analysis_result]
 
 
 --------------------------------------------------------------
-classification_common.py
+lib/classification_common.py
 --------------------------------------------------------------
 概要:
   classify_queries.py / classify_queries_batch.py が共有する、
   query分類のカテゴリ定義（1〜7の番号とカテゴリ名の対応）とプロンプト
   生成ロジック。単体では実行しない（importされるだけのモジュール）。
+  実行エントリポイントではないため lib/ 配下にまとめている。
 
   カテゴリ: 1=poi, 2=poi_brand, 3=poi_category, 4=address,
   5=unsupported_query_location_intent, 6=broken_query, 7=others
@@ -123,12 +131,13 @@ count_classifications.py  [suffix: classification_count_analysis_result]
 
 
 --------------------------------------------------------------
-output_utils.py
+lib/output_utils.py
 --------------------------------------------------------------
 概要:
   各スクリプトが共有する、出力ファイルパスの命名ロジック
   （make_output_path: 元ファイル名 + suffix + 秒までのタイムスタンプ → output/配下）。
   単体では実行しない（importされるだけのモジュール）。
+  実行エントリポイントではないため lib/ 配下にまとめている。
 
 
 --------------------------------------------------------------

@@ -1,5 +1,5 @@
 """
-data_cleaning/ 配下の各スクリプトが共有する、出力ファイルパスの命名ロジック。
+data_cleaning/ 配下の各スクリプトが共有する、出力ファイルパスの命名ロジック（lib/配下）。
 
 出力は必ず data_cleaning/output/ 配下に、
     <元のファイル名（拡張子なし）>_<suffix>_<YYYYMMDD_HHMMSS>.csv
@@ -14,7 +14,8 @@ data_cleaning/ 配下の各スクリプトが共有する、出力ファイル�
 import os
 from datetime import datetime
 
-OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+_DATA_CLEANING_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUTPUT_DIR = os.path.join(_DATA_CLEANING_DIR, "output")
 
 
 def make_output_path(input_path: str, suffix: str) -> str:
