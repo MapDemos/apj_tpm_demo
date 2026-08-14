@@ -1,25 +1,12 @@
-#!/usr/bin/env python3
 """
-classify_queries.py（または retry_others_queries.py）の出力CSVにある
-"ai_classification" 列を件数集計するスクリプト
+main.py count-classifications サブコマンドが使うロジック（旧 count_classifications.py）。
 
-出力先は output/ 配下に自動生成
-（<入力ファイル名>_classification_count_analysis_result_<タイムスタンプ>.csv）。
-出力CSV列: ai_classification, count, ratio
-（classification_common.py のカテゴリ順で出力。
- 想定外のラベルが含まれる場合は、その他として末尾に件数の降順で追加する）
-
-使い方:
-    python3 count_classifications.py input.csv
+ai-classify（または ai-retry）の出力CSVにある "ai_classification" 列を件数集計する。
 """
 
 import csv
-import sys
 
 from lib.classification_common import CATEGORIES
-from lib.output_utils import make_output_path
-
-SUFFIX = "classification_count_analysis_result"
 
 
 def extract_labels(input_path: str) -> list[str]:
@@ -60,28 +47,3 @@ def write_counts(output_path: str, items: list[tuple[str, int]], total: int) -> 
         for label, count in items:
             ratio = f"{count / total * 100:.1f}%" if total else "0.0%"
             writer.writerow([label, count, ratio])
-
-
-def main() -> None:
-    if len(sys.argv) != 2:
-        print("使い方: python3 count_classifications.py <input.csv>", file=sys.stderr)
-        sys.exit(1)
-
-    input_path = sys.argv[1]
-    output_path = make_output_path(input_path, SUFFIX)
-
-    labels = extract_labels(input_path)
-    items = count_labels(labels)
-    total = len(labels)
-
-    write_counts(output_path, items, total)
-
-    print(f"総行数: {total}")
-    for label, count in items:
-        ratio = f"{count / total * 100:.1f}%" if total else "0.0%"
-        print(f"  {label}: {count}件（{ratio}）")
-    print(f"出力先: {output_path}")
-
-
-if __name__ == "__main__":
-    main()

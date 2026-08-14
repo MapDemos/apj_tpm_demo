@@ -1,38 +1,16 @@
-#!/usr/bin/env python3
 """
-LLM(Claude Haiku)を使って query 列を分類し、判定結果列を追加したCSVを出力するスクリプト
-（プロキシ経由・並行処理版）
+main.py ai-classify / ai-retry サブコマンドが使う分類ロジック（旧 classify_queries.py）。
 
-分類カテゴリの定義は classification_common.py を参照（番号1〜7で返させ、
-Python側でカテゴリ名に変換する。出力トークン削減のため、
-"unsupported_query_location_intent" のような長いカテゴリ名文字列を
-そのまま返させない）。
+LLM（Claude Haiku、プロキシ経由）を使って query 配列を分類する。バッチ分割＋並行処理版。
+1バッチがまるごと失敗した場合は、その中身を1件ずつ個別に再試行し、
+それでも失敗した行だけを others にフォールバックする。
 
-送信するのは "query" 列の値のみ（他の列はLLMに渡さない）。
-判定結果は元のCSVに "ai_classification" 列を追加して出力する（列の値はカテゴリ名の文字列）。
-
-出力先は output/ 配下に自動生成
-（<入力ファイル名>_classified_analysis_result_<タイムスタンプ>.csv）。
-
-使い方:
-    python3 classify_queries.py input.csv [--batch-size 30] [--workers 8] [--max-batches N]
-
---workers はバッチリクエストを何件同時に投げるかの並列数。
-プロキシ側のスループット次第だが、まずは 5〜10 程度を推奨。
-
---max-batches は先頭から指定バッチ数までに処理を絞るオプション（動作確認用）。
-未指定なら全件処理する。指定した場合、出力CSVも処理した範囲の行のみになる点に注意。
-
-事前準備:
-    特になし（このスクリプトが直接叩くのはプロキシ経由のLambda URLで、
-    x-api-key等の認証情報はプロキシ側で付与されるためローカルには不要）
+送信するのは query の値のみ（他の列はLLMに渡さない）。
+分類カテゴリの定義は classification_common.py を参照。
 """
 
-import argparse
-import csv
 import json
 import sys
-import time
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -43,10 +21,8 @@ from lib.classification_common import (
     numbers_to_labels,
     parse_response_text,
 )
-from lib.output_utils import make_output_path
 
 PROXY_URL = "https://okqfpyxf4oe6htegrlcgrwdssa0yoxcr.lambda-url.us-east-1.on.aws/"
-SUFFIX = "classified_analysis_result"
 
 
 def call_claude(queries: list[str]) -> tuple[list[str], dict]:
@@ -158,55 +134,3 @@ def classify_all(queries: list[str], batch_size: int, max_workers: int) -> tuple
         labels.extend(results[start])
 
     return labels, total_in, total_out
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("input_csv")
-    parser.add_argument("--batch-size", type=int, default=30)
-    parser.add_argument("--workers", type=int, default=8, help="並行実行するリクエスト数")
-    parser.add_argument(
-        "--max-batches",
-        type=int,
-        default=None,
-        help="先頭から指定バッチ数までに処理を絞る（動作確認用。未指定なら全件処理。"
-        "出力CSVも処理した範囲の行のみになる）",
-    )
-    args = parser.parse_args()
-
-    output_path = make_output_path(args.input_csv, SUFFIX)
-
-    with open(args.input_csv, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames
-        if fieldnames is None or "query" not in fieldnames:
-            raise ValueError('入力CSVに "query" 列が見つかりません')
-        rows = list(reader)
-
-    if args.max_batches is not None:
-        rows = rows[: args.max_batches * args.batch_size]
-
-    queries = [row.get("query", "") for row in rows]
-
-    t0 = time.time()
-    labels, total_in, total_out = classify_all(queries, args.batch_size, args.workers)
-    elapsed = time.time() - t0
-
-    out_fieldnames = list(fieldnames) + ["ai_classification"]
-    for row, label in zip(rows, labels):
-        row["ai_classification"] = label
-
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=out_fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    print(f"\n処理件数: {len(rows)}")
-    print(f"所要時間: {elapsed:.1f}秒")
-    print(f"input tokens合計 : {total_in}")
-    print(f"output tokens合計: {total_out}")
-    print(f"出力先: {output_path}")
-
-
-if __name__ == "__main__":
-    main()

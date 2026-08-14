@@ -1,30 +1,16 @@
-#!/usr/bin/env python3
 """
-classify_queries.py（または retry_others_queries.py）の出力CSV
-（"ai_classification" 列付き）を対象に、クエリ傾向を分析するスクリプト。
+main.py analyze サブコマンドが使うクエリ傾向分析ロジック（旧 analyze_query_trends.py）。
 
 分析する3観点:
-  A. カテゴリ別頻出クエリ（各カテゴリ上位N件。--top-n で指定、デフォルト20）
+  A. カテゴリ別頻出クエリ（各カテゴリ上位N件）
   B. 日別のカテゴリ比率推移（datetime列の日付部分でグループ化）
   C. カテゴリ×列指定率クロス集計（bbox/proximity/near がそれぞれ
      指定されている行の割合を、カテゴリごとに集計）
 
-出力は output/ 配下に自動生成。1回の実行で4ファイル（CSV3種＋HTMLレポート1種）が
-同じタイムスタンプで出力される:
-  <入力ファイル名>_trend_top_queries_result_<タイムスタンプ>.csv
-  <入力ファイル名>_trend_daily_category_result_<タイムスタンプ>.csv
-  <入力ファイル名>_trend_column_usage_result_<タイムスタンプ>.csv
-  <入力ファイル名>_trend_report_<タイムスタンプ>.html          ← 上記3つをまとめた分析レポート
-
-使い方:
-    python3 analyze_query_trends.py input.csv
-    python3 analyze_query_trends.py input.csv --top-n 30
-
-想定入力: "query", "ai_classification", "datetime", "bbox", "proximity", "near" 列を含むCSV
-（classify_queries.py / retry_others_queries.py の出力）。
+CSV出力・HTMLレポート生成の関数を提供する。ファイルパスの決定（output_utils）や
+CLI引数の処理は main.py 側が担当し、このモジュールは集計・整形ロジックに専念する。
 """
 
-import argparse
 import csv
 import html
 import sys
@@ -170,15 +156,15 @@ def render_top_queries_section(top_queries: dict[str, list[tuple[str, int]]], or
         blocks.append(f"""
         <details class="card" {"open" if category == order[0] else ""}>
           <summary><span class="cat-dot" style="background:var(--cat-{esc(category)})"></span>{esc(category)}
-            <span class="muted">（{len(items)}件）</span></summary>
+            <span class="muted">({len(items)} queries)</span></summary>
           <table class="data-table">
             <thead><tr><th>#</th><th>query</th><th class="num">count</th></tr></thead>
-            <tbody>{rows_html if rows_html else '<tr><td colspan="3" class="muted">データなし</td></tr>'}</tbody>
+            <tbody>{rows_html if rows_html else '<tr><td colspan="3" class="muted">No data</td></tr>'}</tbody>
           </table>
         </details>""")
     return f"""
     <section>
-      <h2>A. カテゴリ別頻出クエリ（上位{top_n}件）</h2>
+      <h2>A. Top Queries by Category (top {top_n})</h2>
       {"".join(blocks)}
     </section>"""
 
@@ -202,7 +188,7 @@ def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[
             pct = ratio * 100
             segments.append(
                 f'<div class="segment" style="flex-grow:{ratio:.6f};background:var(--cat-{esc(category)})" '
-                f'title="{esc(date)} / {esc(category)}: {count}件（{pct:.1f}%）"></div>'
+                f'title="{esc(date)} / {esc(category)}: {count} ({pct:.1f}%)"></div>'
             )
         bars.append(f"""
           <div class="bar-col">
@@ -222,11 +208,11 @@ def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[
 
     return f"""
     <section>
-      <h2>B. 日別カテゴリ比率推移</h2>
+      <h2>B. Daily Category Ratio Trend</h2>
       <div class="legend">{legend}</div>
       <div class="chart stacked-bars">{"".join(bars)}</div>
       <details class="card">
-        <summary>データテーブルを表示</summary>
+        <summary>Show data table</summary>
         <table class="data-table">
           <thead><tr><th>date</th><th>ai_classification</th><th class="num">count</th><th class="num">ratio</th></tr></thead>
           <tbody>{"".join(table_rows)}</tbody>
@@ -274,14 +260,14 @@ def render_column_usage_section(usage: dict[str, dict[str, int]], order: list[st
 
     return f"""
     <section>
-      <h2>C. カテゴリ×列指定率クロス集計</h2>
+      <h2>C. Column Usage Rate by Category</h2>
       <div class="hbar-grid">
-        {metric_chart("bbox", "bbox 指定率")}
-        {metric_chart("proximity", "proximity 指定率")}
-        {metric_chart("near", "near 指定率")}
+        {metric_chart("bbox", "bbox specified rate")}
+        {metric_chart("proximity", "proximity specified rate")}
+        {metric_chart("near", "near specified rate")}
       </div>
       <details class="card">
-        <summary>データテーブルを表示</summary>
+        <summary>Show data table</summary>
         <table class="data-table">
           <thead><tr><th>ai_classification</th><th class="num">total</th>
             <th class="num">bbox_rate</th><th class="num">proximity_rate</th><th class="num">near_rate</th></tr></thead>
@@ -309,10 +295,10 @@ def render_html_report(
     )
 
     return f"""<!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>クエリ傾向分析レポート</title>
+<title>Query Trend Analysis Report</title>
 <style>
   :root {{
     color-scheme: light;
@@ -423,8 +409,8 @@ def render_html_report(
 </head>
 <body>
 <main>
-  <h1>クエリ傾向分析レポート</h1>
-  <div class="meta">入力ファイル: {esc(input_path)} ／ 総行数: {total_rows}件 ／ 生成日時: {esc(generated_at)}</div>
+  <h1>Query Trend Analysis Report</h1>
+  <div class="meta">Input file: {esc(input_path)} / Total rows: {total_rows} / Generated at: {esc(generated_at)}</div>
 
   {render_top_queries_section(top_queries, order, top_n)}
   {render_daily_category_section(daily, order)}
@@ -433,49 +419,3 @@ def render_html_report(
 </body>
 </html>
 """
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("input_csv")
-    parser.add_argument("--top-n", type=int, default=20, help="カテゴリ別頻出クエリの上位何件を出すか（デフォルト20）")
-    args = parser.parse_args()
-
-    fieldnames, rows = read_rows(args.input_csv)
-    total_rows = len(rows)
-
-    seen_categories = {row.get("ai_classification", "") for row in rows}
-    order = category_order(seen_categories)
-
-    top_queries = compute_top_queries(rows, args.top_n)
-    daily = compute_daily_category(rows)
-    usage = compute_column_usage(rows)
-
-    ts = current_timestamp()
-    top_queries_path = make_output_path(args.input_csv, "trend_top_queries_result", timestamp=ts)
-    daily_path = make_output_path(args.input_csv, "trend_daily_category_result", timestamp=ts)
-    usage_path = make_output_path(args.input_csv, "trend_column_usage_result", timestamp=ts)
-    report_path = make_output_path(args.input_csv, "trend_report", timestamp=ts, ext="html")
-
-    write_top_queries_csv(top_queries_path, top_queries, order)
-    write_daily_category_csv(daily_path, daily, order)
-    write_column_usage_csv(usage_path, usage, order)
-
-    generated_at = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}"
-    html_report = render_html_report(
-        args.input_csv, generated_at, total_rows, order, top_queries, daily, usage, args.top_n
-    )
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write(html_report)
-
-    print(f"総行数: {total_rows}")
-    print(f"カテゴリ数: {len(order)}（{', '.join(order)}）")
-    print(f"出力先:")
-    print(f"  {top_queries_path}")
-    print(f"  {daily_path}")
-    print(f"  {usage_path}")
-    print(f"  {report_path}  ← HTMLレポート")
-
-
-if __name__ == "__main__":
-    main()
