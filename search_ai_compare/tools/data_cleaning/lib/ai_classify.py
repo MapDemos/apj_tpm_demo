@@ -25,12 +25,12 @@ from lib.classification_common import (
 PROXY_URL = "https://okqfpyxf4oe6htegrlcgrwdssa0yoxcr.lambda-url.us-east-1.on.aws/"
 
 
-def call_claude(queries: list[str]) -> tuple[list[str], dict]:
+def call_claude(queries: list[str], model: str = MODEL) -> tuple[list[str], dict]:
     """queriesのバッチをLLMに送り、分類結果リストと usage を返す"""
     user_content = json.dumps(queries, ensure_ascii=False)
 
     body = {
-        "model": MODEL,
+        "model": model,
         "max_tokens": 4096,
         "temperature": 0,
         "system": SYSTEM_PROMPT,
@@ -65,22 +65,22 @@ def call_claude(queries: list[str]) -> tuple[list[str], dict]:
     return labels, usage
 
 
-def _classify_single_safe(query: str) -> tuple[str, dict]:
+def _classify_single_safe(query: str, model: str) -> tuple[str, dict]:
     """1件だけを分類する。失敗時は others を返す。"""
     try:
-        labels, usage = call_claude([query])
+        labels, usage = call_claude([query], model)
         return labels[0], usage
     except (urllib.error.URLError, ValueError, json.JSONDecodeError) as e:
         print(f"    警告: 個別再試行も失敗（othersにします）: {query!r}: {e}", file=sys.stderr)
         return "others", {}
 
 
-def _classify_batch_safe(batch: list[str], start: int, end: int, n: int) -> tuple[int, list[str], dict]:
+def _classify_batch_safe(batch: list[str], start: int, end: int, n: int, model: str) -> tuple[int, list[str], dict]:
     """1バッチ分の分類を実行。バッチ全体が失敗した場合は、その行だけを丸ごと
     othersで埋めるのではなく、1件ずつ個別に再試行し、それでも失敗した行だけを
     othersにフォールバックする。"""
     try:
-        labels, usage = call_claude(batch)
+        labels, usage = call_claude(batch, model)
         return start, labels, usage
     except (urllib.error.URLError, ValueError, json.JSONDecodeError) as e:
         print(
@@ -91,7 +91,7 @@ def _classify_batch_safe(batch: list[str], start: int, end: int, n: int) -> tupl
     labels = []
     usage = {"input_tokens": 0, "output_tokens": 0}
     for query in batch:
-        label, single_usage = _classify_single_safe(query)
+        label, single_usage = _classify_single_safe(query, model)
         labels.append(label)
         usage["input_tokens"] += single_usage.get("input_tokens", 0) or 0
         usage["output_tokens"] += single_usage.get("output_tokens", 0) or 0
@@ -99,7 +99,7 @@ def _classify_batch_safe(batch: list[str], start: int, end: int, n: int) -> tupl
     return start, labels, usage
 
 
-def classify_all(queries: list[str], batch_size: int, max_workers: int) -> tuple[list[str], int, int]:
+def classify_all(queries: list[str], batch_size: int, max_workers: int, model: str = MODEL) -> tuple[list[str], int, int]:
     n = len(queries)
     batches = []
     for start in range(0, n, batch_size):
@@ -113,7 +113,7 @@ def classify_all(queries: list[str], batch_size: int, max_workers: int) -> tuple
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_classify_batch_safe, batch, start, end, n): (start, end)
+            executor.submit(_classify_batch_safe, batch, start, end, n, model): (start, end)
             for start, end, batch in batches
         }
         for future in as_completed(futures):
@@ -134,3 +134,16 @@ def classify_all(queries: list[str], batch_size: int, max_workers: int) -> tuple
         labels.extend(results[start])
 
     return labels, total_in, total_out
+
+
+def classify_unique(queries: list[str], batch_size: int, max_workers: int, model: str = MODEL) -> tuple[dict[str, str], int, int]:
+    """queriesからユニークな値だけを抽出してLLMに渡し、{query文字列: label} の
+    辞書を返す。同じqueryが何度出現しても分類は1回で済ませることで、
+    API呼び出し回数を削減するとともに、同一クエリが別バッチに分かれて
+    別々の判定結果になる不整合を防ぐ。呼び出し元は返ってきた辞書を
+    row["query"] をキーに引くことで、行の位置(インデックス)に頼らず
+    元データへマッピングできる。"""
+    unique_queries = list(dict.fromkeys(queries))
+    labels, total_in, total_out = classify_all(unique_queries, batch_size, max_workers, model)
+    mapping = dict(zip(unique_queries, labels))
+    return mapping, total_in, total_out

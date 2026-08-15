@@ -7,9 +7,9 @@ data_cleaning/ のCSVクレンジング・AI分類・傾向分析を1つにま�
                           same_query_count列を自動付与）
   add-query-count        same_query_count列だけを付与する（重複除去はしない、プログラム的カウントのみ、AI不使用）
   count-queries          query出現回数カウント
-  ai-classify             AI分類（プロキシ経由・並行処理）
-  ai-classify-batch       AI分類（Anthropic Message Batches API版、要ANTHROPIC_API_KEY）
-  ai-retry                ai_classificationがothersの行だけAIで再分類
+  ai-classify             AI分類（プロキシ経由・並行処理。--batch-apiでBatches API版
+                          （要ANTHROPIC_API_KEYまたは--token）に切り替え可）
+  ai-retry                ai_classificationが指定カテゴリ（デフォルトothers）の行だけAIで再分類
   count-classifications  分類結果の件数集計
   analyze                クエリ傾向分析（HTMLレポート込み）
   analyze-ai              クエリ傾向分析＋AIコメンタリー（HTMLレポート上部にAI要約を追加）
@@ -27,6 +27,7 @@ import time
 from lib import ai_analyze as ai_analyze_lib
 from lib import ai_classify as ai_classify_lib
 from lib import analyze_trends as analyze_trends_lib
+from lib import classification_common as classification_common_lib
 from lib import count_classifications as count_classifications_lib
 from lib import count_queries as count_queries_lib
 from lib import dedup as dedup_lib
@@ -106,118 +107,46 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
         rows = rows[: args.max_batches * args.batch_size]
 
     queries = [row.get("query", "") for row in rows]
+    unique_count = len(set(queries))
+    model = classification_common_lib.MODEL_CHOICES[args.model]
 
     t0 = time.time()
-    labels, total_in, total_out = ai_classify_lib.classify_all(queries, args.batch_size, args.workers)
+    failed_ranges = None
+    if args.batch_api:
+        # Anthropic Message Batches API版。トークン単価が通常の50%になる代わりに
+        # 非同期ジョブ(数分〜最大24時間)になる。プロキシ経由では動かない可能性が
+        # 高いため、本物のANTHROPIC_API_KEY（--tokenで上書き可）が必要。
+        try:
+            from lib import ai_classify_batch as ai_classify_batch_lib
+        except ImportError as e:
+            print(f"エラー: anthropicパッケージが必要です（pip install anthropic）: {e}", file=sys.stderr)
+            sys.exit(1)
+        from lib.classification_common import SYSTEM_PROMPT
+
+        mapping, total_in, total_out, failed_ranges = ai_classify_batch_lib.classify_unique(
+            queries, args.batch_size, model, SYSTEM_PROMPT, api_key=args.token,
+        )
+    else:
+        mapping, total_in, total_out = ai_classify_lib.classify_unique(queries, args.batch_size, args.workers, model)
     elapsed = time.time() - t0
 
     out_fieldnames = list(fieldnames) + ["ai_classification"]
-    for row, label in zip(rows, labels):
-        row["ai_classification"] = label
+    for row in rows:
+        row["ai_classification"] = mapping[row.get("query", "")]
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=out_fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\n処理件数: {len(rows)}")
+    print(f"\n処理件数: {len(rows)}（うちユニークなquery: {unique_count}件をAIに送信）")
+    print(f"モデル: {model}")
+    if args.batch_api:
+        print(f"失敗バッチ数（othersで埋めた範囲）: {failed_ranges}")
     print(f"所要時間: {elapsed:.1f}秒")
-    print(f"input tokens合計 : {total_in}")
-    print(f"output tokens合計: {total_out}")
-    print(f"出力先: {output_path}")
-
-
-def cmd_ai_classify_batch(args: argparse.Namespace) -> None:
-    try:
-        from lib import ai_classify_batch as ai_classify_batch_lib
-        import anthropic
-    except ImportError as e:
-        print(f"エラー: anthropicパッケージが必要です（pip install anthropic）: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    from lib.classification_common import MODEL, SYSTEM_PROMPT, numbers_to_labels, parse_response_text
-    import json
-
-    output_path = make_output_path(args.input_csv, "classified_batch_analysis_result")
-
-    with open(args.input_csv, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames
-        if fieldnames is None or "query" not in fieldnames:
-            raise ValueError('入力CSVに "query" 列が見つかりません')
-        rows = list(reader)
-
-    queries = [row.get("query", "") for row in rows]
-    all_requests = ai_classify_batch_lib.build_requests(queries, args.batch_size, MODEL, SYSTEM_PROMPT)
-
-    client = anthropic.Anthropic()  # ANTHROPIC_API_KEY 環境変数から読む
-
-    labels: list[str] = ["others"] * len(queries)
-    total_in = 0
-    total_out = 0
-    failed_ranges = 0
-
-    t0 = time.time()
-
-    # 100,000リクエスト/ジョブの上限に合わせてジョブを分割
-    for job_start in range(0, len(all_requests), ai_classify_batch_lib.MAX_REQUESTS_PER_JOB):
-        job_requests_meta = all_requests[job_start:job_start + ai_classify_batch_lib.MAX_REQUESTS_PER_JOB]
-        job_requests = [r for _, _, r in job_requests_meta]
-
-        results_by_id = ai_classify_batch_lib.run_batch_job(client, job_requests)
-
-        for start, end, req in job_requests_meta:
-            result = results_by_id.get(req.custom_id)
-            chunk_len = end - start
-
-            if result is None:
-                print(f"  警告: {req.custom_id} の結果が見つかりません（othersで埋めます）", file=sys.stderr)
-                failed_ranges += 1
-                continue
-
-            if result.type != "succeeded":
-                print(f"  警告: {req.custom_id} は {result.type}（othersで埋めます）", file=sys.stderr)
-                failed_ranges += 1
-                continue
-
-            message = result.message
-            content_blocks = message.content or []
-            text = "".join(b.text for b in content_blocks if b.type == "text")
-            text = parse_response_text(text)
-
-            try:
-                numbers = json.loads(text)
-                if not isinstance(numbers, list) or len(numbers) != chunk_len:
-                    raise ValueError("要素数不一致")
-                chunk_labels = numbers_to_labels(numbers)
-            except (json.JSONDecodeError, ValueError) as e:
-                print(f"  警告: {req.custom_id} のパースに失敗（othersで埋めます）: {e}", file=sys.stderr)
-                failed_ranges += 1
-                continue
-
-            for i, label in enumerate(chunk_labels):
-                labels[start + i] = label
-
-            usage = message.usage
-            total_in += usage.input_tokens or 0
-            total_out += usage.output_tokens or 0
-
-    elapsed = time.time() - t0
-
-    out_fieldnames = list(fieldnames) + ["ai_classification"]
-    for row, label in zip(rows, labels):
-        row["ai_classification"] = label
-
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=out_fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    print(f"\n処理件数: {len(rows)}")
-    print(f"失敗バッチ数（othersで埋めた範囲）: {failed_ranges}")
-    print(f"所要時間: {elapsed:.1f}秒")
-    print(f"input tokens合計 : {total_in}（Batches APIのため通常の50%価格で課金）")
-    print(f"output tokens合計: {total_out}（Batches APIのため通常の50%価格で課金）")
+    token_note = "（Batches APIのため通常の50%価格で課金）" if args.batch_api else ""
+    print(f"input tokens合計 : {total_in}{token_note}")
+    print(f"output tokens合計: {total_out}{token_note}")
     print(f"出力先: {output_path}")
 
 
@@ -233,10 +162,11 @@ def cmd_ai_retry(args: argparse.Namespace) -> None:
             raise ValueError('入力CSVに "ai_classification" 列が見つかりません')
         rows = list(reader)
 
-    target_indices = [i for i, row in enumerate(rows) if row.get("ai_classification") == "others"]
+    target_category = args.category
+    target_indices = [i for i, row in enumerate(rows) if row.get("ai_classification") == target_category]
 
     if not target_indices:
-        print("othersの行が見つかりませんでした。再実行対象なし。")
+        print(f"{target_category}の行が見つかりませんでした。再実行対象なし。")
         with open(output_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -249,25 +179,28 @@ def cmd_ai_retry(args: argparse.Namespace) -> None:
         target_indices = target_indices[:limit]
 
     target_queries = [rows[i]["query"] for i in target_indices]
+    unique_count = len(set(target_queries))
+    model = classification_common_lib.MODEL_CHOICES[args.model]
 
-    print(f"再実行対象: {len(target_indices)}件（全{len(rows)}件中）", file=sys.stderr)
+    print(f"再実行対象（{target_category}）: {len(target_indices)}件（全{len(rows)}件中、うちユニークなquery: {unique_count}件をAIに送信）", file=sys.stderr)
 
     t0 = time.time()
-    labels, total_in, total_out = ai_classify_lib.classify_all(target_queries, args.batch_size, args.workers)
+    mapping, total_in, total_out = ai_classify_lib.classify_unique(target_queries, args.batch_size, args.workers, model)
     elapsed = time.time() - t0
 
-    for i, label in zip(target_indices, labels):
-        rows[i]["ai_classification"] = label
+    for i in target_indices:
+        rows[i]["ai_classification"] = mapping[rows[i]["query"]]
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
-    still_others = sum(1 for i in target_indices if rows[i]["ai_classification"] == "others")
+    still_same = sum(1 for i in target_indices if rows[i]["ai_classification"] == target_category)
 
     print(f"\n再実行件数: {len(target_indices)}")
-    print(f"再実行後もothersのまま: {still_others}件")
+    print(f"モデル: {model}")
+    print(f"再実行後も{target_category}のまま: {still_same}件")
     print(f"所要時間: {elapsed:.1f}秒")
     print(f"input tokens合計 : {total_in}")
     print(f"output tokens合計: {total_out}")
@@ -433,20 +366,48 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("input_csv")
     p.set_defaults(func=cmd_count_queries)
 
-    p = sub.add_parser("ai-classify", help="LLMでquery列を分類する（プロキシ経由・並行処理）")
+    p = sub.add_parser(
+        "ai-classify",
+        help="LLMでquery列を分類する（プロキシ経由・並行処理。--batch-apiでAnthropic Message Batches "
+        "API版に切り替え可、要ANTHROPIC_API_KEYまたは--token）",
+    )
     p.add_argument("input_csv")
+    p.add_argument(
+        "--model",
+        default="haiku",
+        choices=list(classification_common_lib.MODEL_CHOICES.keys()),
+        help="分類に使うモデル（デフォルト: haiku）",
+    )
+    p.add_argument(
+        "--batch-api",
+        action="store_true",
+        help="Anthropic Message Batches APIを使う（トークン単価が通常の50%%だが非同期・要anthropicパッケージ）。"
+        "プロキシ経由では動かない可能性が高いため、本物のANTHROPIC_API_KEYか--tokenが必要",
+    )
+    p.add_argument(
+        "--token",
+        default=None,
+        help="--batch-api使用時にANTHROPIC_API_KEY環境変数の代わりに使うAPIキー",
+    )
     p.add_argument("--batch-size", type=int, default=30)
-    p.add_argument("--workers", type=int, default=8, help="並行実行するリクエスト数")
+    p.add_argument("--workers", type=int, default=8, help="並行実行するリクエスト数（--batch-api指定時は無視）")
     p.add_argument("--max-batches", type=int, default=None, help="先頭から指定バッチ数までに処理を絞る（動作確認用）")
     p.set_defaults(func=cmd_ai_classify)
 
-    p = sub.add_parser("ai-classify-batch", help="LLMでquery列を分類する（Anthropic Message Batches API版、要ANTHROPIC_API_KEY）")
+    p = sub.add_parser("ai-retry", help="ai_classificationが指定カテゴリ（デフォルトothers）の行だけAIで再分類する")
     p.add_argument("input_csv")
-    p.add_argument("--batch-size", type=int, default=30)
-    p.set_defaults(func=cmd_ai_classify_batch)
-
-    p = sub.add_parser("ai-retry", help="ai_classificationがothersの行だけAIで再分類する")
-    p.add_argument("input_csv")
+    p.add_argument(
+        "--category",
+        default="others",
+        choices=list(classification_common_lib.CATEGORIES.values()),
+        help="再分類対象にするai_classificationの値（デフォルト: others）",
+    )
+    p.add_argument(
+        "--model",
+        default="haiku",
+        choices=list(classification_common_lib.MODEL_CHOICES.keys()),
+        help="分類に使うモデル（デフォルト: haiku）",
+    )
     p.add_argument("--batch-size", type=int, default=30)
     p.add_argument("--workers", type=int, default=8, help="並行実行するリクエスト数")
     p.add_argument("--max-batches", type=int, default=None, help="先頭から指定バッチ数までに処理を絞る（動作確認用）")

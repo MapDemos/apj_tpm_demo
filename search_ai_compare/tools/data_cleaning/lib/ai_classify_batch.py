@@ -16,12 +16,15 @@ anthropicパッケージは本サブコマンド専用の依存なので、main.
 （ai-classify-batch実行時のみimport）し、他のサブコマンドには影響しないようにしている。
 """
 
+import json
 import sys
 import time
 
 import anthropic
 from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
 from anthropic.types.messages.batch_create_params import Request
+
+from lib.classification_common import numbers_to_labels, parse_response_text
 
 MAX_REQUESTS_PER_JOB = 100_000
 POLL_INTERVAL_SECONDS = 30
@@ -78,3 +81,73 @@ def run_batch_job(client: anthropic.Anthropic, requests: list[Request]) -> dict:
     for result in client.messages.batches.results(job.id):
         results_by_id[result.custom_id] = result.result
     return results_by_id
+
+
+def classify_unique(
+    queries: list[str],
+    batch_size: int,
+    model: str,
+    system_prompt: str,
+    api_key: str | None = None,
+) -> tuple[dict[str, str], int, int, int]:
+    """queriesからユニークな値だけを抽出し、Batches APIで分類する。
+    {query文字列: label} の辞書・input/outputトークン合計・失敗レンジ数を返す。
+    ai_classify.classify_unique（プロキシ版）と同様、重複クエリをまとめて
+    送ることでコストと不整合を抑える。
+
+    api_key を渡すと ANTHROPIC_API_KEY 環境変数の代わりにそれを使う。"""
+    unique_queries = list(dict.fromkeys(queries))
+    all_requests = build_requests(unique_queries, batch_size, model, system_prompt)
+
+    client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+
+    labels: list[str] = ["others"] * len(unique_queries)
+    total_in = 0
+    total_out = 0
+    failed_ranges = 0
+
+    # 100,000リクエスト/ジョブの上限に合わせてジョブを分割
+    for job_start in range(0, len(all_requests), MAX_REQUESTS_PER_JOB):
+        job_requests_meta = all_requests[job_start:job_start + MAX_REQUESTS_PER_JOB]
+        job_requests = [r for _, _, r in job_requests_meta]
+
+        results_by_id = run_batch_job(client, job_requests)
+
+        for start, end, req in job_requests_meta:
+            result = results_by_id.get(req.custom_id)
+            chunk_len = end - start
+
+            if result is None:
+                print(f"  警告: {req.custom_id} の結果が見つかりません（othersで埋めます）", file=sys.stderr)
+                failed_ranges += 1
+                continue
+
+            if result.type != "succeeded":
+                print(f"  警告: {req.custom_id} は {result.type}（othersで埋めます）", file=sys.stderr)
+                failed_ranges += 1
+                continue
+
+            message = result.message
+            content_blocks = message.content or []
+            text = "".join(b.text for b in content_blocks if b.type == "text")
+            text = parse_response_text(text)
+
+            try:
+                numbers = json.loads(text)
+                if not isinstance(numbers, list) or len(numbers) != chunk_len:
+                    raise ValueError("要素数不一致")
+                chunk_labels = numbers_to_labels(numbers)
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"  警告: {req.custom_id} のパースに失敗（othersで埋めます）: {e}", file=sys.stderr)
+                failed_ranges += 1
+                continue
+
+            for i, label in enumerate(chunk_labels):
+                labels[start + i] = label
+
+            usage = message.usage
+            total_in += usage.input_tokens or 0
+            total_out += usage.output_tokens or 0
+
+    mapping = dict(zip(unique_queries, labels))
+    return mapping, total_in, total_out, failed_ranges
