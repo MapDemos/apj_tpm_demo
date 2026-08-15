@@ -32,10 +32,13 @@ def call_claude(queries: list[str], model: str = MODEL) -> tuple[list[str], dict
     body = {
         "model": model,
         "max_tokens": 4096,
-        "temperature": 0,
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": user_content}],
     }
+    # temperatureはSonnet 5では非推奨パラメータで、指定すると400 invalid_request_error
+    # になる（ai_analyze.pyのgenerate_commentaryと同じ理由）。haiku指定時のみ付与する。
+    if "haiku" in model:
+        body["temperature"] = 0
 
     req = urllib.request.Request(
         PROXY_URL,

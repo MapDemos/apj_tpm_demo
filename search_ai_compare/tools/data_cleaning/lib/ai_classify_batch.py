@@ -1,5 +1,6 @@
 """
-main.py ai-classify-batch サブコマンドが使うロジック（旧 classify_queries_batch.py）。
+ai-classify/ai-retry の --batch-api 指定時に使うロジック（旧 classify_queries_batch.py、
+旧 ai-classify-batch 独立サブコマンドは廃止・統合済み）。
 
 Anthropic Message Batches API を使って query 配列を分類する。
 - 通常の /v1/messages ではなく /v1/messages/batches を使う非同期バッチ処理
@@ -9,11 +10,12 @@ Anthropic Message Batches API を使って query 配列を分類する。
   Anthropic API に直接アクセスする
 
 事前準備:
-    pip install anthropic
     export ANTHROPIC_API_KEY=sk-ant-...   （プロキシ用キーではなく、本物のAPIキーが必要）
+    ※anthropicパッケージ自体はmain.pyのensure_batch_api_venv_and_reexec()が
+      .venv/ を自動作成してインストールするので手動インストール不要
 
-anthropicパッケージは本サブコマンド専用の依存なので、main.py側で遅延import
-（ai-classify-batch実行時のみimport）し、他のサブコマンドには影響しないようにしている。
+anthropicパッケージは本機能専用の依存なので、main.py側で遅延import
+（--batch-api指定時のみimport）し、他のサブコマンドには影響しないようにしている。
 """
 
 import json
@@ -41,18 +43,22 @@ def build_requests(queries: list[str], batch_size: int, model: str, system_promp
         end = min(start + batch_size, n)
         chunk = queries[start:end]
         user_content = json.dumps(chunk, ensure_ascii=False)
+        params: MessageCreateParamsNonStreaming = {
+            "model": model,
+            "max_tokens": 4096,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_content}],
+        }
+        # temperatureはSonnet 5では非推奨パラメータで、指定すると invalid_request_error
+        # になる（ai_classify.pyのcall_claudeと同じ理由）。haiku指定時のみ付与する。
+        if "haiku" in model:
+            params["temperature"] = 0
         requests.append((
             start,
             end,
             Request(
                 custom_id=f"batch-{start}",
-                params=MessageCreateParamsNonStreaming(
-                    model=model,
-                    max_tokens=4096,
-                    temperature=0,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": user_content}],
-                ),
+                params=params,
             ),
         ))
     return requests
@@ -114,16 +120,20 @@ def classify_unique(
         results_by_id = run_batch_job(client, job_requests)
 
         for start, end, req in job_requests_meta:
-            result = results_by_id.get(req.custom_id)
+            custom_id = req["custom_id"]
+            result = results_by_id.get(custom_id)
             chunk_len = end - start
 
             if result is None:
-                print(f"  警告: {req.custom_id} の結果が見つかりません（othersで埋めます）", file=sys.stderr)
+                print(f"  警告: {custom_id} の結果が見つかりません（othersで埋めます）", file=sys.stderr)
                 failed_ranges += 1
                 continue
 
             if result.type != "succeeded":
-                print(f"  警告: {req.custom_id} は {result.type}（othersで埋めます）", file=sys.stderr)
+                detail = ""
+                if result.type == "errored":
+                    detail = f": {result.error.error.type} - {result.error.error.message}"
+                print(f"  警告: {custom_id} は {result.type}{detail}（othersで埋めます）", file=sys.stderr)
                 failed_ranges += 1
                 continue
 
@@ -138,7 +148,7 @@ def classify_unique(
                     raise ValueError("要素数不一致")
                 chunk_labels = numbers_to_labels(numbers)
             except (json.JSONDecodeError, ValueError) as e:
-                print(f"  警告: {req.custom_id} のパースに失敗（othersで埋めます）: {e}", file=sys.stderr)
+                print(f"  警告: {custom_id} のパースに失敗（othersで埋めます）: {e}", file=sys.stderr)
                 failed_ranges += 1
                 continue
 
