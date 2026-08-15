@@ -90,17 +90,20 @@ ai-classify  [suffix: classified_analysis_result]
   --batch-api を付けると、通常のプロキシ経由リクエストの代わりに
   Anthropic Message Batches API（非同期・トークン単価50%引き、結果取得
   まで数分〜最大24時間）を使う。プロキシ経由では動かない可能性が高く、
-  本物の ANTHROPIC_API_KEY か --token での上書きが必要。anthropicパッケージ
-  未インストール時は --batch-api 使用時にだけエラーになり、通常モードには
-  影響しない。
+  本物の ANTHROPIC_API_KEY か --token での上書きが必要。anthropicパッケージが
+  未インストールでも、--batch-api指定時はmain.pyが自動で
+  tools/data_cleaning/.venv/ を作成しanthropicをインストール、そのvenvの
+  pythonで自分自身を再実行する（Homebrew管理下のpython3は
+  externally-managed-environmentのため直接pip installできないための対応。
+  .venv/はgitignore対象）。通常モードには影響しない。
 
   分類カテゴリの定義は lib/classification_common.py を参照:
   1=poi, 2=poi_brand, 3=poi_category, 4=address,
   5=unsupported_query_location_intent, 6=broken_query, 7=others
 
 事前準備（--batch-api使用時のみ）:
-  pip install anthropic
   export ANTHROPIC_API_KEY=sk-ant-...   （または --token sk-ant-... で上書き）
+  ※anthropicパッケージ自体は初回実行時にmain.pyが自動でインストールするので不要
 
 実行例:
   python3 main.py ai-classify input.csv
@@ -122,11 +125,23 @@ ai-retry  [suffix: classified_retry_analysis_result]
   再利用する（ユニーククエリ抽出・プロンプト修正・個別再試行フォールバック
   もそのまま反映される）。--model も ai-classify と同様に指定可能。
 
+  --batch-api も ai-classify と同様に指定可能。通常のプロキシ経由リクエスト
+  の代わりに Anthropic Message Batches API（非同期・トークン単価50%引き、
+  結果取得まで数分〜最大24時間）を使う。プロキシ経由では動かない可能性が
+  高く、本物の ANTHROPIC_API_KEY か --token での上書きが必要。anthropicパッケージの
+  自動インストールについてはai-classifyの説明を参照（挙動は共通）。
+
+事前準備（--batch-api使用時のみ）:
+  export ANTHROPIC_API_KEY=sk-ant-...   （または --token sk-ant-... で上書き）
+  ※anthropicパッケージ自体は初回実行時にmain.pyが自動でインストールするので不要
+
 実行例:
   python3 main.py ai-retry classified.csv
   python3 main.py ai-retry classified.csv --category poi_brand
   python3 main.py ai-retry classified.csv --model sonnet
   python3 main.py ai-retry classified.csv --max-batches 3   # 動作確認用
+  python3 main.py ai-retry classified.csv --batch-api
+  python3 main.py ai-retry classified.csv --batch-api --token sk-ant-...
 
 
 --------------------------------------------------------------

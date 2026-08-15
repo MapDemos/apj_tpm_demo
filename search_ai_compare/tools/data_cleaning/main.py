@@ -10,6 +10,7 @@ data_cleaning/ のCSVクレンジング・AI分類・傾向分析を1つにま�
   ai-classify             AI分類（プロキシ経由・並行処理。--batch-apiでBatches API版
                           （要ANTHROPIC_API_KEYまたは--token）に切り替え可）
   ai-retry                ai_classificationが指定カテゴリ（デフォルトothers）の行だけAIで再分類
+                          （--batch-apiでBatches API版に切り替え可）
   count-classifications  分類結果の件数集計
   analyze                クエリ傾向分析（HTMLレポート込み）
   analyze-ai              クエリ傾向分析＋AIコメンタリー（HTMLレポート上部にAI要約を追加）
@@ -21,6 +22,8 @@ data_cleaning/ のCSVクレンジング・AI分類・傾向分析を1つにま�
 
 import argparse
 import csv
+import os
+import subprocess
 import sys
 import time
 
@@ -185,7 +188,23 @@ def cmd_ai_retry(args: argparse.Namespace) -> None:
     print(f"再実行対象（{target_category}）: {len(target_indices)}件（全{len(rows)}件中、うちユニークなquery: {unique_count}件をAIに送信）", file=sys.stderr)
 
     t0 = time.time()
-    mapping, total_in, total_out = ai_classify_lib.classify_unique(target_queries, args.batch_size, args.workers, model)
+    failed_ranges = None
+    if args.batch_api:
+        # ai-classifyの--batch-apiと同じくAnthropic Message Batches API版に切り替える。
+        # トークン単価が通常の50%になる代わりに非同期ジョブ(数分〜最大24時間)になる。
+        # プロキシ経由では動かない可能性が高いため、本物のANTHROPIC_API_KEY（--tokenで上書き可）が必要。
+        try:
+            from lib import ai_classify_batch as ai_classify_batch_lib
+        except ImportError as e:
+            print(f"エラー: anthropicパッケージが必要です（pip install anthropic）: {e}", file=sys.stderr)
+            sys.exit(1)
+        from lib.classification_common import SYSTEM_PROMPT
+
+        mapping, total_in, total_out, failed_ranges = ai_classify_batch_lib.classify_unique(
+            target_queries, args.batch_size, model, SYSTEM_PROMPT, api_key=args.token,
+        )
+    else:
+        mapping, total_in, total_out = ai_classify_lib.classify_unique(target_queries, args.batch_size, args.workers, model)
     elapsed = time.time() - t0
 
     for i in target_indices:
@@ -201,9 +220,12 @@ def cmd_ai_retry(args: argparse.Namespace) -> None:
     print(f"\n再実行件数: {len(target_indices)}")
     print(f"モデル: {model}")
     print(f"再実行後も{target_category}のまま: {still_same}件")
+    if args.batch_api:
+        print(f"失敗バッチ数（othersで埋めた範囲）: {failed_ranges}")
     print(f"所要時間: {elapsed:.1f}秒")
-    print(f"input tokens合計 : {total_in}")
-    print(f"output tokens合計: {total_out}")
+    token_note = "（Batches APIのため通常の50%価格で課金）" if args.batch_api else ""
+    print(f"input tokens合計 : {total_in}{token_note}")
+    print(f"output tokens合計: {total_out}{token_note}")
     print(f"出力先: {output_path}")
 
 
@@ -394,7 +416,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-batches", type=int, default=None, help="先頭から指定バッチ数までに処理を絞る（動作確認用）")
     p.set_defaults(func=cmd_ai_classify)
 
-    p = sub.add_parser("ai-retry", help="ai_classificationが指定カテゴリ（デフォルトothers）の行だけAIで再分類する")
+    p = sub.add_parser(
+        "ai-retry",
+        help="ai_classificationが指定カテゴリ（デフォルトothers）の行だけAIで再分類する（--batch-apiでAnthropic "
+        "Message Batches API版に切り替え可、要ANTHROPIC_API_KEYまたは--token）",
+    )
     p.add_argument("input_csv")
     p.add_argument(
         "--category",
@@ -408,8 +434,19 @@ def build_parser() -> argparse.ArgumentParser:
         choices=list(classification_common_lib.MODEL_CHOICES.keys()),
         help="分類に使うモデル（デフォルト: haiku）",
     )
+    p.add_argument(
+        "--batch-api",
+        action="store_true",
+        help="Anthropic Message Batches APIを使う（トークン単価が通常の50%%だが非同期・要anthropicパッケージ）。"
+        "プロキシ経由では動かない可能性が高いため、本物のANTHROPIC_API_KEYか--tokenが必要",
+    )
+    p.add_argument(
+        "--token",
+        default=None,
+        help="--batch-api使用時にANTHROPIC_API_KEY環境変数の代わりに使うAPIキー",
+    )
     p.add_argument("--batch-size", type=int, default=30)
-    p.add_argument("--workers", type=int, default=8, help="並行実行するリクエスト数")
+    p.add_argument("--workers", type=int, default=8, help="並行実行するリクエスト数（--batch-api指定時は無視）")
     p.add_argument("--max-batches", type=int, default=None, help="先頭から指定バッチ数までに処理を絞る（動作確認用）")
     p.set_defaults(func=cmd_ai_retry)
 
@@ -433,9 +470,46 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def ensure_batch_api_venv_and_reexec() -> None:
+    """--batch-api使用時にanthropicパッケージが無ければ、tools/data_cleaning/.venv を
+    自動作成してインストールし、そのvenvのpythonで自分自身を再実行する。
+
+    Homebrew管理下のpython3は`externally-managed-environment`（PEP 668）のため
+    直接`pip install`できない。venvを切ってそちらのpythonに乗り換えることで、
+    ユーザーに事前セットアップを要求せずに済ませる。
+    """
+    try:
+        import anthropic  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    if os.environ.get("_DATA_CLEANING_VENV_ACTIVE") == "1":
+        # 既にこのvenv上で動いているのにまだ無い＝install失敗。無限re-execを避けて
+        # ここでは何もせず、呼び出し元（cmd_ai_classify/cmd_ai_retry）の
+        # 通常のImportErrorハンドリングに任せる。
+        return
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    venv_dir = os.path.join(script_dir, ".venv")
+    venv_python = os.path.join(venv_dir, "bin", "python3")
+
+    if not os.path.exists(venv_python):
+        print(f"[--batch-api] anthropicパッケージ用の仮想環境を作成します: {venv_dir}", file=sys.stderr)
+        subprocess.run([sys.executable, "-m", "venv", venv_dir], check=True)
+
+    print("[--batch-api] venv内にanthropicパッケージをインストールします...", file=sys.stderr)
+    subprocess.run([venv_python, "-m", "pip", "install", "--quiet", "anthropic"], check=True)
+
+    env = dict(os.environ, _DATA_CLEANING_VENV_ACTIVE="1")
+    os.execve(venv_python, [venv_python] + sys.argv, env)
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    if getattr(args, "batch_api", False):
+        ensure_batch_api_venv_and_reexec()
     args.func(args)
 
 
