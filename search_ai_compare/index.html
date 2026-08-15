@@ -1639,17 +1639,21 @@ function addressesMatch(a, b) {
 }
 
 // listA の各要素について、listB内のどれかとname/addressが一致するかを判定し 'none'|'name'|'address'|'both' を返す
+// 'both'は同一候補がname・address両方を満たした時だけ成立させる(別々の候補がそれぞれ片方だけ満たした場合を
+// 合成して完全一致扱いにすると、無関係な候補同士の組み合わせで誤って「完全一致」になってしまうため)。
 function computeMatchCategories(listA, getNameA, getAddrA, listB, getNameB, getAddrB, treatNameAsAddress) {
   return listA.map(item => {
     const nameA = getNameA(item), addrA = getAddrA(item);
-    let nameHit = false, addrHit = false;
+    let nameHit = false, addrHit = false, bothHit = false;
     for (const other of listB) {
       if (other === item) continue; // 万一listAとlistBが同一参照を含んでいても自己参照させない
-      if (!nameHit && namesMatch(nameA, getNameB(other), treatNameAsAddress)) nameHit = true;
-      if (!addrHit && addressesMatch(addrA, getAddrB(other))) addrHit = true;
-      if (nameHit && addrHit) break;
+      const nHit = namesMatch(nameA, getNameB(other), treatNameAsAddress);
+      const aHit = addressesMatch(addrA, getAddrB(other));
+      if (nHit && aHit) { bothHit = true; break; } // 同一候補が両方満たした時点で確定
+      if (nHit) nameHit = true;
+      if (aHit) addrHit = true;
     }
-    return nameHit && addrHit ? 'both' : nameHit ? 'name' : addrHit ? 'address' : 'none';
+    return bothHit ? 'both' : nameHit ? 'name' : addrHit ? 'address' : 'none';
   });
 }
 
