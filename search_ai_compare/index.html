@@ -1538,6 +1538,18 @@ function stripBeforePrefecture(s) {
   return m ? s.slice(m.index) : s;
 }
 
+// 「ヶ/ケ/が」は同じ地名でも表記が割れやすいため(千駄ヶ谷/千駄ケ谷/千駄が谷 等)、比較用に「が」へ統一する。
+function unifyKaNotation(s) {
+  return s.replace(/[ヶケ]/g, 'が');
+}
+
+// 都道府県の直後に続く「郡」区分は省略されることがある(例:「青森県上北郡六戸町」⇔「青森県六戸町」)ため、
+// 郡名(番地の数字やハイフンを含まない1〜6文字)+「郡」をまとめて除去する。
+const COUNTY_RE = /^(北海道|東京都|京都府|大阪府|[一-鿿々]{2,3}県)[^\d\s,、\-]{1,6}郡/;
+function stripCountySegment(s) {
+  return s.replace(COUNTY_RE, '$1');
+}
+
 // 漢数字(〇/一〜九/十)の連続を算用数字に変換する(0〜99程度の丁目・番地・号を想定)
 // 例: "三"→"3"、"十一"→"11"、"二十三"→"23"。変換対象外の文字が混じる場合はそのまま返す。
 const KANJI_DIGIT_MAP = { '〇': 0, '○': 0, '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
@@ -1565,18 +1577,36 @@ function stripAddressDivisionPrefixes(s) {
   return s.replace(/大字|小字/g, '').replace(/字/g, '');
 }
 
+// 号までの番地の数字列より後ろに残るテキスト(建物名)は、フロア表記(●階/●F/B●/地下●階)を含まない場合に限り無視する。
+// フロア表記が含まれる場合は何もしない(同一建物内の別テナント、例:異なる階の同名店舗を誤って同一視しないため)。
+const FLOOR_RE = /(\d+\s*(階|f)|b\d+|地下\d*階?)/i;
+function stripBuildingNameIfNoFloor(s) {
+  // 住所内で最初に現れる数字(丁目・番地・号)のチェーンまでを住所本体、それ以降を建物名候補とする。
+  // (末尾の数字を基準にすると「サンシャインビル3F」のようにフロア表記自体に数字がある場合を取り違えるため)
+  const m = s.match(/^(.*?\d[\d-]*)(.{1,50})?$/);
+  if (!m) return s;
+  const [, base, suffix] = m;
+  if (!suffix) return s; // 番地チェーンの後に何も残らない場合は何もしない
+  if (FLOOR_RE.test(suffix)) return s;
+  return base;
+}
+
 // 住所比較用: 都道府県より前(国名/郵便番号)を除去し、丁目・番地・番・号や各種ハイフン類(全角/半角/長音)を単一の"-"に統一する
 // (Googleは郵便番号が入っていないケースがあるため、郵便番号自体は「あれば無視する」形にする)
 function normalizeAddressForMatch(s) {
   if (!s) return '';
   let t = s.normalize('NFKC');
+  t = unifyKaNotation(t); // 「ヶ/ケ/が」の表記ゆれを吸収
   t = stripBeforePrefecture(t);
+  t = stripCountySegment(t); // 「郡」区分の省略ゆれを吸収
   t = kanjiNumeralsToArabic(t); // 「三丁目」= 「3丁目」のように漢数字表記ゆれを吸収
   t = stripAddressDivisionPrefixes(t); // 「大字」「小字」「字」の有無による表記ゆれを吸収
   t = t.replace(/〒?\d{3}-?\d{4}/g, '');           // 郵便番号(先頭で拾いきれなかった場合の保険)
   t = t.replace(/日本[、,]?/g, '').replace(/,?\s*Japan/gi, '');
   t = t.replace(/[‐‑‒–—―−ー\-]/g, '-'); // 各種ハイフン/長音記号→"-"
+  t = t.replace(/(\d)の(?=\d)/g, '$1-'); // 「2の3」のような「の」区切りを"-"に統一
   t = t.replace(/丁目/g, '-').replace(/番地/g, '-').replace(/番/g, '-').replace(/号/g, '');
+  t = stripBuildingNameIfNoFloor(t); // フロア表記がなければ末尾の建物名を無視
   t = t.replace(/[\s,、]+/g, '');
   t = t.replace(/-+/g, '-');
   return t.toLowerCase();
