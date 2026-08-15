@@ -8,7 +8,7 @@ tools/data_cleaning/ — CSVクレンジング・AI分類・傾向分析CLI
 
 全機能は main.py の1本のCLIにサブコマンドとしてまとまっている。
 サブコマンド一覧: dedup / add-query-count / count-queries / ai-classify /
-ai-classify-batch / ai-retry / count-classifications / analyze / analyze-ai
+ai-retry / count-classifications / analyze / analyze-ai
 
     python3 main.py <subcommand> input.csv [オプション]
     python3 main.py <subcommand> --help   # サブコマンドごとの詳細
@@ -76,51 +76,56 @@ count-queries  [suffix: count_analysis_result]
 ai-classify  [suffix: classified_analysis_result]
 --------------------------------------------------------------
 概要:
-  LLM（Claude Haiku、プロキシ経由）を使って "query" 列を分類し、
-  "ai_classification" 列を追加したCSVを出力する。バッチ分割＋並行処理版。
-  1バッチがまるごと失敗した場合は、その中身を1件ずつ個別に再試行し、
-  それでも失敗した行だけを others にフォールバックする。
+  LLMを使って "query" 列を分類し、"ai_classification" 列を追加した
+  CSVを出力する。"query" 列のユニークな値だけを抽出してLLMに送り、
+  結果を {query: label} の辞書で全行にマッピングする（同じqueryが
+  何度出現してもAI呼び出しは1回で済み、同一クエリが別バッチに分かれて
+  別々の判定結果になる不整合も防げる。lib/ai_classify.py の
+  classify_unique を参照）。バッチ分割＋並行処理で、1バッチがまるごと
+  失敗した場合は中身を1件ずつ個別に再試行し、それでも失敗した行だけ
+  others にフォールバックする。
+
+  --model haiku|sonnet でモデルを切り替えられる（デフォルト haiku）。
+
+  --batch-api を付けると、通常のプロキシ経由リクエストの代わりに
+  Anthropic Message Batches API（非同期・トークン単価50%引き、結果取得
+  まで数分〜最大24時間）を使う。プロキシ経由では動かない可能性が高く、
+  本物の ANTHROPIC_API_KEY か --token での上書きが必要。anthropicパッケージ
+  未インストール時は --batch-api 使用時にだけエラーになり、通常モードには
+  影響しない。
 
   分類カテゴリの定義は lib/classification_common.py を参照:
   1=poi, 2=poi_brand, 3=poi_category, 4=address,
   5=unsupported_query_location_intent, 6=broken_query, 7=others
 
+事前準備（--batch-api使用時のみ）:
+  pip install anthropic
+  export ANTHROPIC_API_KEY=sk-ant-...   （または --token sk-ant-... で上書き）
+
 実行例:
   python3 main.py ai-classify input.csv
+  python3 main.py ai-classify input.csv --model sonnet
   python3 main.py ai-classify input.csv --batch-size 30 --workers 8
   python3 main.py ai-classify input.csv --max-batches 3   # 動作確認用に件数を絞る
-
-
---------------------------------------------------------------
-ai-classify-batch  [suffix: classified_batch_analysis_result]
---------------------------------------------------------------
-概要:
-  ai-classify と同じ分類タスクを、Anthropic Message Batches API
-  （非同期・トークン単価50%引き、結果取得まで数分〜最大24時間）で行う版。
-  プロキシ経由では動かない可能性が高く、本物の ANTHROPIC_API_KEY が必要。
-  anthropicパッケージ未インストール時は、このサブコマンドだけがエラーで
-  止まり、他のサブコマンドには影響しない。
-
-事前準備:
-  pip install anthropic
-  export ANTHROPIC_API_KEY=sk-ant-...
-
-実行例:
-  python3 main.py ai-classify-batch input.csv
-  python3 main.py ai-classify-batch input.csv --batch-size 30
+  python3 main.py ai-classify input.csv --batch-api
+  python3 main.py ai-classify input.csv --batch-api --token sk-ant-...
 
 
 --------------------------------------------------------------
 ai-retry  [suffix: classified_retry_analysis_result]
 --------------------------------------------------------------
 概要:
-  ai-classify の出力CSVのうち、"ai_classification" が "others" になっている
-  行だけを対象にAIで再分類し、その列だけを更新した別CSVを出力する。
-  分類ロジックは ai-classify と同じ lib/ai_classify.py の classify_all を
-  そのまま再利用する（プロンプト修正・個別再試行フォールバックの改善もそのまま反映される）。
+  ai-classify の出力CSVのうち、"ai_classification" が指定カテゴリ
+  （--category、デフォルト others）になっている行だけを対象にAIで
+  再分類し、その列だけを更新した別CSVを出力する。分類ロジックは
+  ai-classify と同じ lib/ai_classify.py の classify_unique をそのまま
+  再利用する（ユニーククエリ抽出・プロンプト修正・個別再試行フォールバック
+  もそのまま反映される）。--model も ai-classify と同様に指定可能。
 
 実行例:
   python3 main.py ai-retry classified.csv
+  python3 main.py ai-retry classified.csv --category poi_brand
+  python3 main.py ai-retry classified.csv --model sonnet
   python3 main.py ai-retry classified.csv --max-batches 3   # 動作確認用
 
 
