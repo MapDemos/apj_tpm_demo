@@ -10,6 +10,9 @@
 CONFIG="geonator/config.js"
 [ -f "$CONFIG" ] || exit 0
 
+# geonator配下の変更を含まないコミット(無関係な他ディレクトリの変更等)では発火しない。
+git diff --cached --name-only | grep -q '^geonator/' || exit 0
+
 STAMP=$(date '+%Y-%m-%d.%H%M')
 
 # BSD/macOS sed in-place. Only rewrites the APP_VERSION line.

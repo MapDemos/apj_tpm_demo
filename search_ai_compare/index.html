@@ -1567,8 +1567,10 @@ function kanjiNumeralToArabic(str) {
   if (tens === undefined || ones === undefined) return str;
   return String(tens * 10 + ones);
 }
+// 「丁目/番地/番/号」の直前にある漢数字だけを変換対象にする(地名自体に含まれる漢数字は変換しない)。
+// 例: 「六本木」「三田」「二子玉川」等は数字ではなく地名の一部なので素通りさせる。
 function kanjiNumeralsToArabic(s) {
-  return s.replace(/[〇○零一二三四五六七八九十]+/g, kanjiNumeralToArabic);
+  return s.replace(/[〇○零一二三四五六七八九十]+(?=丁目|番地|番|号)/g, kanjiNumeralToArabic);
 }
 
 // 住所でよく省略される地名区分の接頭辞(大字・小字・字)は、片方にだけ付いていると不一致の原因になるため無視する。
