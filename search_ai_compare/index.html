@@ -46,11 +46,12 @@
     #setup-clear { background: none; border: none; color: #555; font-size: 11px; cursor: pointer; text-align: center; text-decoration: underline; }
     #setup-clear:hover { color: #aaa; }
 
-    /* Header */
+    /* Header (80%サイズで表示) */
     #header {
       display: flex; align-items: center; gap: 10px;
       padding: 10px 16px; background: #1a1a1a;
       border-bottom: 1px solid #333; flex-shrink: 0;
+      zoom: 0.8; overflow-x: auto; overflow-y: hidden; flex-wrap: nowrap;
     }
     #header .title { font-size: 13px; font-weight: bold; color: #aaa; white-space: nowrap; }
     #header .spacer { flex: 1; }
@@ -62,19 +63,29 @@
     .btn-secondary { background: #2d2d2d; border: 1px solid #444; color: #ccc; }
     .btn-secondary:hover { background: #3a3a3a; }
 
-    /* CSV Panel */
+    /* CSV Controls Row (ヘッダー直下、1行に収める。80%サイズで表示) */
+    #csv-toolbar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 16px; background: #161616;
+      border-bottom: 1px solid #333; flex-shrink: 0;
+      zoom: 0.8; overflow-x: auto; overflow-y: hidden; flex-wrap: nowrap;
+    }
+    .header-sep { width: 1px; height: 20px; background: #333; flex-shrink: 0; }
+    .header-label-sm { font-size: 10px; color: #555; white-space: nowrap; flex-shrink: 0; }
+    .csv-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; padding: 4px 6px; border-radius: 4px; flex-shrink: 0; }
+    .csv-toggle:hover { background: #242424; }
+
+    /* CSV Panel (折りたたみ式の行一覧テーブルのみ。開閉トグル/ファイル選択等はcsv-toolbarへ移動済み) */
     #csv-panel {
       flex-shrink: 0; background: #161616; border-bottom: 1px solid #333; overflow: hidden;
     }
-    #csv-header {
-      display: flex; align-items: center; gap: 8px;
-      padding: 6px 16px; cursor: pointer; user-select: none;
-    }
-    #csv-header:hover { background: #1e1e1e; }
     #csv-toggle-icon { font-size: 10px; color: #666; transition: transform 0.2s; }
     #csv-toggle-icon.open { transform: rotate(90deg); }
-    #csv-header-label { font-size: 12px; color: #888; font-family: monospace; }
-    #csv-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    #csv-header-label {
+      font-size: 12px; color: #888; font-family: monospace;
+      max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      display: inline-block; vertical-align: middle;
+    }
     #csv-body { display: none; max-height: 180px; overflow-y: auto; }
     #csv-body.open { display: block; }
     #csv-table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -83,9 +94,13 @@
     #csv-table tr:hover td { background: #1e1e1e; }
     #csv-table tr.active td { background: #1a2744; color: #fff; }
     #csv-table tr.active td:first-child { color: #60a5fa; font-weight: bold; }
+    #csv-table tr.csv-tested:not(.active) td { color: #5c5c5c; }
     .csv-progress { font-size: 11px; color: #666; white-space: nowrap; }
+    #csv-filter-text { width: 130px; padding: 4px 6px; background: #2a2a2a; border: 1px solid #444; border-radius: 3px; color: #fff; font-size: 11px; outline: none; }
+    #csv-filter-result, #csv-filter-reason { padding: 4px 6px; background: #2a2a2a; border: 1px solid #444; border-radius: 3px; color: #ccc; font-size: 11px; cursor: pointer; outline: none; max-width: 150px; }
 
-    #layout { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+    #layout { flex: 1; display: flex; flex-direction: row; overflow: hidden; min-height: 0; }
+    #main-column { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 
     .resizer { height: 5px; background: #2a2a2a; cursor: row-resize; flex-shrink: 0; position: relative; transition: background 0.15s; }
     .resizer:hover, .resizer.dragging { background: #2563eb; }
@@ -95,6 +110,18 @@
     #results-row { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; min-height: 0; flex: 1; }
     .pane-half { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
     .pane-half:first-child { border-right: 1px solid #333; }
+
+    /* Feedback Panel (マップ行+結果行の右側に全高で並ぶ) */
+    #feedback-panel { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; min-height: 0; border-left: 1px solid #333; }
+    #feedback-body { flex: 1; overflow-y: auto; padding: 12px; }
+    .fb-buttons { display: flex; gap: 8px; }
+    .fb-btn { flex: 1; font-size: 24px; padding: 16px 0; }
+    .fb-btn:hover { background: #3a3a3a; }
+    .fb-reason-group { font-weight: bold; font-size: 11px; color: #999; margin: 12px 0 6px; }
+    .fb-reason-group:first-child { margin-top: 0; }
+    .fb-reason-list { display: flex; flex-direction: column; gap: 4px; }
+    .fb-reason-btn { text-align: left; font-size: 11px; padding: 6px 8px; }
+    .fb-back-btn { width: 100%; text-align: left; font-size: 11px; padding: 6px 8px; margin-bottom: 10px; color: #999; }
     .pane-header { padding: 7px 12px; font-size: 11px; color: #888; background: #1a1a1a; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
     .pane-header .ph-spacer { flex: 1; }
     .result-count { font-size: 11px; font-weight: bold; }
@@ -102,16 +129,52 @@
     .mapbox-count { color: #e74c3c; }
     .map-container { flex: 1; min-height: 0; }
     .results-list { flex: 1; overflow-y: auto; }
-    .result-item { display: flex; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #1e1e1e; align-items: flex-start; }
+    .result-item { display: flex; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #1e1e1e; align-items: flex-start; transition: background 0.6s ease; }
     .result-item:hover { background: #1a1a1a; }
+    .result-item.result-item-flash { background: #33415e; }
     .result-index { min-width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; color: white; font-weight: bold; margin-top: 2px; flex-shrink: 0; }
     .google-index { background: #1a73e8; }
     .mapbox-index { background: #e74c3c; }
     .result-name { font-size: 11px; font-weight: bold; margin-bottom: 1px; }
+    .proximity-badge {
+      display: inline-block; margin-right: 3px; background: #dc2626; color: #fff;
+      font-weight: bold; border-radius: 2px; padding: 0 3px; line-height: 1.6;
+    }
     .result-address { font-size: 10px; color: #888; margin-bottom: 1px; }
     .result-type { font-size: 9px; color: #555; }
     .status-msg { padding: 16px 12px; font-size: 13px; color: #555; }
     .status-error { color: #e74c3c; }
+
+    /* 結果名ストリップ(全件のnameを折り返しで一覧表示、Google/Mapboxで高さを揃える) */
+    .name-strip { flex-shrink: 0; overflow: visible; padding: 2px 6px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 4px; border-bottom: 1px solid #2a2a2a; background: #161616; position: relative; }
+    .name-strip:empty { display: none; }
+    .name-chip { position: relative; font-size: 6px; line-height: 1.6; padding: 0 2px; border-radius: 2px; color: #999; white-space: nowrap; cursor: pointer; }
+    .name-chip:hover { background: #333; color: #fff; }
+    .name-chip.match-name    { background: #123a52; color: #7dd3fc; }
+    .name-chip.match-name:hover    { background: #1c5478; }
+    .name-chip.match-address { background: #133824; color: #86efac; }
+    .name-chip.match-address:hover { background: #1c5233; }
+    .name-chip.match-both    { background: #6d28d9; color: #fff; box-shadow: 0 0 0 1px #c4b5fd; }
+    .name-chip.match-both:hover    { background: #7c3aed; }
+
+    /* nameチップhover時の一致状態ツールチップ(吹き出し) */
+    .name-chip::after {
+      content: attr(data-tooltip);
+      position: absolute; top: 100%; left: 50%; margin-top: 5px;
+      transform: translateX(-50%) translateY(-3px);
+      background: #000; color: #fff; font-size: 9px; font-weight: normal;
+      padding: 3px 7px; border-radius: 4px; white-space: nowrap;
+      opacity: 0; pointer-events: none; transition: opacity 0.15s ease, transform 0.15s ease;
+      z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    .name-chip::before {
+      content: ''; position: absolute; top: 100%; left: 50%; margin-top: 1px;
+      transform: translateX(-50%) translateY(-3px);
+      border: 4px solid transparent; border-bottom-color: #000;
+      opacity: 0; pointer-events: none; transition: opacity 0.15s ease, transform 0.15s ease;
+      z-index: 50;
+    }
+    .name-chip:hover::after, .name-chip:hover::before { opacity: 1; transform: translateX(-50%) translateY(0); }
 
     .mode-badge { font-size: 10px; padding: 2px 7px; border-radius: 10px; border: 1px solid #444; cursor: pointer; background: #2d2d2d; color: #aaa; user-select: none; }
     .mode-badge:hover { background: #3a3a3a; }
@@ -174,6 +237,11 @@
     #csv-mapping-table th { padding: 6px 10px; background: #1a1a1a; color: #666; text-align: left; font-weight: normal; border-bottom: 1px solid #2a2a2a; }
     #csv-mapping-table td { padding: 5px 10px; border-bottom: 1px solid #1a1a1a; color: #ccc; }
     #csv-mapping-table select { padding: 4px 6px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 11px; }
+
+    /* History dialog */
+    #history-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    #history-table th { padding: 6px 10px; background: #1a1a1a; color: #666; text-align: left; font-weight: normal; border-bottom: 1px solid #2a2a2a; position: sticky; top: 0; }
+    #history-table td { padding: 5px 10px; border-bottom: 1px solid #1a1a1a; color: #ccc; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -222,31 +290,45 @@
   <div class="spacer"></div>
   <button class="btn btn-secondary" id="open-query-btn">📋 QUERY</button>
   <button class="btn btn-secondary" id="open-results-btn">📋 RESULTS</button>
+  <button class="btn btn-secondary" id="open-history-btn">📜 HISTORY</button>
   <button class="btn btn-secondary" id="open-token-btn" style="font-size:11px;padding:5px 10px;">🔑 Token</button>
 </div>
 
-<!-- CSV Panel -->
-<div id="csv-panel">
-  <div id="csv-header">
+<!-- CSV Controls Row (ヘッダーの真下、1行に収める) -->
+<div id="csv-toolbar">
+  <span id="csv-toggle" class="csv-toggle" title="クリックでCSV行一覧を開閉">
     <span id="csv-toggle-icon">▶</span>
-    <span id="csv-header-label">📂 CSV Test</span>
-    <div id="csv-controls" onclick="event.stopPropagation()">
-      <input type="file" id="csv-file-input" accept=".csv" style="display:none;" />
-      <button class="btn btn-secondary" id="csv-file-btn" style="font-size:11px;padding:4px 10px;">ファイル選択</button>
-      <button class="btn btn-secondary" id="csv-prev-btn" style="font-size:11px;padding:4px 10px;" disabled>◀ 前へ</button>
-      <button class="btn btn-secondary" id="csv-next-btn" style="font-size:11px;padding:4px 10px;" disabled>次へ ▶</button>
-      <span class="csv-progress" id="csv-progress"></span>
-      <span style="color:#555;font-size:10px;">Jump:</span>
-      <input type="number" id="csv-jump-input" min="1" placeholder="行番号"
-        style="width:70px;padding:4px 6px;background:#2a2a2a;border:1px solid #444;border-radius:3px;color:#fff;font-size:11px;outline:none;" />
-      <button id="csv-jump-btn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;">Go</button>
-      <span style="color:#555;font-size:10px;" id="csv-jump-hint"></span>
-    </div>
-  </div>
+    <span id="csv-header-label" title="">📂 CSV Test</span>
+  </span>
+  <input type="file" id="csv-file-input" accept=".csv" style="display:none;" />
+  <button class="btn btn-secondary" id="csv-file-btn" title="CSVファイルを選択" style="font-size:13px;padding:4px 9px;">📤</button>
+  <span class="csv-progress" id="csv-progress"></span>
+  <span class="header-label-sm">Jump:</span>
+  <input type="number" id="csv-jump-input" min="1" placeholder="行番号"
+    style="width:70px;padding:4px 6px;background:#2a2a2a;border:1px solid #444;border-radius:3px;color:#fff;font-size:11px;outline:none;" />
+  <button id="csv-jump-btn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;">Go</button>
+  <span class="header-label-sm" id="csv-jump-hint"></span>
+  <span class="header-sep"></span>
+  <span class="header-label-sm">結果:</span>
+  <select id="csv-filter-result">
+    <option value="all">All</option>
+    <option value="good">👍</option>
+    <option value="bad">👎</option>
+    <option value="untested">未実施</option>
+  </select>
+  <span class="header-label-sm">理由:</span>
+  <select id="csv-filter-reason"><option value="all">All</option></select>
+  <input type="text" id="csv-filter-text" placeholder="🔍 フリーワード検索" />
+  <button id="csv-filter-text-btn" class="btn btn-secondary" title="検索実行(Enter)" style="font-size:11px;padding:4px 6px;line-height:1;">⏎</button>
+  <span class="csv-progress" id="csv-filter-count"></span>
+</div>
+
+<!-- CSV Panel (行一覧テーブルのみ。開閉/ファイル選択等の操作はcsv-toolbarに移動済み) -->
+<div id="csv-panel">
   <div id="csv-body">
     <table id="csv-table">
       <thead>
-        <tr id="csv-thead-row"><th>#</th></tr>
+        <tr id="csv-thead-row"><th>#</th><th>結果</th><th>理由</th></tr>
       </thead>
       <tbody id="csv-tbody"></tbody>
     </table>
@@ -257,45 +339,53 @@
 <div class="resizer" id="resizer-csv-layout"></div>
 
 <div id="layout">
-  <div id="map-row">
-    <div class="pane-half">
-      <div class="pane-header">
-        <span>Google Places API</span>
-        <span id="google-count" class="result-count google-count"></span>
-        <span class="ph-spacer"></span>
-        <span class="mode-badge new" id="google-mode-badge">New</span>
+  <div id="main-column">
+    <div id="map-row">
+      <div class="pane-half">
+        <div class="pane-header">
+          <span>Google Places API</span>
+          <span id="google-count" class="result-count google-count"></span>
+          <span class="ph-spacer"></span>
+          <span class="mode-badge new" id="google-mode-badge">New</span>
+        </div>
+        <div id="google-map" class="map-container"></div>
       </div>
-      <div id="google-map" class="map-container"></div>
+      <div class="pane-half">
+        <div class="pane-header">
+          Mapbox Search Box API
+          <span id="mapbox-count" class="result-count mapbox-count"></span>
+          <span class="ph-spacer"></span>
+          <select id="poi-density-select" style="padding:2px 6px;background:#2a2a2a;border:1px solid #444;border-radius:3px;color:#ccc;font-size:10px;cursor:pointer;outline:none;">
+            <option value="1" selected>POI: Low</option>
+            <option value="2">POI: Middle</option>
+            <option value="3">POI: High</option>
+            <option value="4">POI: Very High</option>
+          </select>
+          <button class="btn btn-secondary" id="bbox-toggle-btn" style="font-size:10px;padding:2px 8px;">BBOX OFF</button>
+        </div>
+        <div id="mapbox-map" class="map-container"></div>
+      </div>
     </div>
-    <div class="pane-half">
-      <div class="pane-header">
-        Mapbox Search Box API
-        <span id="mapbox-count" class="result-count mapbox-count"></span>
-        <span class="ph-spacer"></span>
-        <select id="poi-density-select" style="padding:2px 6px;background:#2a2a2a;border:1px solid #444;border-radius:3px;color:#ccc;font-size:10px;cursor:pointer;outline:none;">
-          <option value="1" selected>POI: Low</option>
-          <option value="2">POI: Middle</option>
-          <option value="3">POI: High</option>
-          <option value="4">POI: Very High</option>
-        </select>
-        <button class="btn btn-secondary" id="bbox-toggle-btn" style="font-size:10px;padding:2px 8px;">BBOX OFF</button>
+    <div class="resizer" id="resizer-map-results"></div>
+
+    <div id="results-row">
+      <div class="pane-half">
+        <div id="google-name-strip" class="name-strip"></div>
+        <div id="google-results" class="results-list">
+          <p class="status-msg">クエリを入力して検索してください</p>
+        </div>
       </div>
-      <div id="mapbox-map" class="map-container"></div>
+      <div class="pane-half">
+        <div id="mapbox-name-strip" class="name-strip"></div>
+        <div id="mapbox-results" class="results-list">
+          <p class="status-msg">クエリを入力して検索してください</p>
+        </div>
+      </div>
     </div>
   </div>
-  <div class="resizer" id="resizer-map-results"></div>
-
-  <div id="results-row">
-    <div class="pane-half">
-      <div id="google-results" class="results-list">
-        <p class="status-msg">クエリを入力して検索してください</p>
-      </div>
-    </div>
-    <div class="pane-half">
-      <div id="mapbox-results" class="results-list">
-        <p class="status-msg">クエリを入力して検索してください</p>
-      </div>
-    </div>
+  <div id="feedback-panel">
+    <div class="pane-header">フィードバック</div>
+    <div id="feedback-body"><p class="status-msg" style="padding:0;">検索を実行してください</p></div>
   </div>
 </div>
 
@@ -394,10 +484,98 @@
         <tbody id="csv-mapping-tbody"></tbody>
       </table>
       <p id="csv-mapping-error" style="color:#e74c3c;font-size:12px;margin-top:10px;display:none;"></p>
+      <div id="csv-extra-columns-section" style="margin-top:14px;padding-top:12px;border-top:1px solid #333;display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <label for="csv-querytype-select" style="font-size:11px;color:#888;min-width:200px;">Filter column (optional, not a Mapbox/Google role)</label>
+          <select id="csv-querytype-select" style="padding:4px 6px;background:#2a2a2a;border:1px solid #444;border-radius:4px;color:#fff;font-size:11px;"></select>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <label for="csv-querycount-select" style="font-size:11px;color:#888;min-width:200px;">Count column (optional, numeric, not a Mapbox/Google role)</label>
+          <select id="csv-querycount-select" style="padding:4px 6px;background:#2a2a2a;border:1px solid #444;border-radius:4px;color:#fff;font-size:11px;"></select>
+        </div>
+      </div>
       <div style="display:flex;gap:8px;margin-top:14px;">
         <button id="csv-mapping-confirm-btn" class="btn btn-primary" style="flex:1;padding:9px;">完了</button>
         <button id="csv-mapping-cancel-btn" class="btn btn-secondary" style="flex:1;padding:9px;">キャンセル</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- query_type Filter Dialog -->
+<div class="dialog-overlay" id="querytype-filter-dialog">
+  <div class="dialog" style="max-width:360px;">
+    <div class="dialog-header">
+      <span class="dialog-title" id="querytype-filter-title">🔽 Filter</span>
+      <button class="dialog-close" data-close="querytype-filter-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <button id="qt-select-all-btn" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;">Select All</button>
+        <button id="qt-select-none-btn" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;">Clear All</button>
+      </div>
+      <div id="querytype-filter-body" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button id="qt-apply-btn" class="btn btn-primary" style="flex:1;padding:7px;font-size:12px;">Apply</button>
+        <button id="qt-cancel-btn" class="btn btn-secondary dialog-close" style="flex:1;padding:7px;font-size:12px;" data-close="querytype-filter-dialog">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- query_count Filter Dialog -->
+<div class="dialog-overlay" id="querycount-filter-dialog">
+  <div class="dialog" style="max-width:380px;">
+    <div class="dialog-header">
+      <span class="dialog-title" id="querycount-filter-title">🔢 Filter</span>
+      <button class="dialog-close" data-close="querycount-filter-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div style="margin-bottom:14px;">
+        <div style="font-size:11px;color:#888;margin-bottom:6px;">Sort</div>
+        <div style="display:flex;gap:8px;">
+          <button id="qc-sort-asc-btn" class="btn btn-secondary param-view-btn qc-sort-btn" data-dir="asc" style="flex:1;font-size:11px;padding:5px 8px;">Ascending ▲</button>
+          <button id="qc-sort-desc-btn" class="btn btn-secondary param-view-btn qc-sort-btn" data-dir="desc" style="flex:1;font-size:11px;padding:5px 8px;">Descending ▼</button>
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label for="qc-min-input" style="font-size:11px;color:#888;display:block;margin-bottom:6px;">Show rows with count &ge;</label>
+        <input type="number" id="qc-min-input" min="0" placeholder="(no filter)" style="width:100%;box-sizing:border-box;padding:6px 8px;background:#2a2a2a;border:1px solid #444;border-radius:4px;color:#fff;font-size:12px;">
+      </div>
+      <div style="margin-bottom:4px;">
+        <div style="font-size:11px;color:#888;margin-bottom:6px;">Distribution (for reference)</div>
+        <table id="qc-distribution-table" style="width:100%;font-size:11px;color:#ccc;border-collapse:collapse;">
+          <tbody id="qc-distribution-tbody"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button id="qc-apply-btn" class="btn btn-primary" style="flex:1;padding:7px;font-size:12px;">Apply</button>
+        <button id="qc-cancel-btn" class="btn btn-secondary dialog-close" style="flex:1;padding:7px;font-size:12px;" data-close="querycount-filter-dialog">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- HISTORY Dialog -->
+<div class="dialog-overlay" id="history-dialog">
+  <div class="dialog" style="max-width:900px;">
+    <div class="dialog-header">
+      <span class="dialog-title">📜 HISTORY</span>
+      <button class="dialog-close" data-close="history-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <button class="btn btn-secondary" id="history-copy-btn">Copy</button>
+        <button class="btn btn-secondary" id="history-export-btn">Export CSV</button>
+        <span class="ph-spacer"></span>
+        <span id="history-count" style="font-size:11px;color:#666;"></span>
+      </div>
+      <table id="history-table">
+        <thead>
+          <tr><th>日時</th><th>ファイル</th><th>行</th><th>クエリ</th><th>結果</th><th>理由</th></tr>
+        </thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
     </div>
   </div>
 </div>
@@ -673,7 +851,9 @@ function renderParamForm(container, fields, stateObj, onChange) {
       });
     } else if (f.widget === 'text-array') {
       input = document.createElement('input'); input.type = 'text';
-      input.value = Array.isArray(rawVal) ? rawVal.join(',') : (rawVal ?? '');
+      // CSV等から%エンコード済みの値が入ってくることがあるため、表示前にデコードする(壊れたシーケンスは元の値のまま)
+      const decodeSafe = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+      input.value = Array.isArray(rawVal) ? rawVal.map(decodeSafe).join(',') : (rawVal ?? '');
       input.placeholder = 'カンマ区切り';
       input.addEventListener('change', () => {
         const arr = input.value.split(',').map(s => s.trim()).filter(Boolean);
@@ -704,7 +884,11 @@ function renderParamForm(container, fields, stateObj, onChange) {
       input.value = rawVal ?? '';
       input.addEventListener('change', () => {
         const v = input.value === '' ? undefined : Number(input.value);
-        setPath(stateObj, f.path, v); onChange();
+        setPath(stateObj, f.path, v);
+        // proximity/bboxをFormで直接編集した場合は手動編集とみなし、以後の自動追従による上書きを止める
+        if (f.path === 'proximity.lat' || f.path === 'proximity.lng') mapboxProximityManual = true;
+        if (/^bbox\.\d$/.test(f.path)) mapboxBboxManual = true;
+        onChange();
       });
     } else if (f.widget === 'checkbox') {
       input = document.createElement('input'); input.type = 'checkbox';
@@ -763,6 +947,11 @@ let state = {
   mapboxParams:  structuredClone(DEFAULT_MAPBOX_PARAMS),
 };
 
+// proximity/bboxをFormで直接編集した場合、地図ピン操作やCSV行選択による自動追従で上書きされないようにするフラグ。
+// setLocationPin()(地図クリック/ドラッグ、CSV行のlat/lng)またはmapboxパラメータのResetでfalseに戻る(=自動追従を復活させる)
+let mapboxProximityManual = false;
+let mapboxBboxManual      = false;
+
 // ============================================================
 // CSV STATE
 // ============================================================
@@ -771,6 +960,147 @@ let csvRawRows    = [];   // [{header: value, ...}, ...]
 let csvIndex      = -1;
 let csvMapping    = null; // { columns: [{header, mapboxRole, googleRole}] }
 let currentCsvFileName = '';
+let currentCsvFileId   = ''; // ファイル名+内容ハッシュ。同じファイルの再読込を検知するためのキー
+
+// query_type列(CSVマッピング確認モーダルでMapbox/Googleどちらの役割でもない列として選択。#の右隣に表示し、ヘッダークリックでチェックボックスフィルタを開く)
+let csvQueryTypeColumn   = null;   // 選択されたCSV列名。未選択/(none)ならnull
+let csvHasQueryType      = false;
+let csvQueryTypeValues   = [];      // 出現するユニーク値(初出順、空文字も1値として含む)
+let csvQueryTypeSelected = new Set(); // 適用中の選択(全件選択時はフィルタなしとして扱う)
+let csvQueryTypePending  = new Set(); // モーダル編集中の一時選択(Cancelで破棄)
+
+// query_count列(query_typeと同様にMapbox/Googleの役割ではない列として選択。#の右隣に表示)
+// ヘッダークリックでソート(昇順/降順)+ n以上フィルタのモーダルを開く
+let csvQueryCountColumn = null;   // 選択されたCSV列名。未選択/(none)ならnull
+let csvHasQueryCount    = false;
+let csvQueryCountMin    = null;   // 適用中のしきい値(n以上のみ表示)。nullはフィルタなし
+let csvQueryCountMinPending = null; // モーダル編集中の一時値(Cancelで破棄)
+
+// 行の並び順。sortField: null(元の順序) | 'index'(#列クリック) | 'querycount'(query_countモーダルで適用)
+// 直近に確定した方が優先される(片方しか同時に有効にならない)
+let csvSortField = null;
+let csvSortDir   = 'asc'; // 'asc' | 'desc'
+
+// ============================================================
+// FEEDBACK (検索結果への 👍/👎 評価)
+// ============================================================
+const FEEDBACK_REASONS = [
+  { category: 'Coverage', items: ['poi coverage', 'poi coverage (bus)', 'poi coverage (brand)', 'poi freshness', 'poi coverage (parking lot)', 'address coverage'] },
+  { category: 'Fuzzy Search', items: ['synonym coverage', 'wrong synonym', 'prefix match', 'subsequence match', 'suffix match', 'edit distance match', 'alphabet for kana', 'different kana for alphabet', 'hyphen for kana', 'ignore letter size', 'multiple reading', 'ignore space'] },
+  { category: 'Bug', items: ['poi duplication', 'wrong poi', 'wrong address'] },
+  { category: 'Others', items: ['location intent', 'category intent', 'prominence score'] },
+];
+// GOODを押した際の内訳(順位まで含めて精度を見る方針のため、1位での正解/正解はしているが1位ではない、を区別する)
+const GOOD_REASONS = ['Perfect (Correct POI at top)', 'Almost! (Correct POI but not ranked at top)'];
+
+const LS_FEEDBACK = 'apc_feedback_log';
+function loadFeedbackLog() { try { return JSON.parse(localStorage.getItem(LS_FEEDBACK) || '[]'); } catch { return []; } }
+function saveFeedbackLog(log) { localStorage.setItem(LS_FEEDBACK, JSON.stringify(log)); }
+let feedbackLog = loadFeedbackLog();
+
+// 簡易ハッシュ(djb2系)。CSVの中身が同じかどうかの判定用(暗号強度は不要)
+function hashString(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+function feedbackKey(ctx) {
+  return ctx.fileId ? `${ctx.fileId}::${ctx.rowIndex}` : `manual::${ctx.query}`;
+}
+
+function getLatestFeedbackForKey(key) {
+  for (let i = feedbackLog.length - 1; i >= 0; i--) {
+    if (feedbackLog[i].key === key) return feedbackLog[i];
+  }
+  return null;
+}
+
+function getRowFeedback(rowIdx) {
+  if (!currentCsvFileId) return null;
+  return getLatestFeedbackForKey(`${currentCsvFileId}::${rowIdx}`);
+}
+
+function recordFeedback(ctx, result, reason) {
+  const entry = {
+    key: feedbackKey(ctx), result, reason: reason || null,
+    query: ctx.query, fileName: ctx.fileName || null, rowIndex: ctx.rowIndex ?? null,
+    timestamp: new Date().toISOString(),
+  };
+  feedbackLog.push(entry);
+  saveFeedbackLog(feedbackLog);
+  return entry;
+}
+
+let feedbackContext  = null;   // { fileId, fileName, rowIndex, query } —直近の検索がどのクエリ/行に対するものか
+let feedbackPanelMode = 'idle'; // 'idle' | 'rated' | 'good_reason' | 'reason'
+
+function renderFeedbackPanel() {
+  const body = document.getElementById('feedback-body');
+  if (feedbackPanelMode === 'rated') {
+    body.innerHTML = `
+      <div class="fb-buttons">
+        <button class="btn btn-secondary fb-btn" id="fb-good-btn">👍</button>
+        <button class="btn btn-secondary fb-btn" id="fb-bad-btn">👎</button>
+      </div>`;
+    document.getElementById('fb-good-btn').addEventListener('click', () => { feedbackPanelMode = 'good_reason'; renderFeedbackPanel(); });
+    document.getElementById('fb-bad-btn').addEventListener('click', () => { feedbackPanelMode = 'reason'; renderFeedbackPanel(); });
+  } else if (feedbackPanelMode === 'good_reason') {
+    body.innerHTML = `
+      <button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← 戻る</button>
+      <div class="fb-reason-list">
+        ${GOOD_REASONS.map(label => `<button class="btn btn-secondary fb-reason-btn" data-reason="${esc(label)}">${esc(label)}</button>`).join('')}
+      </div>`;
+    document.getElementById('fb-back-btn').addEventListener('click', () => { feedbackPanelMode = 'rated'; renderFeedbackPanel(); });
+    body.querySelectorAll('.fb-reason-btn').forEach(btn => {
+      btn.addEventListener('click', () => submitFeedback('good', btn.dataset.reason));
+    });
+  } else if (feedbackPanelMode === 'reason') {
+    body.innerHTML = `<button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← 戻る</button>` + FEEDBACK_REASONS.map(group => `
+      <div class="fb-reason-group">${esc(group.category)}</div>
+      <div class="fb-reason-list">
+        ${group.items.map(label => `<button class="btn btn-secondary fb-reason-btn" data-reason="${esc(label)}">${esc(label)}</button>`).join('')}
+      </div>`).join('');
+    document.getElementById('fb-back-btn').addEventListener('click', () => { feedbackPanelMode = 'rated'; renderFeedbackPanel(); });
+    body.querySelectorAll('.fb-reason-btn').forEach(btn => {
+      btn.addEventListener('click', () => submitFeedback('bad', btn.dataset.reason));
+    });
+  } else {
+    body.innerHTML = `<p class="status-msg" style="padding:0;">検索を実行してください</p>`;
+  }
+}
+
+function submitFeedback(result, reason) {
+  if (!feedbackContext) return;
+  recordFeedback(feedbackContext, result, reason);
+  feedbackPanelMode = 'idle';
+  feedbackContext = null;
+  renderFeedbackPanel();
+  if (currentCsvFileId) renderCSVViewport(); // このクエリがCSV行に紐づく場合、結果アイコン/薄字を反映
+
+  // ファイル読み込み中で次の行があれば自動遷移
+  if (csvMapping && csvIndex >= 0 && csvIndex < csvRawRows.length - 1) {
+    jumpToCSVRow(csvIndex + 1);
+  }
+}
+
+// ============================================================
+// QUERY HISTORY (↑/↓キーで遡る。最大100件)
+// ============================================================
+const LS_QUERY_HISTORY = 'apc_query_history';
+function loadQueryHistory() { try { return JSON.parse(localStorage.getItem(LS_QUERY_HISTORY) || '[]'); } catch { return []; } }
+function saveQueryHistory(arr) { localStorage.setItem(LS_QUERY_HISTORY, JSON.stringify(arr)); }
+let queryHistory = loadQueryHistory(); // 先頭が最新
+let queryHistoryPos = -1;              // -1 = 履歴を辿っていない(入力中の下書き)
+let queryHistoryDraft = '';
+
+function pushQueryHistory(q) {
+  if (!q) return;
+  queryHistory = queryHistory.filter(x => x !== q);
+  queryHistory.unshift(q);
+  if (queryHistory.length > 100) queryHistory.length = 100;
+  saveQueryHistory(queryHistory);
+}
 
 // ============================================================
 // LOCATION HELPERS
@@ -851,7 +1181,8 @@ function readFromURL() {
 }
 
 function writeToURL() {
-  state.mapboxParams.proximity = getCurrentLocation();
+  // proximityをFormで手動編集した直後は、ここでの自動追従上書きをスキップする(でないと入力した値がその場で消える)
+  if (!mapboxProximityManual) state.mapboxParams.proximity = getCurrentLocation();
   const url = new URL(window.location.href);
   url.searchParams.set('state', encodeState(state));
   window.history.replaceState(null, '', url.toString());
@@ -1119,6 +1450,25 @@ async function searchMapbox(query) {
 // ============================================================
 // RENDER
 // ============================================================
+// 2点間の距離をhaversine公式で概算(km)。proximity/locationからの近さの目安表示にのみ使うので厳密な測地線計算はしない。
+const EARTH_RADIUS_KM = 6371;
+function haversineDistanceKm(lat1, lng1, lat2, lng2) {
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+const NEAR_PROXIMITY_KM = 3;
+// proximity(Mapbox)/location(Google)からresultまでの距離を判定し、NEAR_PROXIMITY_KM以内なら
+// { badge: 🅿️マークのHTML, tooltip: 吹き出しに足すテキスト } を返す(未設定/範囲外はどちらも空文字)
+function nearProximityInfo(centerLat, centerLng, resultLat, resultLng) {
+  if (centerLat == null || centerLng == null || resultLat == null || resultLng == null) return { badge: '', tooltip: '' };
+  if (!isFinite(centerLat) || !isFinite(centerLng) || !isFinite(resultLat) || !isFinite(resultLng)) return { badge: '', tooltip: '' };
+  const km = haversineDistanceKm(centerLat, centerLng, resultLat, resultLng);
+  if (km > NEAR_PROXIMITY_KM) return { badge: '', tooltip: '' };
+  return { badge: `<span class="proximity-badge">P</span>`, tooltip: `proximity/locationから${km.toFixed(1)}km(${NEAR_PROXIMITY_KM}km以内)` };
+}
+
 function renderGoogleResults(data) {
   const el = document.getElementById('google-results'), countEl = document.getElementById('google-count');
   if (data.error) { el.innerHTML = `<p class="status-msg status-error">${data.error}</p>`; countEl.textContent = ''; return; }
@@ -1171,9 +1521,181 @@ function renderMapboxResults(data) {
   });
 }
 
+// ============================================================
+// NAME STRIP (Google/Mapboxの全結果nameを一覧表示し、名前/住所の一致をハイライト)
+// ============================================================
+// 全角/半角・カタカナ半角などをNFKCで統一し、空白を除去して比較用の文字列を作る
+function normalizeNameForMatch(s) {
+  if (!s) return '';
+  return s.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+}
+
+// 都道府県名の先頭位置を探し、それより前(国名「日本」や郵便番号など)を丸ごと切り捨てる
+// (「日本、〒106-0032 東京都港区...」→「東京都港区...」。都道府県名を含めた形で残す)
+const PREFECTURE_RE = /(北海道|東京都|京都府|大阪府|[一-鿿々]{2,3}県)/;
+function stripBeforePrefecture(s) {
+  const m = s.match(PREFECTURE_RE);
+  return m ? s.slice(m.index) : s;
+}
+
+// 漢数字(〇/一〜九/十)の連続を算用数字に変換する(0〜99程度の丁目・番地・号を想定)
+// 例: "三"→"3"、"十一"→"11"、"二十三"→"23"。変換対象外の文字が混じる場合はそのまま返す。
+const KANJI_DIGIT_MAP = { '〇': 0, '○': 0, '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
+function kanjiNumeralToArabic(str) {
+  if (str.indexOf('十') === -1) {
+    let out = '';
+    for (const ch of str) out += (KANJI_DIGIT_MAP[ch] !== undefined ? KANJI_DIGIT_MAP[ch] : ch);
+    return out;
+  }
+  const parts = str.split('十');
+  if (parts.length !== 2) return str; // "十"が複数回登場するなど想定外のパターンはそのまま
+  const [before, after] = parts;
+  const tens = before === '' ? 1 : KANJI_DIGIT_MAP[before];
+  const ones = after === '' ? 0 : KANJI_DIGIT_MAP[after];
+  if (tens === undefined || ones === undefined) return str;
+  return String(tens * 10 + ones);
+}
+function kanjiNumeralsToArabic(s) {
+  return s.replace(/[〇○零一二三四五六七八九十]+/g, kanjiNumeralToArabic);
+}
+
+// 住所でよく省略される地名区分の接頭辞(大字・小字・字)は、片方にだけ付いていると不一致の原因になるため無視する。
+// 「大字」「小字」を先に除去してから残った単独の「字」を除去する(「小字」の「字」を二重に消さないための順序)。
+function stripAddressDivisionPrefixes(s) {
+  return s.replace(/大字|小字/g, '').replace(/字/g, '');
+}
+
+// 住所比較用: 都道府県より前(国名/郵便番号)を除去し、丁目・番地・番・号や各種ハイフン類(全角/半角/長音)を単一の"-"に統一する
+// (Googleは郵便番号が入っていないケースがあるため、郵便番号自体は「あれば無視する」形にする)
+function normalizeAddressForMatch(s) {
+  if (!s) return '';
+  let t = s.normalize('NFKC');
+  t = stripBeforePrefecture(t);
+  t = kanjiNumeralsToArabic(t); // 「三丁目」= 「3丁目」のように漢数字表記ゆれを吸収
+  t = stripAddressDivisionPrefixes(t); // 「大字」「小字」「字」の有無による表記ゆれを吸収
+  t = t.replace(/〒?\d{3}-?\d{4}/g, '');           // 郵便番号(先頭で拾いきれなかった場合の保険)
+  t = t.replace(/日本[、,]?/g, '').replace(/,?\s*Japan/gi, '');
+  t = t.replace(/[‐‑‒–—―−ー\-]/g, '-'); // 各種ハイフン/長音記号→"-"
+  t = t.replace(/丁目/g, '-').replace(/番地/g, '-').replace(/番/g, '-').replace(/号/g, '');
+  t = t.replace(/[\s,、]+/g, '');
+  t = t.replace(/-+/g, '-');
+  return t.toLowerCase();
+}
+
+// ノイズ(全角半角/空白/丁目番地のハイフン表記ゆれ等)は正規化で吸収した上で、完全一致のみを一致とみなす
+// (containment不可: 例「入谷駅」に対して「セブンイレブン入谷駅前店」はマッチさせない)
+// ただしaddress型クエリの場合、nameフィールド自体が住所の断片(Googleは短く/市区町村名すら省略、Mapboxはより完全)として
+// 返ってくることがあるため、treatAsAddress=true時は住所用の正規化+後方一致(短い方が長い方の末尾と一致)を許容する。
+// (番地の数字列だけを見るフォールバックは廃止: 町名が違っても番地番号が偶然一致すると誤マッチするため)
+function namesMatch(a, b, treatAsAddress) {
+  if (treatAsAddress) {
+    const na = normalizeAddressForMatch(a), nb = normalizeAddressForMatch(b);
+    if (!na || !nb) return false;
+    return na === nb || na.endsWith(nb) || nb.endsWith(na);
+  }
+  const na = normalizeNameForMatch(a), nb = normalizeNameForMatch(b);
+  if (!na || !nb) return false;
+  return na === nb;
+}
+
+// address(formatted_address/full_address)フィールドは元々Google/Mapboxどちらもフルで入っているので、
+// 郵便番号/国名を無視した上での完全一致のみを一致とみなす(後方一致・番地核フォールバックは行わない)。
+function addressesMatch(a, b) {
+  const na = normalizeAddressForMatch(a), nb = normalizeAddressForMatch(b);
+  if (!na || !nb) return false;
+  return na === nb;
+}
+
+// listA の各要素について、listB内のどれかとname/addressが一致するかを判定し 'none'|'name'|'address'|'both' を返す
+function computeMatchCategories(listA, getNameA, getAddrA, listB, getNameB, getAddrB, treatNameAsAddress) {
+  return listA.map(item => {
+    const nameA = getNameA(item), addrA = getAddrA(item);
+    let nameHit = false, addrHit = false;
+    for (const other of listB) {
+      if (other === item) continue; // 万一listAとlistBが同一参照を含んでいても自己参照させない
+      if (!nameHit && namesMatch(nameA, getNameB(other), treatNameAsAddress)) nameHit = true;
+      if (!addrHit && addressesMatch(addrA, getAddrB(other))) addrHit = true;
+      if (nameHit && addrHit) break;
+    }
+    return nameHit && addrHit ? 'both' : nameHit ? 'name' : addrHit ? 'address' : 'none';
+  });
+}
+
+// クリックされたnameチップに対応する結果リストの項目までスクロールし、一瞬ハイライトして知らせる
+function focusResultItem(side, index) {
+  const list = document.getElementById(`${side}-results`);
+  if (!list) return;
+  const item = list.querySelectorAll('.result-item')[index];
+  if (!item) return;
+  item.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  item.click();
+  item.classList.add('result-item-flash');
+  setTimeout(() => item.classList.remove('result-item-flash'), 1000);
+}
+
+function renderNameStrip(elId, list, nameOf, categories, side, proximityInfoOf) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!list || !list.length) { el.innerHTML = ''; return; }
+  const MATCH_LABEL = { both: '完全一致', name: 'nameのみ一致', address: '完全一致（address）', none: '一致なし' };
+  el.innerHTML = list.map((item, i) => {
+    const cat = categories[i];
+    const cls = cat === 'both' ? 'match-both' : cat === 'name' ? 'match-name' : cat === 'address' ? 'match-address' : '';
+    const { badge, tooltip } = proximityInfoOf ? proximityInfoOf(item) : { badge: '', tooltip: '' };
+    const tooltipText = tooltip ? `${MATCH_LABEL[cat]} / ${tooltip}` : MATCH_LABEL[cat];
+    return `<span class="name-chip ${cls}" data-index="${i}" data-tooltip="${esc(tooltipText)}">${badge}${esc(nameOf(item) ?? '(no name)')}</span>`;
+  }).join('');
+  el.querySelectorAll('.name-chip').forEach(chip => {
+    chip.addEventListener('click', () => focusResultItem(side, parseInt(chip.dataset.index, 10)));
+  });
+}
+
+// GoogleとMapboxの高さの高い方に両ストリップを揃える
+function syncNameStripHeights() {
+  const g = document.getElementById('google-name-strip');
+  const m = document.getElementById('mapbox-name-strip');
+  if (!g || !m) return;
+  g.style.height = ''; m.style.height = '';
+  const h = Math.max(g.scrollHeight, m.scrollHeight);
+  if (h > 0) { g.style.height = h + 'px'; m.style.height = h + 'px'; }
+}
+
+// nameフィールドを住所として扱う(住所用の正規化+後方一致を許可する)かどうか。
+// CSVバッチ実行中でquery_type列がある場合は、その行がAI/手動分類で「address」とされている時だけtrueにする
+// (検索ボックス単体利用やquery_type列が無い場合は制限しない)
+function isCurrentQueryAddressType() {
+  if (currentCsvFileId && csvHasQueryType && csvIndex >= 0 && csvRawRows[csvIndex]) {
+    const val = String(csvRawRows[csvIndex][csvQueryTypeColumn] ?? '').trim().toLowerCase();
+    return val === 'address';
+  }
+  return true;
+}
+
+function updateNameStrips() {
+  const gList = Array.isArray(googleRawResults) ? googleRawResults : [];
+  const mList = Array.isArray(mapboxRawResults) ? mapboxRawResults : [];
+  const gName = r => r.name, gAddr = r => r.formatted_address;
+  const mName = r => r.name, mAddr = r => r.full_address;
+  const treatNameAsAddress = isCurrentQueryAddressType();
+
+  const gCats = computeMatchCategories(gList, gName, gAddr, mList, mName, mAddr, treatNameAsAddress);
+  const mCats = computeMatchCategories(mList, mName, mAddr, gList, gName, gAddr, treatNameAsAddress);
+
+  const gCenter = state.googleParams.location;
+  const mCenter = state.mapboxParams.proximity;
+  const gProximityInfo = r => nearProximityInfo(gCenter?.lat, gCenter?.lng, r.geometry?.location?.lat, r.geometry?.location?.lng);
+  const mProximityInfo = r => nearProximityInfo(mCenter?.lat, mCenter?.lng, r.coordinates?.latitude, r.coordinates?.longitude);
+
+  renderNameStrip('google-name-strip', gList, gName, gCats, 'google', gProximityInfo);
+  renderNameStrip('mapbox-name-strip', mList, mName, mCats, 'mapbox', mProximityInfo);
+  syncNameStripHeights();
+}
+
 function setLoading(side) {
   document.getElementById(`${side}-results`).innerHTML = `<p class="status-msg">Searching...</p>`;
   document.getElementById(`${side}-count`).textContent = '';
+  const strip = document.getElementById(`${side}-name-strip`);
+  if (strip) { strip.innerHTML = ''; strip.style.height = ''; }
 }
 
 // ============================================================
@@ -1215,8 +1737,11 @@ async function doSearch() {
   const query = document.getElementById('query-input').value.trim();
   if (!query) return;
   state.query = query;
+  pushQueryHistory(query);
+  queryHistoryPos = -1;
 
-  if (Array.isArray(state.mapboxParams.bbox) && state.mapboxParams.bbox.length === 4) {
+  // bboxをFormで手動編集した場合は、ここでの位置・半径からの自動再計算をスキップして手動値を保持する
+  if (!mapboxBboxManual && Array.isArray(state.mapboxParams.bbox) && state.mapboxParams.bbox.length === 4) {
     const { lat, lng } = getCurrentLocation(), radius = getCurrentRadius(), offset = radius / 111000;
     state.mapboxParams.bbox = [+(lng-offset).toFixed(6), +(lat-offset).toFixed(6), +(lng+offset).toFixed(6), +(lat+offset).toFixed(6)];
     refreshParamUI('mapbox');
@@ -1252,10 +1777,21 @@ async function doSearch() {
     if (!mRes.value.error) plotMapboxMarkers(mRes.value);
   } else { mapboxRawResults = []; renderMapboxResults({ error: String(mRes.reason) }); }
 
+  updateNameStrips();
   fitResultsBounds();
   drawRangeOverlays();
   updateResultEditors();
   persistLastResult();
+
+  // このクエリに対するフィードバック待ち状態にする(CSV読込中ならその行に紐づける)
+  feedbackContext = {
+    fileId:    currentCsvFileId || null,
+    fileName:  currentCsvFileId ? currentCsvFileName : null,
+    rowIndex:  currentCsvFileId ? csvIndex : null,
+    query,
+  };
+  feedbackPanelMode = 'rated';
+  renderFeedbackPanel();
 }
 
 // ============================================================
@@ -1301,11 +1837,67 @@ const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 
 // Mapbox/Googleのどちらにも役割が割り当てられていない列は、メイン画面のプレビュー表からは隠す
 function getVisibleCsvHeaders() {
-  if (!csvMapping) return csvHeaders;
-  return csvHeaders.filter(h => {
-    const col = csvMapping.columns.find(c => c.header === h);
-    return col && (col.mapboxRole !== '(none)' || col.googleRole !== '(none)');
+  const headers = csvMapping
+    ? csvHeaders.filter(h => {
+        const col = csvMapping.columns.find(c => c.header === h);
+        return col && (col.mapboxRole !== '(none)' || col.googleRole !== '(none)');
+      })
+    : csvHeaders;
+  // query_type/query_count列は専用列(#の右隣)で表示するため、通常の列一覧からは除外する
+  return headers.filter(h => h !== csvQueryTypeColumn && h !== csvQueryCountColumn);
+}
+
+// ---- フィルタリング状態 ----
+let csvFilterResult = 'all'; // 'all' | 'good' | 'bad' | 'untested'
+let csvFilterReason = 'all'; // 'all' or 具体的な理由ラベル
+let csvFilterText   = '';    // フリーワード検索
+
+// CSV行のquery_count値を数値化(空/非数値は0扱い)
+function getQueryCountValue(i) {
+  const v = parseFloat(csvRawRows[i][csvQueryCountColumn]);
+  return isNaN(v) ? 0 : v;
+}
+
+function getFilteredCsvIndices() {
+  const needle = csvFilterText.trim().toLowerCase();
+  const indices = csvRawRows.map((_, i) => i).filter(i => {
+    const fb = getRowFeedback(i);
+    if (csvFilterResult === 'good'     && (!fb || fb.result !== 'good')) return false;
+    if (csvFilterResult === 'bad'      && (!fb || fb.result !== 'bad'))  return false;
+    if (csvFilterResult === 'untested' && fb) return false;
+    if (csvFilterReason !== 'all' && (!fb || fb.reason !== csvFilterReason)) return false;
+    if (csvHasQueryType && csvQueryTypeSelected.size < csvQueryTypeValues.length) {
+      if (!csvQueryTypeSelected.has(csvRawRows[i][csvQueryTypeColumn] || '')) return false;
+    }
+    if (csvHasQueryCount && csvQueryCountMin != null) {
+      if (getQueryCountValue(i) < csvQueryCountMin) return false;
+    }
+    if (needle) {
+      const hay = Object.values(csvRawRows[i]).join(' ').toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
   });
+
+  // ソート: #列クリック('index')かquery_countモーダルでの適用('querycount')のうち、直近に確定した方だけが有効
+  if (csvSortField === 'querycount' && csvHasQueryCount) {
+    indices.sort((a, b) => csvSortDir === 'asc'
+      ? getQueryCountValue(a) - getQueryCountValue(b)
+      : getQueryCountValue(b) - getQueryCountValue(a));
+  } else if (csvSortField === 'index' && csvSortDir === 'desc') {
+    indices.reverse();
+  }
+  return indices;
+}
+
+function populateCsvFilterReasonOptions() {
+  const sel = document.getElementById('csv-filter-reason');
+  const current = sel.value;
+  const goodGroup = `<optgroup label="Good">${GOOD_REASONS.map(label => `<option value="${esc(label)}">${esc(label)}</option>`).join('')}</optgroup>`;
+  sel.innerHTML = '<option value="all">All</option>' + goodGroup + FEEDBACK_REASONS.map(g =>
+    `<optgroup label="${esc(g.category)}">${g.items.map(label => `<option value="${esc(label)}">${esc(label)}</option>`).join('')}</optgroup>`
+  ).join('');
+  sel.value = current || 'all';
 }
 
 function renderCSVTable() {
@@ -1314,18 +1906,38 @@ function renderCSVTable() {
   const theadRow = document.getElementById('csv-thead-row');
   const visibleHeaders = getVisibleCsvHeaders();
 
-  theadRow.innerHTML = '<th>#</th>' + visibleHeaders.map(h => `<th>${esc(h)}</th>`).join('');
+  const indexSortIcon = csvSortField === 'index' ? (csvSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const indexTh = `<th id="csv-th-index" style="cursor:pointer;user-select:none;" title="Click to sort by row order">#${indexSortIcon}</th>`;
+
+  const queryTypeTh = csvHasQueryType
+    ? `<th id="csv-th-querytype" style="cursor:pointer;user-select:none;" title="Click to filter by ${esc(csvQueryTypeColumn)}">${esc(csvQueryTypeColumn)} ${csvQueryTypeSelected.size < csvQueryTypeValues.length ? `🔽(${csvQueryTypeSelected.size}/${csvQueryTypeValues.length})` : '🔽'}</th>`
+    : '';
+  const queryCountSortIcon = csvSortField === 'querycount' ? (csvSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const queryCountTh = csvHasQueryCount
+    ? `<th id="csv-th-querycount" style="cursor:pointer;user-select:none;" title="Click to sort/filter by ${esc(csvQueryCountColumn)}">${esc(csvQueryCountColumn)}${queryCountSortIcon}${csvQueryCountMin != null ? ` 🔽(≥${csvQueryCountMin})` : ''}</th>`
+    : '';
+  theadRow.innerHTML = indexTh + queryTypeTh + queryCountTh + '<th>結果</th><th>理由</th>' + visibleHeaders.map(h => `<th>${esc(h)}</th>`).join('');
 
   document.getElementById('csv-progress').textContent = csvRawRows.length > 0
     ? `${csvIndex >= 0 ? csvIndex + 1 : '-'} / ${csvRawRows.length}` : '';
-  document.getElementById('csv-prev-btn').disabled = csvRawRows.length === 0 || csvIndex <= 0;
-  document.getElementById('csv-next-btn').disabled = csvRawRows.length === 0 || csvIndex >= csvRawRows.length - 1;
 
   if (!csvHandlersAttached) {
     body.addEventListener('scroll', renderCSVViewport);
     tbody.addEventListener('click', (e) => {
       const tr = e.target.closest('tr[data-idx]');
       if (tr) jumpToCSVRow(parseInt(tr.dataset.idx));
+    });
+    theadRow.addEventListener('click', (e) => {
+      if (e.target.closest('#csv-th-index')) {
+        // #列クリック: 昇順/降順をトグル。直近のクリックが優先されるので、query_countソートを上書きする
+        csvSortDir = (csvSortField === 'index' && csvSortDir === 'asc') ? 'desc' : 'asc';
+        csvSortField = 'index';
+        document.getElementById('csv-body').scrollTop = 0;
+        renderCSVTable();
+        return;
+      }
+      if (e.target.closest('#csv-th-querytype')) { openQueryTypeFilterModal(); return; }
+      if (e.target.closest('#csv-th-querycount')) { openQueryCountFilterModal(); return; }
     });
     csvHandlersAttached = true;
   }
@@ -1336,13 +1948,19 @@ function renderCSVTable() {
 function renderCSVViewport() {
   const body  = document.getElementById('csv-body');
   const tbody = document.getElementById('csv-tbody');
-  const total = csvRawRows.length;
   const visibleHeaders = getVisibleCsvHeaders();
-  const colCount = visibleHeaders.length + 1;
+  const colCount = visibleHeaders.length + 3 + (csvHasQueryType ? 1 : 0) + (csvHasQueryCount ? 1 : 0); // # + 結果 + 理由 (+ query_type) (+ query_count)
+
+  const indices = getFilteredCsvIndices();
+  const total = indices.length;
+  const countEl = document.getElementById('csv-filter-count');
+  if (countEl) countEl.textContent = csvRawRows.length ? `${total} / ${csvRawRows.length}件表示` : '';
   if (total === 0) { tbody.innerHTML = ''; return; }
 
   const viewH = body.clientHeight || 180;
-  const first = Math.max(0, Math.floor(body.scrollTop / CSV_ROW_H) - 5);
+  // フィルタで行数が減った直後は、フィルタ前のスクロール位置(scrollTop)が新しいtotalを超えている場合がある。
+  // クランプしないとfirst > lastになり、件数は表示されるのに行が1件も描画されないバグになる。
+  const first = Math.min(Math.max(0, Math.floor(body.scrollTop / CSV_ROW_H) - 5), total - 1);
   const last  = Math.min(total - 1, first + Math.ceil(viewH / CSV_ROW_H) + 10);
 
   const padTop    = first * CSV_ROW_H;
@@ -1352,11 +1970,21 @@ function renderCSVViewport() {
   if (padTop > 0)
     html += `<tr><td colspan="${colCount}" style="height:${padTop}px;padding:0;border:none;"></td></tr>`;
 
-  for (let i = first; i <= last; i++) {
+  for (let k = first; k <= last; k++) {
+    const i = indices[k];
     const r = csvRawRows[i];
+    const fb = getRowFeedback(i);
+    const resultIcon = fb ? (fb.result === 'good' ? '👍' : '👎') : '';
+    const reasonText = fb ? esc(fb.reason || '') : '';
+    const queryTypeTd = csvHasQueryType ? `<td>${esc(r[csvQueryTypeColumn])}</td>` : '';
+    const queryCountTd = csvHasQueryCount ? `<td>${esc(r[csvQueryCountColumn])}</td>` : '';
     html += `
-      <tr class="${i === csvIndex ? 'active' : ''}" data-idx="${i}">
+      <tr class="${i === csvIndex ? 'active' : ''} ${fb ? 'csv-tested' : ''}" data-idx="${i}">
         <td>${i + 1}</td>
+        ${queryTypeTd}
+        ${queryCountTd}
+        <td>${resultIcon}</td>
+        <td>${reasonText}</td>
         ${visibleHeaders.map(h => `<td>${esc(r[h])}</td>`).join('')}
       </tr>`;
   }
@@ -1367,10 +1995,122 @@ function renderCSVViewport() {
   tbody.innerHTML = html;
 }
 
+// ---- query_type フィルタモーダル ----
+let qtFilterHandlersAttached = false;
+
+function openQueryTypeFilterModal() {
+  csvQueryTypePending = new Set(csvQueryTypeSelected); // 編集用に複製(Cancel時は破棄)
+  document.getElementById('querytype-filter-title').textContent = `🔽 Filter by ${csvQueryTypeColumn}`;
+  renderQueryTypeFilterModal();
+  document.getElementById('querytype-filter-dialog').classList.add('open');
+
+  if (!qtFilterHandlersAttached) {
+    document.getElementById('querytype-filter-body').addEventListener('change', (e) => {
+      const cb = e.target.closest('.qt-checkbox');
+      if (!cb) return;
+      const v = csvQueryTypeValues[parseInt(cb.dataset.idx)];
+      if (cb.checked) csvQueryTypePending.add(v); else csvQueryTypePending.delete(v);
+    });
+    document.getElementById('qt-select-all-btn').addEventListener('click', () => {
+      csvQueryTypePending = new Set(csvQueryTypeValues);
+      renderQueryTypeFilterModal();
+    });
+    document.getElementById('qt-select-none-btn').addEventListener('click', () => {
+      csvQueryTypePending = new Set();
+      renderQueryTypeFilterModal();
+    });
+    document.getElementById('qt-apply-btn').addEventListener('click', () => {
+      csvQueryTypeSelected = new Set(csvQueryTypePending);
+      document.getElementById('querytype-filter-dialog').classList.remove('open');
+      document.getElementById('csv-body').scrollTop = 0;
+      renderCSVTable(); // ヘッダーの選択件数表示も更新
+    });
+    qtFilterHandlersAttached = true;
+  }
+}
+
+function renderQueryTypeFilterModal() {
+  const body = document.getElementById('querytype-filter-body');
+  body.innerHTML = csvQueryTypeValues.map((v, idx) => {
+    const label = v === '' ? '(empty)' : esc(v);
+    const checked = csvQueryTypePending.has(v) ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ccc;cursor:pointer;padding:3px 0;">
+      <input type="checkbox" class="qt-checkbox" data-idx="${idx}" ${checked}> ${label}
+    </label>`;
+  }).join('');
+}
+
+// ---- query_count フィルタ/ソートモーダル ----
+let qcFilterHandlersAttached = false;
+let csvSortDirPending = 'asc'; // モーダル編集中の一時的な並び順(Applyで確定)
+
+// 0は「ありえない」ので出さず、1 / 2-10 / 11-50 / 51+ の固定バケットで分布件数を集計する(ユーザーがnを決める参考用)
+function computeQueryCountDistribution() {
+  const buckets = [
+    { label: '1',     test: v => v === 1 },
+    { label: '2–10',  test: v => v >= 2 && v <= 10 },
+    { label: '11–50', test: v => v >= 11 && v <= 50 },
+    { label: '51+',   test: v => v >= 51 },
+  ];
+  const counts = buckets.map(() => 0);
+  for (let i = 0; i < csvRawRows.length; i++) {
+    const v = getQueryCountValue(i);
+    buckets.forEach((b, bi) => { if (b.test(v)) counts[bi]++; });
+  }
+  return buckets.map((b, bi) => ({ label: b.label, count: counts[bi] }));
+}
+
+function renderQueryCountSortButtons() {
+  document.querySelectorAll('.qc-sort-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.dir === csvSortDirPending);
+  });
+}
+
+function renderQueryCountDistribution() {
+  const tbody = document.getElementById('qc-distribution-tbody');
+  tbody.innerHTML = computeQueryCountDistribution().map(b => `
+    <tr><td style="padding:2px 6px 2px 0;">${b.label}</td><td style="padding:2px 0;text-align:right;color:#888;">${b.count} rows</td></tr>
+  `).join('');
+}
+
+function openQueryCountFilterModal() {
+  csvSortDirPending = (csvSortField === 'querycount') ? csvSortDir : 'asc';
+  csvQueryCountMinPending = csvQueryCountMin;
+  document.getElementById('querycount-filter-title').textContent = `🔢 Filter by ${csvQueryCountColumn}`;
+  document.getElementById('qc-min-input').value = csvQueryCountMinPending != null ? csvQueryCountMinPending : '';
+  renderQueryCountSortButtons();
+  renderQueryCountDistribution();
+  document.getElementById('querycount-filter-dialog').classList.add('open');
+
+  if (!qcFilterHandlersAttached) {
+    document.querySelectorAll('.qc-sort-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        csvSortDirPending = btn.dataset.dir;
+        renderQueryCountSortButtons();
+      });
+    });
+    document.getElementById('qc-min-input').addEventListener('input', (e) => {
+      const val = e.target.value.trim();
+      csvQueryCountMinPending = val === '' ? null : Math.max(0, parseFloat(val) || 0);
+    });
+    document.getElementById('qc-apply-btn').addEventListener('click', () => {
+      csvQueryCountMin = csvQueryCountMinPending;
+      csvSortField = 'querycount'; // #列ソートより優先(直近に確定した方が優先されるルール)
+      csvSortDir = csvSortDirPending;
+      document.getElementById('querycount-filter-dialog').classList.remove('open');
+      document.getElementById('csv-body').scrollTop = 0;
+      renderCSVTable();
+    });
+    qcFilterHandlersAttached = true;
+  }
+}
+
 function scrollCSVToIndex(idx) {
   const body  = document.getElementById('csv-body');
   const viewH = body.clientHeight || 180;
-  const top   = idx * CSV_ROW_H;
+  const pos   = getFilteredCsvIndices().indexOf(idx);
+  if (pos === -1) { renderCSVViewport(); return; } // フィルタで非表示中の行(スクロールは動かさない)
+  const top   = pos * CSV_ROW_H;
   if (top < body.scrollTop) {
     body.scrollTop = top;
   } else if (top + CSV_ROW_H > body.scrollTop + viewH) {
@@ -1441,10 +2181,22 @@ function renderCsvMappingRowsAnalyzing(headers) {
     </tr>`).join('');
 }
 
+// Mapbox/Googleのどちらのロールにも属さない、query_type/query_count用の列選択(任意)
+// initialColumn省略時はdefaultNameという名前の列があればそれをデフォルト選択する
+function populateExtraColumnSelect(selectId, headers, initialColumn, defaultName) {
+  const sel = document.getElementById(selectId);
+  const fallback = headers.includes(defaultName) ? defaultName : '(none)';
+  const selected = (initialColumn && headers.includes(initialColumn)) ? initialColumn : fallback;
+  sel.innerHTML = '<option value="(none)">(none)</option>' + headers.map(h => `<option value="${esc(h)}">${esc(h)}</option>`).join('');
+  sel.value = selected;
+}
+
 // analyzing=true: 「analyzing...」表示のプレースホルダ行を出し、完了ボタンを無効化
-function openCsvMappingDialog(headers, initialColumns, analyzing) {
+function openCsvMappingDialog(headers, initialColumns, analyzing, initialQueryTypeColumn, initialQueryCountColumn) {
   document.getElementById('csv-mapping-error').style.display = 'none';
   const confirmBtn = document.getElementById('csv-mapping-confirm-btn');
+  populateExtraColumnSelect('csv-querytype-select', headers, initialQueryTypeColumn, 'query_type');
+  populateExtraColumnSelect('csv-querycount-select', headers, initialQueryCountColumn, 'query_count');
   if (analyzing) {
     renderCsvMappingRowsAnalyzing(headers);
     confirmBtn.disabled = true;
@@ -1483,22 +2235,49 @@ function initCsvMappingDialog() {
       err.style.display = 'block';
       return;
     }
-    csvMapping = { columns };
+    const queryTypeColumn  = document.getElementById('csv-querytype-select').value;
+    const queryCountColumn = document.getElementById('csv-querycount-select').value;
+    csvMapping = { columns, queryTypeColumn, queryCountColumn };
     const cache = loadCsvMappingCache();
-    cache[currentCsvFileName] = { headers: csvHeaders, columns, confirmedAt: new Date().toISOString() };
+    cache[currentCsvFileName] = { headers: csvHeaders, columns, queryTypeColumn, queryCountColumn, confirmedAt: new Date().toISOString() };
     saveCsvMappingCache(cache);
+
+    // query_type列(選択されていれば)の値を確定。列を変えて再読込した場合に備え、毎回作り直す
+    csvQueryTypeColumn = queryTypeColumn !== '(none)' ? queryTypeColumn : null;
+    csvHasQueryType = !!csvQueryTypeColumn;
+    csvQueryTypeValues = csvHasQueryType
+      ? [...new Set(csvRawRows.map(r => r[csvQueryTypeColumn] || ''))]
+      : [];
+    csvQueryTypeSelected = new Set(csvQueryTypeValues); // デフォルト全チェック(=フィルタなし)
+
+    // query_count列(選択されていれば)を確定。ソート/フィルタ状態はファイル読み込み直後なのでリセットする
+    csvQueryCountColumn = queryCountColumn !== '(none)' ? queryCountColumn : null;
+    csvHasQueryCount = !!csvQueryCountColumn;
+    csvQueryCountMin = null;
+    csvSortField = null;
+    csvSortDir = 'asc';
 
     document.getElementById('csv-mapping-dialog').classList.remove('open');
     document.getElementById('csv-body').classList.add('open');
     document.getElementById('csv-toggle-icon').classList.add('open');
-    document.getElementById('csv-header-label').textContent = `📂 ${currentCsvFileName} (${csvRawRows.length} rows)`;
+    {
+      // ラベルはCSSで省略表示(ellipsis)するので、フルテキストはtitleでホバー表示する
+      // (ブラウザの仕様上、実ファイルパスは取得不可のためファイル名までを表示)
+      const label = document.getElementById('csv-header-label');
+      const fullLabel = `📂 ${currentCsvFileName} (${csvRawRows.length} rows)`;
+      label.textContent = fullLabel;
+      label.title = fullLabel;
+    }
     csvIndex = -1;
     renderCSVTable();
   });
 
   document.getElementById('csv-mapping-cancel-btn').addEventListener('click', () => {
     document.getElementById('csv-mapping-dialog').classList.remove('open');
-    csvHeaders = []; csvRawRows = []; csvMapping = null; currentCsvFileName = '';
+    csvHeaders = []; csvRawRows = []; csvMapping = null; currentCsvFileName = ''; currentCsvFileId = '';
+    csvQueryTypeColumn = null; csvHasQueryType = false; csvQueryTypeValues = []; csvQueryTypeSelected = new Set();
+    csvQueryCountColumn = null; csvHasQueryCount = false; csvQueryCountMin = null;
+    csvSortField = null; csvSortDir = 'asc';
   });
 }
 
@@ -1550,6 +2329,10 @@ function resolveCsvRow(rawRow, mapping) {
 
 function applyCsvRowToState(resolved) {
   document.getElementById('query-input').value = resolved.query || '';
+
+  // CSV行を選ぶたびに、Form手動編集フラグを解除して自動追従(位置・半径からのproximity/bbox再計算)を復活させる
+  mapboxProximityManual = false;
+  mapboxBboxManual = false;
 
   const mb = resolved.mapbox, gg = resolved.google;
   let lat, lng;
@@ -1608,7 +2391,7 @@ async function jumpToCSVRow(idx) {
 }
 
 function initCSV() {
-  document.getElementById('csv-header').addEventListener('click', () => {
+  document.getElementById('csv-toggle').addEventListener('click', () => {
     const body = document.getElementById('csv-body');
     const icon = document.getElementById('csv-toggle-icon');
     const isOpen = body.classList.toggle('open');
@@ -1631,13 +2414,19 @@ function initCSV() {
         if (!parsed.rows.length) { alert('有効な行がありません。'); return; }
         csvHeaders = parsed.headers;
         csvRawRows = parsed.rows;
+        // ファイル名+内容ハッシュで識別 → 同じファイルを再読込した際に過去のフィードバックを参照できる
+        currentCsvFileId = `${file.name}::${hashString(ev.target.result)}`;
+        csvFilterResult = 'all'; csvFilterReason = 'all'; csvFilterText = '';
+        document.getElementById('csv-filter-result').value = 'all';
+        document.getElementById('csv-filter-reason').value = 'all';
+        document.getElementById('csv-filter-text').value = '';
 
         const cache = loadCsvMappingCache();
         const cached = cache[file.name];
 
         if (cached && arraysEqual(cached.headers, csvHeaders)) {
           // 同一ファイル名+同一ヘッダー構成 → AI呼び出しをスキップしてキャッシュを再利用
-          openCsvMappingDialog(csvHeaders, cached.columns, false);
+          openCsvMappingDialog(csvHeaders, cached.columns, false, cached.queryTypeColumn, cached.queryCountColumn);
           setCsvMappingStatus('📦 前回の判定結果を再利用しています(AI呼び出しなし)');
         } else {
           // まず「analyzing...」のプレースホルダでモーダルを即表示し、完了ボタンは無効化
@@ -1658,9 +2447,6 @@ function initCSV() {
     e.target.value = '';
   });
 
-  document.getElementById('csv-prev-btn').addEventListener('click', () => jumpToCSVRow(csvIndex - 1));
-  document.getElementById('csv-next-btn').addEventListener('click', () => jumpToCSVRow(csvIndex + 1));
-
   const jumpInput = document.getElementById('csv-jump-input');
   const jumpBtn   = document.getElementById('csv-jump-btn');
   const jumpHint  = document.getElementById('csv-jump-hint');
@@ -1676,6 +2462,15 @@ function initCSV() {
 
   jumpBtn.addEventListener('click', doJump);
   jumpInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJump(); });
+
+  populateCsvFilterReasonOptions();
+  // フィルタ変更時はスクロール位置を先頭に戻す(古い位置のままだと絞り込み後の内容が画面外にずれて見えるため)
+  const resetCsvScroll = () => { document.getElementById('csv-body').scrollTop = 0; };
+  document.getElementById('csv-filter-result').addEventListener('change', (e) => { csvFilterResult = e.target.value; resetCsvScroll(); renderCSVViewport(); });
+  document.getElementById('csv-filter-reason').addEventListener('change', (e) => { csvFilterReason = e.target.value; resetCsvScroll(); renderCSVViewport(); });
+  const runCsvTextFilter = () => { csvFilterText = document.getElementById('csv-filter-text').value; resetCsvScroll(); renderCSVViewport(); };
+  document.getElementById('csv-filter-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') runCsvTextFilter(); });
+  document.getElementById('csv-filter-text-btn').addEventListener('click', runCsvTextFilter);
 
   initCsvMappingDialog();
 }
@@ -1749,6 +2544,9 @@ function resetEngineParams(engine) {
   } else {
     state.mapboxParams = structuredClone(DEFAULT_MAPBOX_PARAMS);
     state.mapboxParams.proximity = { lng, lat };
+    // Resetでデフォルトに戻すので、Form手動編集フラグも解除して自動追従を復活させる
+    mapboxProximityManual = false;
+    mapboxBboxManual = false;
   }
   writeToURL(); refreshParamUI(engine); drawRangeOverlays(); updateBboxBtn();
 }
@@ -1893,21 +2691,26 @@ function drawMapboxBbox() {
 // LOCATION PIN
 // ============================================================
 function setLocationPin(lat, lng) {
+  // 新しい場所が明示的に選ばれたので、Form手動編集フラグを解除して自動追従を復活させる
+  mapboxProximityManual = false;
   setLocationToState(lat, lng);
   state.mapboxParams.proximity = { lng, lat };
   writeToURL();
   refreshParamUI('google'); refreshParamUI('mapbox');
 
+  // proximity/locationの中心ピン: 結果一覧の🅿️バッジ(赤背景/白太字のP)とお揃いのデザインにする
+  const PIN_SVG = `<svg width="28" height="38" viewBox="0 0 28 38" xmlns="http://www.w3.org/2000/svg"><path d="M14 0C6.27 0 0 6.27 0 14C0 24.5 14 38 14 38C14 38 28 24.5 28 14C28 6.27 21.73 0 14 0Z" fill="#dc2626" stroke="white" stroke-width="2"/><text x="14" y="19" text-anchor="middle" font-size="14" font-weight="bold" fill="white" font-family="Arial, sans-serif">P</text></svg>`;
+
   if (locationPin.google) locationPin.google.setMap(null);
   locationPin.google = new google.maps.Marker({
     position: { lat, lng }, map: googleMap,
-    icon: { path: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z', fillColor: '#f59e0b', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 1, scale: 1.8, anchor: new google.maps.Point(12, 22) },
+    icon: { url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(PIN_SVG), scaledSize: new google.maps.Size(28, 38), anchor: new google.maps.Point(14, 38) },
     title: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, zIndex: 999,
   });
 
   if (locationPin.mapbox) locationPin.mapbox.remove();
   const el = document.createElement('div');
-  el.innerHTML = `<svg width="28" height="38" viewBox="0 0 28 38" fill="none"><path d="M14 0C6.27 0 0 6.27 0 14C0 24.5 14 38 14 38C14 38 28 24.5 28 14C28 6.27 21.73 0 14 0Z" fill="#f59e0b" stroke="white" stroke-width="2"/><circle cx="14" cy="14" r="5" fill="white"/></svg>`;
+  el.innerHTML = PIN_SVG;
   el.style.cursor = 'pointer';
   locationPin.mapbox = new mapboxgl.Marker({ element: el, anchor: 'bottom' }).setLngLat([lng, lat]).addTo(mapboxMap);
 }
@@ -2066,7 +2869,22 @@ document.getElementById('google-mode-badge').addEventListener('click', () => swi
 // EVENT LISTENERS
 // ============================================================
 document.getElementById('search-btn').addEventListener('click', doSearch);
-document.getElementById('query-input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+document.getElementById('query-input').addEventListener('keydown', e => {
+  if (e.isComposing) return; // IME変換中はEnter確定/履歴操作どちらも無視(誤発火防止)
+  if (e.key === 'Enter') { doSearch(); return; }
+  if (e.key === 'ArrowUp') {
+    if (queryHistory.length === 0) return;
+    e.preventDefault();
+    if (queryHistoryPos === -1) queryHistoryDraft = e.target.value;
+    queryHistoryPos = Math.min(queryHistoryPos + 1, queryHistory.length - 1);
+    e.target.value = queryHistory[queryHistoryPos];
+  } else if (e.key === 'ArrowDown') {
+    if (queryHistoryPos === -1) return;
+    e.preventDefault();
+    queryHistoryPos -= 1;
+    e.target.value = queryHistoryPos === -1 ? queryHistoryDraft : queryHistory[queryHistoryPos];
+  }
+});
 document.getElementById('copy-url-btn').addEventListener('click', () => {
   navigator.clipboard.writeText(window.location.href);
   const btn = document.getElementById('copy-url-btn'); btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = '🔗 Copy URL', 2000);
@@ -2078,7 +2896,48 @@ document.getElementById('open-query-btn').addEventListener('click', () => {
   });
 });
 document.getElementById('open-results-btn').addEventListener('click', () => openDialog('results-dialog'));
+document.getElementById('open-history-btn').addEventListener('click', () => { renderHistoryTable(); document.getElementById('history-dialog').classList.add('open'); });
 document.getElementById('open-token-btn').addEventListener('click', openTokenModal);
+
+// ============================================================
+// HISTORY (フィードバック履歴)
+// ============================================================
+function renderHistoryTable() {
+  const tbody = document.getElementById('history-tbody');
+  const log = [...feedbackLog].reverse(); // 新しい順
+  document.getElementById('history-count').textContent = `${log.length}件`;
+  tbody.innerHTML = log.map(e => `
+    <tr>
+      <td>${esc(e.timestamp)}</td>
+      <td>${esc(e.fileName || '-')}</td>
+      <td>${e.rowIndex != null ? e.rowIndex + 1 : '-'}</td>
+      <td title="${esc(e.query)}">${esc(e.query)}</td>
+      <td>${e.result === 'good' ? '👍' : '👎'}</td>
+      <td title="${esc(e.reason || '')}">${esc(e.reason || '')}</td>
+    </tr>`).join('');
+}
+
+function historyToCSV() {
+  const header = ['timestamp', 'fileName', 'rowIndex', 'query', 'result', 'reason'];
+  const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [header.join(',')];
+  feedbackLog.forEach(e => {
+    lines.push([e.timestamp, e.fileName || '', e.rowIndex != null ? e.rowIndex + 1 : '', e.query, e.result, e.reason || '']
+      .map(csvEscape).join(','));
+  });
+  return lines.join('\n');
+}
+
+document.getElementById('history-copy-btn').addEventListener('click', () => {
+  navigator.clipboard.writeText(historyToCSV());
+  const btn = document.getElementById('history-copy-btn'); btn.textContent = '✅ Copied'; setTimeout(() => btn.textContent = 'Copy', 1500);
+});
+document.getElementById('history-export-btn').addEventListener('click', () => {
+  const blob = new Blob([historyToCSV()], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = `feedback_history_${Date.now()}.csv`; a.click();
+  URL.revokeObjectURL(url);
+});
 
 document.getElementById('copy-google-query-btn').addEventListener('click', () => { navigator.clipboard.writeText(pendingGoogleUrl); const btn = document.getElementById('copy-google-query-btn'); btn.textContent = '✅'; setTimeout(() => btn.textContent = 'Copy', 2000); });
 document.getElementById('copy-mapbox-query-btn').addEventListener('click', () => { navigator.clipboard.writeText(pendingMapboxUrl); const btn = document.getElementById('copy-mapbox-query-btn'); btn.textContent = '✅'; setTimeout(() => btn.textContent = 'Copy', 2000); });
@@ -2330,8 +3189,13 @@ function startApp() {
       renderMapboxResults(mapboxRawResults);
       if (!googleRawResults.error) plotGoogleMarkers(googleRawResults);
       if (!mapboxRawResults.error) plotMapboxMarkers(mapboxRawResults);
+      updateNameStrips();
       fitResultsBounds();
       updateResultEditors();
+      // 前回セッションのキャッシュ復元時点ではCSVは未読込のため、クエリ単体としてフィードバック待ちにする
+      feedbackContext = { fileId: null, fileName: null, rowIndex: null, query: state.query };
+      feedbackPanelMode = 'rated';
+      renderFeedbackPanel();
     } else if (state.query) {
       doSearch();
     }
