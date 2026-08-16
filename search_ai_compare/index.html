@@ -1630,25 +1630,30 @@ function namesMatch(a, b, treatAsAddress) {
   return na === nb;
 }
 
-// address(formatted_address/full_address)フィールドは元々Google/Mapboxどちらもフルで入っているので、
-// 郵便番号/国名を無視した上での完全一致のみを一致とみなす(後方一致・番地核フォールバックは行わない)。
-function addressesMatch(a, b) {
-  const na = normalizeAddressForMatch(a), nb = normalizeAddressForMatch(b);
-  if (!na || !nb) return false;
-  return na === nb;
+// 緯度経度を小数点3桁(約100m格子)に丸めて一致するかどうかで「同じ場所」を判定する。
+// (住所文字列は「号」の有無などプロバイダ間のデータ詳細度の差で不一致になりやすいため、
+// address欄の一致判定は文字列比較ではなく座標ベースにしている)
+function coordinatesMatch(a, b) {
+  if (!a || !b) return false;
+  const { lat: latA, lng: lngA } = a;
+  const { lat: latB, lng: lngB } = b;
+  if (latA == null || lngA == null || latB == null || lngB == null) return false;
+  if (!Number.isFinite(latA) || !Number.isFinite(lngA) || !Number.isFinite(latB) || !Number.isFinite(lngB)) return false;
+  return latA.toFixed(3) === latB.toFixed(3) && lngA.toFixed(3) === lngB.toFixed(3);
 }
 
-// listA の各要素について、listB内のどれかとname/addressが一致するかを判定し 'none'|'name'|'address'|'both' を返す
-// 'both'は同一候補がname・address両方を満たした時だけ成立させる(別々の候補がそれぞれ片方だけ満たした場合を
+// listA の各要素について、listB内のどれかとname/座標が一致するかを判定し 'none'|'name'|'address'|'both' を返す
+// ('address'は住所文字列ではなく緯度経度(小数点3桁)の近似一致を指す)
+// 'both'は同一候補がname・座標両方を満たした時だけ成立させる(別々の候補がそれぞれ片方だけ満たした場合を
 // 合成して完全一致扱いにすると、無関係な候補同士の組み合わせで誤って「完全一致」になってしまうため)。
-function computeMatchCategories(listA, getNameA, getAddrA, listB, getNameB, getAddrB, treatNameAsAddress) {
+function computeMatchCategories(listA, getNameA, getCoordA, listB, getNameB, getCoordB, treatNameAsAddress) {
   return listA.map(item => {
-    const nameA = getNameA(item), addrA = getAddrA(item);
+    const nameA = getNameA(item), coordA = getCoordA(item);
     let nameHit = false, addrHit = false, bothHit = false;
     for (const other of listB) {
       if (other === item) continue; // 万一listAとlistBが同一参照を含んでいても自己参照させない
       const nHit = namesMatch(nameA, getNameB(other), treatNameAsAddress);
-      const aHit = addressesMatch(addrA, getAddrB(other));
+      const aHit = coordinatesMatch(coordA, getCoordB(other));
       if (nHit && aHit) { bothHit = true; break; } // 同一候補が両方満たした時点で確定
       if (nHit) nameHit = true;
       if (aHit) addrHit = true;
@@ -1673,7 +1678,7 @@ function renderNameStrip(elId, list, nameOf, categories, side, proximityInfoOf) 
   const el = document.getElementById(elId);
   if (!el) return;
   if (!list || !list.length) { el.innerHTML = ''; return; }
-  const MATCH_LABEL = { both: '完全一致', name: 'nameのみ一致', address: '完全一致（address）', none: '一致なし' };
+  const MATCH_LABEL = { both: '完全一致', name: '一致（nameのみ）', address: '一致（位置が近似）', none: '一致なし' };
   el.innerHTML = list.map((item, i) => {
     const cat = categories[i];
     const cls = cat === 'both' ? 'match-both' : cat === 'name' ? 'match-name' : cat === 'address' ? 'match-address' : '';
@@ -1710,12 +1715,12 @@ function isCurrentQueryAddressType() {
 function updateNameStrips() {
   const gList = Array.isArray(googleRawResults) ? googleRawResults : [];
   const mList = Array.isArray(mapboxRawResults) ? mapboxRawResults : [];
-  const gName = r => r.name, gAddr = r => r.formatted_address;
-  const mName = r => r.name, mAddr = r => r.full_address;
+  const gName = r => r.name, gCoord = r => ({ lat: r.geometry?.location?.lat, lng: r.geometry?.location?.lng });
+  const mName = r => r.name, mCoord = r => ({ lat: r.coordinates?.latitude, lng: r.coordinates?.longitude });
   const treatNameAsAddress = isCurrentQueryAddressType();
 
-  const gCats = computeMatchCategories(gList, gName, gAddr, mList, mName, mAddr, treatNameAsAddress);
-  const mCats = computeMatchCategories(mList, mName, mAddr, gList, gName, gAddr, treatNameAsAddress);
+  const gCats = computeMatchCategories(gList, gName, gCoord, mList, mName, mCoord, treatNameAsAddress);
+  const mCats = computeMatchCategories(mList, mName, mCoord, gList, gName, gCoord, treatNameAsAddress);
 
   const gCenter = state.googleParams.location;
   const mCenter = state.mapboxParams.proximity;
