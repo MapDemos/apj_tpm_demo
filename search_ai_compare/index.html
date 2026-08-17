@@ -118,8 +118,8 @@
     .fb-tab:hover { color: #ccc; }
     .fb-tab.active { color: #fff; border-bottom-color: #2563eb; }
     #feedback-body { flex: 1; overflow-y: auto; padding: 12px; }
-    .fb-buttons { display: flex; gap: 8px; }
-    .fb-btn { flex: 1; font-size: 24px; padding: 16px 0; }
+    .fb-buttons { display: flex; flex-direction: column; gap: 8px; }
+    .fb-btn { font-size: 20px; padding: 12px 0; }
     .fb-btn:hover { background: #3a3a3a; }
     .fb-btn-text { font-size: 11px !important; }
     .fb-reason-group { font-weight: bold; font-size: 11px; color: #999; margin: 12px 0 6px; }
@@ -127,15 +127,17 @@
     .fb-reason-list { display: flex; flex-direction: column; gap: 4px; }
     /* AI診断タブ */
     .ai-diag-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
-    .ai-diag-toolbar .btn { flex: 1; font-size: 11px; padding: 8px 4px; }
+    .ai-diag-toolbar .btn { flex: 1; font-size: 11px; padding: 8px 4px; white-space: nowrap; }
     .ai-diag-analyzing { font-size: 12px; color: #999; text-align: center; padding: 20px 0; }
     .ai-diag-card { background: #262626; border: 1px solid #444; border-radius: 6px; padding: 10px; font-size: 11px; }
     .ai-diag-card-cat { font-weight: bold; font-size: 13px; margin-bottom: 6px; }
     .ai-diag-card-cat.cat-good { color: #4ade80; }
     .ai-diag-card-cat.cat-bad { color: #f87171; }
     .ai-diag-card-cat.cat-nothit { color: #999; }
+    .ai-diag-card-cat.cat-unknown { color: #fbbf24; }
     .ai-diag-card-tag { color: #ccc; margin-bottom: 6px; }
     .ai-diag-card-reason { color: #999; line-height: 1.5; margin-bottom: 10px; white-space: pre-wrap; }
+    .ai-diag-card-usage { color: #666; font-size: 10px; margin-bottom: 10px; }
     .ai-diag-card-actions { display: flex; gap: 8px; }
     .ai-diag-card-actions .btn { flex: 1; font-size: 11px; padding: 7px 0; }
     #ai-diag-decline-reason { width: 100%; min-height: 60px; margin: 8px 0; padding: 6px 8px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 11px; font-family: inherit; resize: vertical; box-sizing: border-box; }
@@ -334,6 +336,7 @@
     <option value="good">👍</option>
     <option value="bad">👎</option>
     <option value="not_hit_both">Not hit in both</option>
+    <option value="unknown_query">Unknown query</option>
     <option value="untested">未実施</option>
   </select>
   <span class="header-label-sm">理由:</span>
@@ -748,17 +751,26 @@ function openTokenModal() {
 // ============================================================
 // AI PROXY (Anthropic Messages API 互換 Lambda プロキシ)
 // ============================================================
-async function callClaude(system, messages, maxTokens = 1024, model = AI_MODEL) {
+function extractClaudeText(data) {
+  return Array.isArray(data?.content)
+    ? data.content.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text).join('')
+    : (data?.content?.[0]?.text ?? '');
+}
+
+// Anthropic Messages APIのレスポンス全体(usage含む)が欲しい呼び出し元向け
+async function callClaudeRaw(system, messages, maxTokens = 1024, model = AI_MODEL) {
   const res = await fetch(AI_PROXY_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, max_tokens: maxTokens, system, messages }),
   });
   if (!res.ok) throw new Error(`AI proxy error: ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  return Array.isArray(data?.content)
-    ? data.content.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text).join('')
-    : (data?.content?.[0]?.text ?? '');
+  return await res.json();
+}
+
+async function callClaude(system, messages, maxTokens = 1024, model = AI_MODEL) {
+  const data = await callClaudeRaw(system, messages, maxTokens, model);
+  return extractClaudeText(data);
 }
 
 // ============================================================
@@ -1043,6 +1055,14 @@ const FEEDBACK_REASONS = [
 const GOOD_REASONS = ['Perfect (Correct POI at top)', 'Almost! (Correct POI but not ranked at top)'];
 // Mapbox・Google両方とも該当候補が無かったケース(理由分岐なし、押した時点で即確定)
 const NOT_HIT_BOTH = 'not_hit_both';
+// クエリ自体が壊れている/曖昧すぎて何を探しているか判断できないケース
+const UNKNOWN_QUERY = 'unknown_query';
+function resultIconOf(result) {
+  if (result === 'good') return '👍';
+  if (result === NOT_HIT_BOTH) return 'Not hit';
+  if (result === UNKNOWN_QUERY) return 'Unknown';
+  return '👎';
+}
 
 const LS_FEEDBACK = 'apc_feedback_log';
 function loadFeedbackLog() { try { return JSON.parse(localStorage.getItem(LS_FEEDBACK) || '[]'); } catch { return []; } }
@@ -1108,10 +1128,12 @@ function renderManualFeedbackPanel() {
         <button class="btn btn-secondary fb-btn" id="fb-good-btn">👍</button>
         <button class="btn btn-secondary fb-btn" id="fb-bad-btn">👎</button>
         <button class="btn btn-secondary fb-btn fb-btn-text" id="fb-nothit-btn">Not hit in both</button>
+        <button class="btn btn-secondary fb-btn fb-btn-text" id="fb-unknown-btn">Unknown query</button>
       </div>`;
     document.getElementById('fb-good-btn').addEventListener('click', () => { feedbackPanelMode = 'good_reason'; renderFeedbackPanel(); });
     document.getElementById('fb-bad-btn').addEventListener('click', () => { feedbackPanelMode = 'reason'; renderFeedbackPanel(); });
     document.getElementById('fb-nothit-btn').addEventListener('click', () => submitFeedback(NOT_HIT_BOTH, null));
+    document.getElementById('fb-unknown-btn').addEventListener('click', () => submitFeedback(UNKNOWN_QUERY, null));
   } else if (feedbackPanelMode === 'good_reason') {
     body.innerHTML = `
       <button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← 戻る</button>
@@ -1157,6 +1179,18 @@ function submitFeedback(result, reason) {
 // 人がAccept/Declineして確定させるアシスト機能。自動ログ記録はしない)
 // ============================================================
 const AI_DIAG_MODEL_IDS = { haiku: 'claude-haiku-4-5-20251001', sonnet: 'claude-sonnet-5' };
+const AI_DIAG_MODEL_LABELS = { haiku: 'Haiku 4.5', sonnet: 'Sonnet 5' };
+// 概算コスト表示用(Anthropic公式の$/MTok単価。要:最新価格での裏取り) と概算USD→JPYレート
+const AI_DIAG_PRICING_USD_PER_MTOK = {
+  haiku:  { input: 1,  output: 5  },
+  sonnet: { input: 3,  output: 15 },
+};
+const AI_DIAG_USD_TO_JPY = 155; // 概算レート。厳密な費用計算には使わないこと
+function estimateAiDiagCostJpy(model, inputTokens, outputTokens) {
+  const p = AI_DIAG_PRICING_USD_PER_MTOK[model] || AI_DIAG_PRICING_USD_PER_MTOK.haiku;
+  const usd = (inputTokens / 1e6) * p.input + (outputTokens / 1e6) * p.output;
+  return usd * AI_DIAG_USD_TO_JPY;
+}
 const LS_AI_DIAG_MODEL        = 'apc_ai_diag_model';
 const LS_AI_DIAG_IGNORE_BBOX  = 'apc_ai_diag_ignore_bbox';
 const LS_AI_DIAG_LOG          = 'apc_ai_diagnosis_log';
@@ -1180,14 +1214,16 @@ function recordAiDiagLog(entry) {
 }
 
 let aiDiagState    = 'idle'; // 'idle' | 'analyzing' | 'proposal' | 'decline_input' | 'error'
-let aiDiagProposal = null;   // { category:'good'|'bad'|'not_hit_both', goodReason, badTag, rank, reasoning }
+let aiDiagProposal = null;   // { category:'good'|'bad'|'not_hit_both'|'unknown_query', goodReason, badTag, rank, reasoning }
 let aiDiagError    = '';
 
 const AI_DIAG_SYSTEM_PROMPT = `あなたはタクシー配車業務等で使われる地図検索(Mapbox Search Box API)の品質診断アシスタントです。
 ユーザーが入力した検索クエリに対して、Mapboxが適切な結果(POIや住所)を返せているかを、Google Places側の結果も参考にしながら判定します。
 
 判定手順(この順番を厳守):
-1. クエリに対してMapbox候補の中に妥当な一致がないか確認する。
+0. まずクエリ自体を見て、そもそも何を探そうとしているのか判断できるか確認する。
+   - クエリが壊れている(文字が欠落・意味不明な断片等)、または曖昧すぎてPOI名/住所/カテゴリのどれを意図しているか特定できない場合は category="unknown_query" とし、他の判定は行わない
+1. クエリの意図が読み取れる場合、Mapbox候補の中に妥当な一致がないか確認する。
    - 一致候補があり、それが1位(最初の候補)なら category="good", goodReason="Perfect (Correct POI at top)"
    - 一致候補はあるが1位ではないなら category="good", goodReason="Almost! (Correct POI but not ranked at top)"、rankにその順位(1始まり)を入れる
 2. Mapbox候補に妥当な一致が無い場合、Google候補の中に妥当な一致がないか確認する。
@@ -1199,7 +1235,7 @@ const AI_DIAG_SYSTEM_PROMPT = `あなたはタクシー配車業務等で使わ�
 検索の中心地点(proximity)から3km以内かどうかのPフラグが付与されています。これらはヒントとして使ってよいですが、最終判断はクエリの意味とcandidateのname/addressから行ってください。
 
 必ず以下のJSON形式のみで出力してください。説明文やコードブロックのマークダウンは付けないでください。
-{"category": "good" | "bad" | "not_hit_both", "goodReason": string | null, "badTag": string | null, "rank": number | null, "reasoning": "日本語で1〜2文の短い理由"}`;
+{"category": "good" | "bad" | "not_hit_both" | "unknown_query", "goodReason": string | null, "badTag": string | null, "rank": number | null, "reasoning": "日本語で1〜2文の短い理由"}`;
 
 // bbox無視トグルON時、診断専用にMapboxをbbox無しで再検索する(画面表示中のmapboxRawResultsは変更しない)
 async function searchMapboxIgnoringBbox(query) {
@@ -1262,6 +1298,15 @@ async function buildAiDiagnosisPayload(query) {
   };
 }
 
+function formatAiDiagUsage(usage) {
+  if (!usage) return '';
+  const modelLabel = AI_DIAG_MODEL_LABELS[usage.model] || usage.model;
+  const tokens = (usage.inputTokens != null && usage.outputTokens != null)
+    ? `in ${usage.inputTokens} / out ${usage.outputTokens} tok` : 'トークン数不明';
+  const cost = usage.costJpy != null ? ` / 概算¥${usage.costJpy < 0.01 ? '<0.01' : usage.costJpy.toFixed(2)}` : '';
+  return `${modelLabel} / ${tokens}${cost}`;
+}
+
 function renderAiDiagPanel() {
   const body = document.getElementById('feedback-body');
   if (!feedbackContext) {
@@ -1284,8 +1329,10 @@ function renderAiDiagPanel() {
   }
   if (aiDiagState === 'proposal' && aiDiagProposal) {
     const p = aiDiagProposal;
-    const catLabel = p.category === 'good' ? (p.goodReason || 'Good') : p.category === 'not_hit_both' ? 'Not hit in both' : 'Bad';
-    const catCls = p.category === 'good' ? 'cat-good' : p.category === 'not_hit_both' ? 'cat-nothit' : 'cat-bad';
+    const CAT_LABELS = { good: p.goodReason || 'Good', bad: 'Bad', not_hit_both: 'Not hit in both', unknown_query: 'Unknown query' };
+    const CAT_CLASSES = { good: 'cat-good', bad: 'cat-bad', not_hit_both: 'cat-nothit', unknown_query: 'cat-unknown' };
+    const catLabel = CAT_LABELS[p.category] ?? p.category;
+    const catCls = CAT_CLASSES[p.category] ?? '';
     body.innerHTML = `
       <div class="ai-diag-toolbar">
         <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ 設定</button>
@@ -1295,6 +1342,7 @@ function renderAiDiagPanel() {
         ${p.category === 'good' && p.rank ? `<div class="ai-diag-card-tag">${p.rank}位で一致</div>` : ''}
         ${p.category === 'bad' && p.badTag ? `<div class="ai-diag-card-tag">タグ: ${esc(p.badTag)}</div>` : ''}
         <div class="ai-diag-card-reason">${esc(p.reasoning || '')}</div>
+        <div class="ai-diag-card-usage">${esc(formatAiDiagUsage(p.usage))}</div>
         <div class="ai-diag-card-actions">
           <button class="btn btn-secondary" id="ai-diag-accept-btn">Accept</button>
           <button class="btn btn-secondary" id="ai-diag-decline-btn">Decline</button>
@@ -1342,12 +1390,21 @@ async function runAiDiagnosis() {
   renderAiDiagPanel();
   try {
     const payload = await buildAiDiagnosisPayload(feedbackContext.query);
-    const modelId = AI_DIAG_MODEL_IDS[aiDiagSettings.model] || AI_DIAG_MODEL_IDS.haiku;
-    const raw = await callClaude(AI_DIAG_SYSTEM_PROMPT, [{ role: 'user', content: JSON.stringify(payload) }], 500, modelId);
+    const modelKey = aiDiagSettings.model;
+    const modelId = AI_DIAG_MODEL_IDS[modelKey] || AI_DIAG_MODEL_IDS.haiku;
+    const data = await callClaudeRaw(AI_DIAG_SYSTEM_PROMPT, [{ role: 'user', content: JSON.stringify(payload) }], 500, modelId);
+    const raw = extractClaudeText(data);
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) throw new Error('AIの応答がJSON形式ではありませんでした');
     const parsed = JSON.parse(match[0]);
-    if (!['good', 'bad', 'not_hit_both'].includes(parsed.category)) throw new Error('AIのcategoryが不正です');
+    if (!['good', 'bad', 'not_hit_both', 'unknown_query'].includes(parsed.category)) throw new Error('AIのcategoryが不正です');
+    const inputTokens  = data?.usage?.input_tokens  ?? null;
+    const outputTokens = data?.usage?.output_tokens ?? null;
+    parsed.usage = {
+      model: modelKey,
+      inputTokens, outputTokens,
+      costJpy: (inputTokens != null && outputTokens != null) ? estimateAiDiagCostJpy(modelKey, inputTokens, outputTokens) : null,
+    };
     aiDiagProposal = parsed;
     aiDiagState = 'proposal';
   } catch (err) {
@@ -2215,6 +2272,7 @@ function getFilteredCsvIndices() {
     if (csvFilterResult === 'good'         && (!fb || fb.result !== 'good'))         return false;
     if (csvFilterResult === 'bad'          && (!fb || fb.result !== 'bad'))          return false;
     if (csvFilterResult === 'not_hit_both' && (!fb || fb.result !== NOT_HIT_BOTH))   return false;
+    if (csvFilterResult === 'unknown_query' && (!fb || fb.result !== UNKNOWN_QUERY)) return false;
     if (csvFilterResult === 'untested' && fb) return false;
     if (csvFilterReason !== 'all' && (!fb || fb.reason !== csvFilterReason)) return false;
     if (csvHasQueryType && csvQueryTypeSelected.size < csvQueryTypeValues.length) {
@@ -2325,7 +2383,7 @@ function renderCSVViewport() {
     const i = indices[k];
     const r = csvRawRows[i];
     const fb = getRowFeedback(i);
-    const resultIcon = fb ? (fb.result === 'good' ? '👍' : fb.result === NOT_HIT_BOTH ? 'Not hit' : '👎') : '';
+    const resultIcon = fb ? resultIconOf(fb.result) : '';
     const reasonText = fb ? esc(fb.reason || '') : '';
     const queryTypeTd = csvHasQueryType ? `<td>${esc(r[csvQueryTypeColumn])}</td>` : '';
     const queryCountTd = csvHasQueryCount ? `<td>${esc(r[csvQueryCountColumn])}</td>` : '';
@@ -3263,7 +3321,7 @@ function renderHistoryTable() {
       <td>${esc(e.fileName || '-')}</td>
       <td>${e.rowIndex != null ? e.rowIndex + 1 : '-'}</td>
       <td title="${esc(e.query)}">${esc(e.query)}</td>
-      <td>${e.result === 'good' ? '👍' : e.result === NOT_HIT_BOTH ? 'Not hit' : '👎'}</td>
+      <td>${resultIconOf(e.result)}</td>
       <td title="${esc(e.reason || '')}">${esc(e.reason || '')}</td>
     </tr>`).join('');
 }
