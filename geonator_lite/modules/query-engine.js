@@ -31,10 +31,14 @@ const SKIP_L2_TARGET_INTENTS = new Set(['transit_entrance', 'intersection', 'sig
 const BUILDING_TARGET_INTENTS = new Set(['category_mansion', 'category_apartment', 'category_building']);
 
 class QueryEngine {
-  constructor({ mcp, llm, config }) {
+  /** @param {function(string, object=):void} [onProgress] - 処理段階が変わるたびに呼ばれる
+   * 任意コールバック('parse'|'collect'|'rate', {n?}). DOM操作は一切行わない(headlessの原則を
+   * 保つ——呼び出し側(index.js)が文言表示等に使う)。UIに何も繋がない場合は省略可。 */
+  constructor({ mcp, llm, config, onProgress }) {
     this.mcp = mcp;
     this.llm = llm;
     this.config = config;
+    this.onProgress = onProgress || null;
   }
 
   _pnow() { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
@@ -66,6 +70,7 @@ class QueryEngine {
     const text = (requestBody?.text || '').trim();
     if (!text) return this._empty(t0, 0);
 
+    this.onProgress?.('parse');
     let raw;
     try {
       raw = await this.llm.parseQuery(text);
@@ -717,6 +722,7 @@ class QueryEngine {
     // Search Box text search on the target only (conditions need a location to be
     // meaningful, so they're skipped — a hitless search is a valid result).
     if (!targetPoint) {
+      this.onProgress?.('collect', { n: 1 });
       const targetCategoryTag = this._resolveCategoryTag(target.queries?.length ? target.queries : [target.text], target.category_tag);
       let mainRaw = await this.mcp.collectTarget(target, null, targetCategoryTag).catch(() => []);
       this._logStage(targetGroup, 'collectTarget（proximity無し）', mainRaw);
@@ -724,9 +730,15 @@ class QueryEngine {
       this._logStage(targetGroup, '建物名ルール後', mainRaw);
       mainRaw = this._dedupTargets(mainRaw);
       this._logStage(targetGroup, '重複排除後', mainRaw);
+      this.onProgress?.('rate', { n: mainRaw.length });
       const { kept } = await this._rateGroup(this._buildIntentLabel(target), mainRaw, target.query_intent, targetGroup);
       return { main: kept, conditions: {} };
     }
+
+    // 進捗表示用: 実際に検索が走るグループ数(ターゲット1件+条件のうちline系(road/water/rail)
+    // を除いたもの——line系は候補収集ではなく候補ごとの距離判定で評価されるため対象外)。
+    const searchGroupCount = 1 + (conditions || []).filter(c => !isLineCond(c.type)).length;
+    this.onProgress?.('collect', { n: searchGroupCount });
 
     const targetCategoryTag = this._resolveCategoryTag(target.queries?.length ? target.queries : [target.text], target.category_tag);
     const targetPromise = this.mcp.collectTarget(target, targetPoint, targetCategoryTag);
@@ -770,6 +782,7 @@ class QueryEngine {
 
     // ── unified L2 (spec §6): target + poi conditions in parallel ──
     const skipTargetRating = SKIP_L2_TARGET_INTENTS.has(target.query_intent);
+    if (!skipTargetRating) this.onProgress?.('rate', { n: mainRaw.length });
     const poiConds = (conditions || []).filter(c => c.type === 'poi');
     const [mainRated] = await Promise.all([
       skipTargetRating
@@ -1065,13 +1078,16 @@ function _buildRuntimeConfig(requestBody) {
  * map instance — safe to call from any page that has loaded geonator_lite's
  * script-tag modules (config.js, data/*, prompts/*, modules/*).
  * @param {{text:string, proximity?:{lat:number,lng:number}, model?:string, judge?:object}} requestBody
+ * @param {function(string, object=):void} [onProgress] - optional progress callback
+ *   ('parse'|'collect'|'rate', {n?}) — NOT part of requestBody (kept out of the JSON
+ *   preview/log, and out of the serializable request shape). See QueryEngine constructor.
  * @returns {Promise<{results:Array<{rank,name,lat,lng,score,poi_category}>, meta:{candidateCount,elapsedMs}}>}
  */
-async function searchPOI(requestBody) {
+async function searchPOI(requestBody, onProgress) {
   const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const config = _buildRuntimeConfig(requestBody || {});
   const mcp = new MapboxMCPClient(config);
   const llm = new LLMClient(config);
-  const engine = new QueryEngine({ mcp, llm, config });
+  const engine = new QueryEngine({ mcp, llm, config, onProgress });
   return engine.run(requestBody || {}, t0);
 }

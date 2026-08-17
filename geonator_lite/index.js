@@ -708,6 +708,32 @@ document.getElementById('viewRequestBtn').addEventListener('click', openRequestM
 document.getElementById('requestModalClose').addEventListener('click', closeRequestModal);
 document.getElementById('requestModal').addEventListener('click', (e) => { if (e.target.id === 'requestModal') closeRequestModal(); });
 
+// 検索中オーバーレイの進捗テキスト。QueryEngine.run()のonProgress('parse'|'collect'|'rate', {n})
+// を選択言語(currentLanguage)の文言に変換して表示する。件数(n)が絡む段階は言語ごとに
+// 文の中での数字の位置が違う（単数/複数の語尾変化含む）ため関数で持つ。通常検索はL1/L2を
+// 介さない単発のSearch Box呼び出し1回だけなので'plain'の固定文言のみ使う。
+const PROGRESS_LABELS = {
+  parse: { ja: 'クエリを解析しています…', en: 'Parsing your query…', ko: '쿼리를 분석하고 있습니다…' },
+  collect: {
+    ja: n => `検索を${n}件実行しています…`,
+    en: n => `Running ${n} search${n === 1 ? '' : 'es'}…`,
+    ko: n => `검색을 ${n}건 실행하고 있습니다…`,
+  },
+  rate: {
+    ja: n => `${n}件の候補を判定しています…`,
+    en: n => `Evaluating ${n} candidate${n === 1 ? '' : 's'}…`,
+    ko: n => `${n}건의 후보를 판정하고 있습니다…`,
+  },
+  plain: { ja: '検索しています…', en: 'Searching…', ko: '검색하고 있습니다…' },
+};
+function setLoadingStatus(stage, meta = {}) {
+  const box = document.getElementById('loadingStatus');
+  const entry = stage && PROGRESS_LABELS[stage];
+  if (!entry) { box.textContent = ''; return; }
+  const label = entry[currentLanguage] ?? entry.ja;
+  box.textContent = typeof label === 'function' ? label(meta.n ?? 0) : label;
+}
+
 async function runSearch() {
   const text = document.getElementById('queryInput').value.trim();
   const errorBox = document.getElementById('errorBox');
@@ -716,8 +742,11 @@ async function runSearch() {
 
   document.getElementById('searchBtn').disabled = true;
   document.getElementById('loadingOverlay').classList.add('open');
+  setLoadingStatus(searchMode === 'normal' ? 'plain' : 'parse');
   try {
-    const resp = searchMode === 'normal' ? await runPlainSearch(text) : await searchPOI(buildRequestBody(text));
+    const resp = searchMode === 'normal'
+      ? await runPlainSearch(text)
+      : await searchPOI(buildRequestBody(text), (stage, meta) => setLoadingStatus(stage, meta));
     renderResults(resp);
   } catch (e) {
     errorBox.style.display = 'block';
@@ -725,6 +754,7 @@ async function runSearch() {
   } finally {
     document.getElementById('searchBtn').disabled = false;
     document.getElementById('loadingOverlay').classList.remove('open');
+    setLoadingStatus(null);
   }
 }
 

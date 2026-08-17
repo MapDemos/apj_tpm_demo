@@ -258,10 +258,12 @@
     /* 検索結果は index.js 側で circle + symbol レイヤーとして描画（zoom>=15で名前ラベル表示）。
        DOMマーカーではなくなったため、専用のCSSクラスは不要。 */
 
-    /* 検索中の画面暗転＋スピナー。AI検索/通常検索どちらもrunSearch()実行中は表示する。 */
+    /* 検索中の画面暗転＋スピナー。AI検索/通常検索どちらもrunSearch()実行中は表示する。
+       #loadingStatusはQueryEngine.run()の進捗コールバック(parse/collect/rate)を選択言語の
+       文言に変換して表示する(index.js setLoadingStatus参照)。 */
     #loadingOverlay {
       position: fixed; inset: 0; background: rgba(0,0,0,0.45);
-      display: flex; align-items: center; justify-content: center;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
       opacity: 0; pointer-events: none; transition: opacity .15s ease; z-index: 950;
     }
     #loadingOverlay.open { opacity: 1; pointer-events: auto; }
@@ -269,6 +271,10 @@
       width: 44px; height: 44px; border-radius: 50%;
       border: 4px solid rgba(255,255,255,0.35); border-top-color: #fff;
       animation: spin .8s linear infinite;
+    }
+    #loadingStatus {
+      color: #fff; font-size: 13px; min-height: 1.2em; text-align: center;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.4);
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -318,7 +324,7 @@
 
     <div id="consoleBackdrop"></div>
 
-    <div id="loadingOverlay"><div class="spinner"></div></div>
+    <div id="loadingOverlay"><div class="spinner"></div><div id="loadingStatus"></div></div>
 
     <div id="console">
       <!-- コンソールの中身はこの3タブが唯一の上位構造（「設定」等の親カテゴリは作らない）。
