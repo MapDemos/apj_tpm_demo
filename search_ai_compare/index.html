@@ -1186,9 +1186,15 @@ const AI_DIAG_PRICING_USD_PER_MTOK = {
   sonnet: { input: 3,  output: 15 },
 };
 const AI_DIAG_USD_TO_JPY = 155; // 概算レート。厳密な費用計算には使わないこと
-function estimateAiDiagCostJpy(model, inputTokens, outputTokens) {
+// Prompt Caching(cache_control)使用時の単価倍率(概算)。書き込みは通常入力より割高、読み込みは大幅に安い
+const AI_DIAG_CACHE_WRITE_MULTIPLIER = 1.25;
+const AI_DIAG_CACHE_READ_MULTIPLIER  = 0.1;
+function estimateAiDiagCostJpy(model, usage) {
   const p = AI_DIAG_PRICING_USD_PER_MTOK[model] || AI_DIAG_PRICING_USD_PER_MTOK.haiku;
-  const usd = (inputTokens / 1e6) * p.input + (outputTokens / 1e6) * p.output;
+  const usd = ((usage.inputTokens ?? 0) / 1e6) * p.input
+    + ((usage.cacheCreationInputTokens ?? 0) / 1e6) * p.input * AI_DIAG_CACHE_WRITE_MULTIPLIER
+    + ((usage.cacheReadInputTokens ?? 0) / 1e6) * p.input * AI_DIAG_CACHE_READ_MULTIPLIER
+    + ((usage.outputTokens ?? 0) / 1e6) * p.output;
   return usd * AI_DIAG_USD_TO_JPY;
 }
 const LS_AI_DIAG_MODEL        = 'apc_ai_diag_model';
@@ -1301,8 +1307,12 @@ async function buildAiDiagnosisPayload(query) {
 function formatAiDiagUsage(usage) {
   if (!usage) return '';
   const modelLabel = AI_DIAG_MODEL_LABELS[usage.model] || usage.model;
-  const tokens = (usage.inputTokens != null && usage.outputTokens != null)
-    ? `in ${usage.inputTokens} / out ${usage.outputTokens} tok` : 'トークン数不明';
+  const parts = [];
+  if (usage.inputTokens != null) parts.push(`in ${usage.inputTokens}`);
+  if (usage.cacheReadInputTokens)     parts.push(`cache read ${usage.cacheReadInputTokens}`);
+  if (usage.cacheCreationInputTokens) parts.push(`cache write ${usage.cacheCreationInputTokens}`);
+  if (usage.outputTokens != null) parts.push(`out ${usage.outputTokens}`);
+  const tokens = parts.length ? `${parts.join(' / ')} tok` : 'トークン数不明';
   const cost = usage.costJpy != null ? ` / 概算¥${usage.costJpy < 0.01 ? '<0.01' : usage.costJpy.toFixed(2)}` : '';
   return `${modelLabel} / ${tokens}${cost}`;
 }
@@ -1392,19 +1402,24 @@ async function runAiDiagnosis() {
     const payload = await buildAiDiagnosisPayload(feedbackContext.query);
     const modelKey = aiDiagSettings.model;
     const modelId = AI_DIAG_MODEL_IDS[modelKey] || AI_DIAG_MODEL_IDS.haiku;
-    const data = await callClaudeRaw(AI_DIAG_SYSTEM_PROMPT, [{ role: 'user', content: JSON.stringify(payload) }], 500, modelId);
+    // 判定手順+タグ一覧は毎回完全に同一の文字列なので、system側だけPrompt Cachingの対象にする
+    // (Mapbox/Google候補等が入るuserメッセージはクエリごとに変わるためキャッシュ対象外)
+    const systemBlocks = [{ type: 'text', text: AI_DIAG_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
+    const data = await callClaudeRaw(systemBlocks, [{ role: 'user', content: JSON.stringify(payload) }], 500, modelId);
     const raw = extractClaudeText(data);
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) throw new Error('AIの応答がJSON形式ではありませんでした');
     const parsed = JSON.parse(match[0]);
     if (!['good', 'bad', 'not_hit_both', 'unknown_query'].includes(parsed.category)) throw new Error('AIのcategoryが不正です');
-    const inputTokens  = data?.usage?.input_tokens  ?? null;
-    const outputTokens = data?.usage?.output_tokens ?? null;
-    parsed.usage = {
+    const usage = {
       model: modelKey,
-      inputTokens, outputTokens,
-      costJpy: (inputTokens != null && outputTokens != null) ? estimateAiDiagCostJpy(modelKey, inputTokens, outputTokens) : null,
+      inputTokens:             data?.usage?.input_tokens              ?? null,
+      outputTokens:            data?.usage?.output_tokens             ?? null,
+      cacheCreationInputTokens: data?.usage?.cache_creation_input_tokens ?? null,
+      cacheReadInputTokens:     data?.usage?.cache_read_input_tokens     ?? null,
     };
+    usage.costJpy = (usage.inputTokens != null && usage.outputTokens != null) ? estimateAiDiagCostJpy(modelKey, usage) : null;
+    parsed.usage = usage;
     aiDiagProposal = parsed;
     aiDiagState = 'proposal';
   } catch (err) {
