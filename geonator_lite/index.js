@@ -216,6 +216,10 @@ function updateBboxPreview() {
 }
 
 map.on('load', () => {
+  // ベーススタイルのtext-field原本をここで確保する——このあと追加するbboxPreview/results
+  // レイヤー(名前を含むtext-fieldを持つ)を巻き込まないよう、他のaddLayerより前に呼ぶ。
+  captureOriginalTextFields();
+
   map.addSource('bboxPreview', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({
     id: 'bboxPreviewFill', type: 'fill', source: 'bboxPreview',
@@ -276,6 +280,147 @@ map.on('load', () => {
       .setText(`#${f.properties.rank} ${f.properties.name || ''}${scoreText}`)
       .addTo(map);
   });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 言語切替（ヘッダーの🌐ボタン→モーダル）
+// ═══════════════════════════════════════════════════════════════
+// 表示言語: 'ja'(既定)/'en'/'ko'。反映先は2つ:
+//   1. ベースマップの地名ラベル(symbolレイヤーのtext-fieldのうちname/name_ja/name_en/
+//      name_ko等)。KRはname_ko→name_en→name(ローカル名/日本語)の順にフォールバック。
+//   2. AI検索(searchMode==='ai')の結果名——buildRequestBody()がrequestBody.language
+//      として渡し、query-engine.js側でunified L2にそのまま候補名を翻訳させる
+//      (Search Box自体のlanguageパラメータは常にja固定のまま——L1が入力を日本語に
+//      正規化して検索する前提を変えないため。詳細はmapbox-mcp.js/query-engine.js参照)。
+// 通常検索(searchMode==='normal')はL1/L2を一切介さないため翻訳の仕組みが無く、常に
+// 日本語のまま(runPlainSearch参照)。UI文言自体(このモーダルやコンソール等)は
+// 翻訳対象外——地図・AI検索結果・ボタン表示のみ。
+
+function _isNameGetExpr(n) {
+  return Array.isArray(n) && n.length === 2 && n[0] === 'get' && typeof n[1] === 'string' && /^name(_[a-zA-Z-]+)?$/.test(n[1]);
+}
+function _buildNameChain(lang) {
+  if (lang === 'ko') return ['coalesce', ['get', 'name_ko'], ['get', 'name_en'], ['get', 'name']];
+  if (lang === 'en') return ['coalesce', ['get', 'name_en'], ['get', 'name']];
+  return ['get', 'name'];
+}
+// text-field式を再帰的に書き換え、name系のget/coalesce部分だけを選択言語のチェーンに
+// 差し替える。step/match/case等の外側の構造(ref番号・ズーム条件分岐等)はそのまま残す
+// ことで、レイヤーごとの個別対応なしに全symbolレイヤーへ汎用的に適用できる。
+function _rewriteNameField(node, lang) {
+  if (!Array.isArray(node)) return node;
+  if (node[0] === 'coalesce' && node.length > 1 && node.slice(1).every(_isNameGetExpr)) return _buildNameChain(lang);
+  if (_isNameGetExpr(node)) return _buildNameChain(lang);
+  return node.map(child => _rewriteNameField(child, lang));
+}
+
+// ベーススタイル(地図読み込み時点、まだ検索結果/bboxPreviewレイヤーを足す前)のtext-field
+// 原本。'ja'に戻す(=このまま再設定する)、en/koへはこれを元に書き換える。
+const originalTextFields = new Map();
+function captureOriginalTextFields() {
+  originalTextFields.clear();
+  for (const layer of map.getStyle().layers || []) {
+    if (layer.type !== 'symbol') continue;
+    let tf;
+    try { tf = map.getLayoutProperty(layer.id, 'text-field'); } catch (e) { continue; }
+    if (tf == null || !JSON.stringify(tf).includes('name')) continue;
+    originalTextFields.set(layer.id, tf);
+  }
+}
+function setMapLanguage(lang) {
+  for (const [layerId, original] of originalTextFields) {
+    const next = lang === 'ja' ? original : _rewriteNameField(original, lang);
+    try { map.setLayoutProperty(layerId, 'text-field', next); } catch (e) {}
+  }
+}
+
+const LANG_LABELS = { ja: '🌐JP', en: '🌐EN', ko: '🌐KR' };
+// AI検索/通常検索トグルのラベルも表示言語に合わせて差し替える(直訳ではなく各言語で自然な
+// 言い回しに——韓国語は「非AI検索」の直訳ではなく「일반 검색(一般検索)」でAI検索と対比)。
+const SEARCH_MODE_LABELS = {
+  ja: { ai: 'AI検索', normal: '通常検索' },
+  en: { ai: 'AI Search', normal: 'Non-AI Search' },
+  ko: { ai: 'AI 검색', normal: '일반 검색' },
+};
+// 検索ボックス周りの残りの文言(placeholder/検索ボタン/言語モーダルのタイトル)も選択言語に
+// 合わせて差し替える。サンプルクエリの文言自体はここに含めない(常に日本語のまま——後述)。
+const UI_LABELS = {
+  ja: { placeholder: '場所を探す...', searchBtn: '検索', langModalTitle: '表示言語' },
+  en: { placeholder: 'Search a place...', searchBtn: 'Search', langModalTitle: 'Display Language' },
+  ko: { placeholder: '장소를 검색하세요...', searchBtn: '검색', langModalTitle: '표시 언어' },
+};
+let currentLanguage = 'ja';
+
+const langToggleBtn = document.getElementById('langToggleBtn');
+const langModal = document.getElementById('langModal');
+
+function openLangModal() {
+  document.querySelectorAll('.lang-option').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.lang === currentLanguage);
+  });
+  langModal.style.display = 'block';
+}
+function closeLangModal() { langModal.style.display = 'none'; }
+
+function setLanguage(lang) {
+  if (!LANG_LABELS[lang]) return;
+  currentLanguage = lang;
+  langToggleBtn.textContent = LANG_LABELS[lang];
+  searchModeAiBtn.textContent = SEARCH_MODE_LABELS[lang].ai;
+  searchModeNormalBtn.textContent = SEARCH_MODE_LABELS[lang].normal;
+  document.getElementById('queryInput').placeholder = UI_LABELS[lang].placeholder;
+  document.getElementById('searchBtn').textContent = UI_LABELS[lang].searchBtn;
+  document.getElementById('langModalTitle').textContent = UI_LABELS[lang].langModalTitle;
+  setMapLanguage(lang);
+  closeLangModal();
+}
+
+// サンプルクエリ(デモ用の実行例)。AI検索モード中、検索ボックスにフォーカスがある状態で
+// ↑/↓キーを押すと、シェルのコマンド履歴のようにこのリストを順に呼び出せる(通常検索
+// モードでは無効——通常検索はAI処理を介さないためサンプルの前提と合わない)。表示言語
+// (currentLanguage)に応じて翻訳版を出す——ただしL1は入力言語によらず日本語に正規化して
+// 検索する前提なので、EN/KR版のサンプルもその他の非日本語入力と同じ扱いで動く。
+// 各言語同じ並び(同indexが対応するクエリの翻訳)。
+const SAMPLE_QUERIES = {
+  ja: [
+    '東京タワーのすぐ横のイタリアン',
+    '天神駅近くの天ぷら屋を探して。歩いてすぐに天神中央公園がある',
+    '徳島駅間の牛丼屋の横のセブン',
+    '徳島駅前のホテルを探して。1Fにファミマが入っている',
+    '虎ノ門ヒルズ駅から徒歩3分以上10分以内のホテル',
+  ],
+  en: [
+    'Italian restaurant right next to Tokyo Tower',
+    'Find a tempura restaurant near Tenjin Station — Tenjin Central Park is just a short walk away',
+    'The Seven-Eleven next to the gyudon (beef bowl) shop near Tokushima Station',
+    'Find a hotel in front of Tokushima Station — there is a FamilyMart on the 1st floor',
+    'Hotel within a 3–10 minute walk of Toranomon Hills Station',
+  ],
+  ko: [
+    '도쿄타워 바로 옆 이탈리안 레스토랑',
+    '텐진역 근처 텐푸라 가게를 찾아줘. 걸어서 바로 텐진 중앙공원이 있어',
+    '도쿠시마역 근처 규동집 옆 세븐일레븐',
+    '도쿠시마역 앞 호텔을 찾아줘. 1층에 훼미리마트가 있어',
+    '토라노몬힐즈역에서 도보 3분 이상 10분 이내의 호텔',
+  ],
+};
+let sampleQueryIndex = -1; // まだ何も呼び出していない状態
+document.getElementById('queryInput').addEventListener('keydown', (e) => {
+  if (searchMode !== 'ai') return;
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  e.preventDefault();
+  const list = SAMPLE_QUERIES[currentLanguage] || SAMPLE_QUERIES.ja;
+  const n = list.length;
+  if (e.key === 'ArrowUp') sampleQueryIndex = (sampleQueryIndex <= 0) ? n - 1 : sampleQueryIndex - 1;
+  else sampleQueryIndex = (sampleQueryIndex >= n - 1) ? 0 : sampleQueryIndex + 1;
+  document.getElementById('queryInput').value = list[sampleQueryIndex];
+});
+
+langToggleBtn.addEventListener('click', openLangModal);
+document.getElementById('langModalClose').addEventListener('click', closeLangModal);
+langModal.addEventListener('click', (e) => { if (e.target.id === 'langModal') closeLangModal(); });
+document.querySelectorAll('.lang-option').forEach(btn => {
+  btn.addEventListener('click', () => setLanguage(btn.dataset.lang));
 });
 
 // viewport modeは地図を動かすたびに実際の検索範囲が変わるので、パン/ズームのたびに再描画する。
@@ -530,6 +675,9 @@ function buildRequestBody(text) {
     model: settings.model,
     judge: settings.judge,
     debugLog: !!settings.debugLog,
+    // 検索自体の言語ではなく表示翻訳の指示(query-engine.js DISPLAY_LANGUAGE経由でL2に
+    // 候補名を翻訳させる)。'ja'ならquery-engine側で無視され翻訳は行われない。
+    language: currentLanguage,
   };
   if (proximityPoint) requestBody.proximity = proximityPoint;
   const bbox = computeBbox(settings.bboxMode, settings.bboxSquareM);
@@ -543,7 +691,8 @@ function openRequestModal() {
   const text = document.getElementById('queryInput').value.trim() || '(検索テキスト未入力)';
   try {
     const body = searchMode === 'normal'
-      ? { note: '通常検索: Search Box forwardのみ（L1/L2/bbox/judgeなし）', q: text, language: 'ja', country: 'jp', limit: 30, proximity: proximityPoint || null }
+      // 通常検索はL2を介さない(=翻訳の仕組みがない)ため、language は常にja固定。
+      ? { note: '通常検索: Search Box forwardのみ（L1/L2/bbox/judgeなし・表示言語切替非対応）', q: text, language: 'ja', country: 'jp', limit: 30, proximity: proximityPoint || null }
       : buildRequestBody(text);
     content.textContent = JSON.stringify(body, null, 2);
     errBox.style.display = 'none';
@@ -596,6 +745,7 @@ searchModeNormalBtn.addEventListener('click', () => setSearchMode('normal'));
 /** 通常検索モード: Search Box forwardのみを固定パラメータで呼ぶ。renderResults()が読む
  * {results, meta}の形はAI検索と揃えるが、score(judgeスコア)は存在しないためnullのまま渡す。 */
 async function runPlainSearch(text) {
+  // 通常検索はL2を介さない(=翻訳の仕組みがない)ため、language は常にja固定。
   const params = new URLSearchParams({
     q: text,
     language: 'ja',

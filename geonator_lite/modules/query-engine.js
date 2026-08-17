@@ -115,7 +115,8 @@ class QueryEngine {
 
     const results = filtered.map((c, i) => ({
       rank: i + 1,
-      name: c.name || null,
+      // 表示言語が設定されていればL2が返した翻訳名(_displayName)を優先、無ければ原名。
+      name: c._displayName || c.name || null,
       lat: c.latitude ?? c.lat ?? null,
       lng: c.longitude ?? c.lng ?? null,
       score: c._matchInfo?.score ?? 0,
@@ -773,7 +774,9 @@ class QueryEngine {
     const [mainRated] = await Promise.all([
       skipTargetRating
         ? Promise.resolve({ kept: mainRaw })
-        : this._rateGroup(this._buildIntentLabel(target), mainRaw, target.query_intent, targetGroup),
+        // 表示言語の翻訳(config.DISPLAY_LANGUAGE)はtarget(=最終結果に出るグループ)の
+        // L2呼び出しにだけ渡す——poi conditionsはフィルタ用途のみで名前を表示しないため不要。
+        : this._rateGroup(this._buildIntentLabel(target), mainRaw, target.query_intent, targetGroup, this.config.DISPLAY_LANGUAGE),
       ...poiConds.map(async c => {
         const key = c.text ?? c.type;
         const items = condResults[key];
@@ -801,8 +804,10 @@ class QueryEngine {
     return { main: kept, conditions: condResults };
   }
 
-  /** Unified L2 (spec §6.1): category + name relevance in one LLM call per group. */
-  async _rateGroup(intentLabel, candidates, queryIntent = null, logGroup = null) {
+  /** Unified L2 (spec §6.1): category + name relevance in one LLM call per group. `lang`
+   * (config.DISPLAY_LANGUAGE, 'en'|'ko'|null) additionally asks the same call to translate
+   * each candidate's name for display — no extra LLM round-trip. */
+  async _rateGroup(intentLabel, candidates, queryIntent = null, logGroup = null, lang = null) {
     if (!candidates || candidates.length === 0) return { kept: [] };
     // Building targets: `class` is uniformly 'building' (no mansion/apartment/office
     // distinction in the tileset), so the category field is noise — send name only and
@@ -811,7 +816,7 @@ class QueryEngine {
     const payload = candidates.map(c => nameOnly
       ? { id: c.id, name: c.name }
       : { id: c.id, name: c.name, poi_category: c.poi_category, class: c.cls || null });
-    const res = await this.llm.rateCandidates(intentLabel, payload, nameOnly).catch(() => null);
+    const res = await this.llm.rateCandidates(intentLabel, payload, nameOnly, lang).catch(() => null);
     if (!res) {
       this._logStage(logGroup, `L2判定失敗(fail-safe・全件keep, intent="${intentLabel}")`, candidates);
       return { kept: candidates }; // fail-safe: keep all as 'unknown'
@@ -822,8 +827,8 @@ class QueryEngine {
       const id = String(c.id);
       // geonator_liteは精度優先（[[project_geonator_lite_precision_over_recall]]）: no はもちろん、
       // definitely/probablyどちらでもない unknown（=L2が確信を持てなかった候補）も最終結果には出さない。
-      if (res.definitely.has(id)) { c._relevance = 'definitely'; kept.push(c); continue; }
-      if (res.probably.has(id)) { c._relevance = 'probably'; kept.push(c); continue; }
+      if (res.definitely.has(id)) { c._relevance = 'definitely'; c._displayName = res.names?.[id] || null; kept.push(c); continue; }
+      if (res.probably.has(id)) { c._relevance = 'probably'; c._displayName = res.names?.[id] || null; kept.push(c); continue; }
       dropped.push(c);
     }
     if (this._log && logGroup) {
@@ -1048,6 +1053,10 @@ function _buildRuntimeConfig(requestBody) {
     if (Number.isFinite(j.weights.anchor)) cfg.SCORE_WEIGHT_ANCHOR = j.weights.anchor;
   }
   cfg.DEBUG_LOG = !!requestBody?.debugLog; // 詳細処理ログ(L1/L2段階トレース+個別API呼び出し)のON/OFF
+  // 検索実行(Search Box APIのlanguage)は常にja固定(mapbox-mcp.js側)——表示言語の翻訳は
+  // 検索後、unified L2で候補名をLLMに翻訳させる形で行う(ヘッダーの🌐ボタン→
+  // requestBody.language。'ja'ならnull=翻訳しない)。
+  cfg.DISPLAY_LANGUAGE = (requestBody?.language && requestBody.language !== 'ja') ? requestBody.language : null;
   return cfg;
 }
 

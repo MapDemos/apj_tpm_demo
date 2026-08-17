@@ -77,13 +77,16 @@ class LLMClient {
    * @param {Array<{id:number|string, name:string, poi_category?:string[], class?:string}>} candidates
    * @param {boolean} nameOnly - true for building targets (mansion/apartment/building):
    *   category is uninformative there, so use the name-relevance-only prompt.
+   * @param {string|null} lang - display language ('en'|'ko') to additionally translate
+   *   each candidate's name into, in the same call (no extra round-trip). null/'ja' = skip
+   *   (search execution itself always stays Japanese — see query-engine.js DISPLAY_LANGUAGE).
    */
-  async rateCandidates(intentLabel, candidates, nameOnly = false) {
+  async rateCandidates(intentLabel, candidates, nameOnly = false, lang = null) {
     if (!candidates || candidates.length === 0) return { definitely: new Set(), probably: new Set(), no: new Set() };
 
     const result = await this._callClaude(
-      this._buildL2Prompt(intentLabel, candidates, nameOnly),
-      1024,
+      this._buildL2Prompt(intentLabel, candidates, nameOnly, lang),
+      lang ? 2048 : 1024, // 翻訳分のnames出力を見込んでmax_tokensを増やす
       this.config.MODEL,
       'L2',
       { cacheSystem: true }
@@ -95,6 +98,7 @@ class LLMClient {
         definitely: new Set((json.definitely || []).map(String)),
         probably:   new Set((json.probably   || []).map(String)),
         no:         new Set((json.no         || []).map(String)),
+        names:      (lang && json.names && typeof json.names === 'object') ? json.names : {},
       };
     } catch {
       return null; // parse failure → caller keeps all as 'unknown'
@@ -200,14 +204,27 @@ class LLMClient {
     };
   }
 
-  _buildL2Prompt(intentLabel, candidates, nameOnly = false) {
+  static _DISPLAY_LANG_NAMES = { en: 'English', ko: '한국어(Korean)' };
+
+  /** lang指定時に付け足す翻訳指示。system(PROMPT_L2/PROMPT_L2_BUILDING)はcache_control対象
+   * なので言語で内容を変えず、user側にだけ追加する(lang違いでキャッシュヒット率が落ちない)。 */
+  _translationInstruction(lang) {
+    if (!lang) return '';
+    const langName = LLMClient._DISPLAY_LANG_NAMES[lang] || lang;
+    return `\n\nさらに、"definitely"/"probably"に含めた各候補について、その名前を${langName}に翻訳/表記した文字列を` +
+      `トップレベルの"names"というオブジェクト(id文字列→翻訳後の名前)として追加で返してください` +
+      `(固有名詞は逐語訳ではなく一般的なローマ字表記/現地語表記を優先。翻訳できない場合は元の名前をそのまま使う)。`;
+  }
+
+  _buildL2Prompt(intentLabel, candidates, nameOnly = false, lang = null) {
     if (typeof PROMPT_L2 === 'undefined') throw new Error('PROMPT_L2 not loaded');
+    const namesField = lang ? ',"names":{...}' : '';
     if (nameOnly) {
       if (typeof PROMPT_L2_BUILDING === 'undefined') throw new Error('PROMPT_L2_BUILDING not loaded');
       const list = candidates.map(c => JSON.stringify({ id: c.id, name: c.name ?? '' })).join('\n');
       return {
         system: PROMPT_L2_BUILDING,
-        user:   `探しているもの（意図）：${intentLabel}\n\n候補:\n${list}\n\n各候補が「意図そのもの（意図のインスタンス）か」を名前だけから判定し、{"definitely":[...],"probably":[...],"no":[...]} 形式でIDを返してください。unknown（判断つかない）は記載不要＝未記載はunknown扱い。JSONのみ。`,
+        user:   `探しているもの（意図）：${intentLabel}\n\n候補:\n${list}\n\n各候補が「意図そのもの（意図のインスタンス）か」を名前だけから判定し、{"definitely":[...],"probably":[...],"no":[...]${namesField}} 形式でIDを返してください。unknown（判断つかない）は記載不要＝未記載はunknown扱い。JSONのみ。${this._translationInstruction(lang)}`,
       };
     }
     const list = candidates.map(c => JSON.stringify({
@@ -215,7 +232,7 @@ class LLMClient {
     })).join('\n');
     return {
       system: PROMPT_L2,
-      user:   `探しているもの（意図）：${intentLabel}\n\n候補:\n${list}\n\n各候補が「意図そのもの（意図のインスタンス）か」を、カテゴリと名前の両方から判定し、{"definitely":[...],"probably":[...],"no":[...]} 形式でIDを返してください。unknown（判断つかない）は記載不要＝未記載はunknown扱い。JSONのみ。`,
+      user:   `探しているもの（意図）：${intentLabel}\n\n候補:\n${list}\n\n各候補が「意図そのもの（意図のインスタンス）か」を、カテゴリと名前の両方から判定し、{"definitely":[...],"probably":[...],"no":[...]${namesField}} 形式でIDを返してください。unknown（判断つかない）は記載不要＝未記載はunknown扱い。JSONのみ。${this._translationInstruction(lang)}`,
     };
   }
 }

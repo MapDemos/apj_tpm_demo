@@ -206,6 +206,10 @@ class MapboxMCPClient {
   // auto-derived locality bbox that was removed (huge/skewed admin-boundary bbox, fixed
   // 800m near-radius excluding real targets) — see class header comment.
   async _searchBoxRequest(q, types, proximity, limit = 30) {
+    // language は常にja固定（検索実行そのものは常に日本語ベース——L1がユーザー入力を
+    // 日本語に正規化してから検索する前提のため、UIの表示言語を検索クエリに反映しない。
+    // 表示言語への翻訳は検索後段（unified L2、llm-client.js rateCandidatesのlang引数）
+    // 側の責務——query-engine.js _buildRuntimeConfigのDISPLAY_LANGUAGE参照）。
     let url =
       `${this.config.SEARCH_BOX_API}?q=${encodeURIComponent(q)}&access_token=${this.token}` +
       `&language=ja&country=jp&types=${types}&limit=${limit}`;

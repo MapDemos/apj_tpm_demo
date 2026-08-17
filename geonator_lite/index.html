@@ -50,10 +50,17 @@
     #mapHeader {
       position: absolute; top: 0; left: 0; right: 0; z-index: 10;
       height: 56px; box-sizing: border-box;
-      display: flex; align-items: center;
+      display: flex; align-items: center; justify-content: space-between;
       background: var(--surface); border-bottom: 1px solid var(--line);
       padding: 0 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.12);
     }
+
+    /* 言語切替：ヘッダー右端の🌐ボタン。現在の表示言語(🌐JP/🌐EN/🌐KR)をボタン自体に表示し、
+       押すとモーダルで日本語/English/한국어を選ばせる（3択並列トグルではなくモーダル方式）。 */
+    #langToggleBtn { flex-shrink: 0; font-weight: 700; }
+    .lang-option { text-align: left; width: 100%; }
+    .lang-option.active { background: var(--accent); color: #fff; border-color: var(--accent-dark); }
+    .lang-option.active:hover { background: var(--accent-dark); }
 
     /* 地図上の検索ボックス（下部中央）＋その上のAI検索/通常検索切替。
        bottomはMapboxロゴ(左下)・attribution(右下)より上に十分な余白を空ける
@@ -286,6 +293,7 @@
     <!-- 地図のヘッダー：上部を全幅で埋めるバー。アプリ名の表示のみ（コンソール側からは外した） -->
     <div id="mapHeader">
       <h1>Geonator Lite</h1>
+      <button id="langToggleBtn" type="button" class="btn-ghost" aria-label="表示言語を切り替える">🌐JP</button>
     </div>
 
     <!-- 地図上に浮く検索ボックス。それ以外の設定/結果類はコンソール(ハンバーガーで開閉)に格納。
@@ -358,7 +366,7 @@
               <label for="modelSelect">モデル</label>
               <select id="modelSelect">
                 <option value="claude-haiku-4-5-20251001">claude-haiku-4-5-20251001</option>
-                <option value="claude-sonnet-4-6-20251015">claude-sonnet-4-6-20251015</option>
+                <option value="claude-sonnet-5">claude-sonnet-5</option>
               </select>
             </div>
             <div class="row">
@@ -412,6 +420,24 @@
             bboxを地図上に表示する
           </label>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 言語切替モーダル：地図(スタイルのname/name_ja等ラベル)とAI検索結果(unified L2による
+       翻訳)の両方に反映する表示言語を選ぶ。このモーダル自体のタイトル("表示言語")・
+       AI検索/通常検索ボタン・検索ボックスのplaceholder/ボタンは選択言語に合わせて
+       UI_LABELS(index.js)から差し替える。それ以外のUI文言(コンソール等)は翻訳対象外。 -->
+  <div id="langModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000;">
+    <div style="background:#fff; max-width:280px; margin:16vh auto; padding:16px 20px; border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,0.35);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h2 id="langModalTitle" style="font-size:15px; margin:0; font-weight:700;">表示言語</h2>
+        <button id="langModalClose" class="btn-ghost" type="button">✕</button>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <button type="button" class="btn-ghost lang-option" data-lang="ja">🌐 日本語 (JP)</button>
+        <button type="button" class="btn-ghost lang-option" data-lang="en">🌐 English (EN)</button>
+        <button type="button" class="btn-ghost lang-option" data-lang="ko">🌐 한국어 (KR)</button>
       </div>
     </div>
   </div>
