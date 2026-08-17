@@ -113,13 +113,32 @@
 
     /* Feedback Panel (マップ行+結果行の右側に全高で並ぶ) */
     #feedback-panel { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; min-height: 0; border-left: 1px solid #333; }
+    #feedback-tabs { display: flex; border-bottom: 1px solid #333; flex-shrink: 0; }
+    .fb-tab { flex: 1; background: none; border: none; color: #888; font-size: 11px; padding: 8px 4px; cursor: pointer; border-bottom: 2px solid transparent; }
+    .fb-tab:hover { color: #ccc; }
+    .fb-tab.active { color: #fff; border-bottom-color: #2563eb; }
     #feedback-body { flex: 1; overflow-y: auto; padding: 12px; }
     .fb-buttons { display: flex; gap: 8px; }
     .fb-btn { flex: 1; font-size: 24px; padding: 16px 0; }
     .fb-btn:hover { background: #3a3a3a; }
+    .fb-btn-text { font-size: 11px !important; }
     .fb-reason-group { font-weight: bold; font-size: 11px; color: #999; margin: 12px 0 6px; }
     .fb-reason-group:first-child { margin-top: 0; }
     .fb-reason-list { display: flex; flex-direction: column; gap: 4px; }
+    /* AI診断タブ */
+    .ai-diag-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+    .ai-diag-toolbar .btn { flex: 1; font-size: 11px; padding: 8px 4px; }
+    .ai-diag-analyzing { font-size: 12px; color: #999; text-align: center; padding: 20px 0; }
+    .ai-diag-card { background: #262626; border: 1px solid #444; border-radius: 6px; padding: 10px; font-size: 11px; }
+    .ai-diag-card-cat { font-weight: bold; font-size: 13px; margin-bottom: 6px; }
+    .ai-diag-card-cat.cat-good { color: #4ade80; }
+    .ai-diag-card-cat.cat-bad { color: #f87171; }
+    .ai-diag-card-cat.cat-nothit { color: #999; }
+    .ai-diag-card-tag { color: #ccc; margin-bottom: 6px; }
+    .ai-diag-card-reason { color: #999; line-height: 1.5; margin-bottom: 10px; white-space: pre-wrap; }
+    .ai-diag-card-actions { display: flex; gap: 8px; }
+    .ai-diag-card-actions .btn { flex: 1; font-size: 11px; padding: 7px 0; }
+    #ai-diag-decline-reason { width: 100%; min-height: 60px; margin: 8px 0; padding: 6px 8px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 11px; font-family: inherit; resize: vertical; box-sizing: border-box; }
     .fb-reason-btn { text-align: left; font-size: 11px; padding: 6px 8px; }
     .fb-back-btn { width: 100%; text-align: left; font-size: 11px; padding: 6px 8px; margin-bottom: 10px; color: #999; }
     .pane-header { padding: 7px 12px; font-size: 11px; color: #888; background: #1a1a1a; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
@@ -314,6 +333,7 @@
     <option value="all">All</option>
     <option value="good">👍</option>
     <option value="bad">👎</option>
+    <option value="not_hit_both">Not hit in both</option>
     <option value="untested">未実施</option>
   </select>
   <span class="header-label-sm">理由:</span>
@@ -385,6 +405,10 @@
   </div>
   <div id="feedback-panel">
     <div class="pane-header">フィードバック</div>
+    <div id="feedback-tabs">
+      <button class="fb-tab active" id="fb-tab-manual" data-tab="manual">マニュアル</button>
+      <button class="fb-tab" id="fb-tab-ai" data-tab="ai">AIによる評価</button>
+    </div>
     <div id="feedback-body"><p class="status-msg" style="padding:0;">検索を実行してください</p></div>
   </div>
 </div>
@@ -613,6 +637,31 @@
   </div>
 </div>
 
+<div class="dialog-overlay" id="ai-diag-settings-dialog">
+  <div class="dialog" style="max-width:420px;">
+    <div class="dialog-header">
+      <span class="dialog-title">⚙️ AIによる評価 設定</span>
+      <button class="dialog-close" data-close="ai-diag-settings-dialog">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div class="setup-field" style="margin-bottom:14px;">
+        <label>使用モデル</label>
+        <select id="ai-diag-model-select" style="padding:9px 12px;background:#2a2a2a;border:1px solid #444;border-radius:4px;color:#fff;font-size:12px;">
+          <option value="haiku">Haiku 4.5</option>
+          <option value="sonnet">Sonnet 5</option>
+        </select>
+      </div>
+      <div class="setup-field" style="margin-bottom:14px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ccc;font-family:inherit;">
+          <input type="checkbox" id="ai-diag-ignore-bbox-checkbox" />
+          bboxを無視して評価する(Mapbox検索をbbox無しでやり直してから評価)
+        </label>
+      </div>
+      <button id="ai-diag-settings-save" class="btn btn-primary" style="width:100%;padding:9px;">保存</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ============================================================
 // TOKENS
@@ -699,11 +748,11 @@ function openTokenModal() {
 // ============================================================
 // AI PROXY (Anthropic Messages API 互換 Lambda プロキシ)
 // ============================================================
-async function callClaude(system, messages, maxTokens = 1024) {
+async function callClaude(system, messages, maxTokens = 1024, model = AI_MODEL) {
   const res = await fetch(AI_PROXY_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: AI_MODEL, max_tokens: maxTokens, system, messages }),
+    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages }),
   });
   if (!res.ok) throw new Error(`AI proxy error: ${res.status} ${await res.text()}`);
   const data = await res.json();
@@ -992,6 +1041,8 @@ const FEEDBACK_REASONS = [
 ];
 // GOODを押した際の内訳(順位まで含めて精度を見る方針のため、1位での正解/正解はしているが1位ではない、を区別する)
 const GOOD_REASONS = ['Perfect (Correct POI at top)', 'Almost! (Correct POI but not ranked at top)'];
+// Mapbox・Google両方とも該当候補が無かったケース(理由分岐なし、押した時点で即確定)
+const NOT_HIT_BOTH = 'not_hit_both';
 
 const LS_FEEDBACK = 'apc_feedback_log';
 function loadFeedbackLog() { try { return JSON.parse(localStorage.getItem(LS_FEEDBACK) || '[]'); } catch { return []; } }
@@ -1034,17 +1085,33 @@ function recordFeedback(ctx, result, reason) {
 
 let feedbackContext  = null;   // { fileId, fileName, rowIndex, query } —直近の検索がどのクエリ/行に対するものか
 let feedbackPanelMode = 'idle'; // 'idle' | 'rated' | 'good_reason' | 'reason'
+let feedbackTab = 'manual'; // 'manual' | 'ai'
+
+function switchFeedbackTab(tab) {
+  feedbackTab = tab;
+  document.querySelectorAll('.fb-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+  renderFeedbackPanel();
+}
+document.getElementById('fb-tab-manual').addEventListener('click', () => switchFeedbackTab('manual'));
+document.getElementById('fb-tab-ai').addEventListener('click', () => switchFeedbackTab('ai'));
 
 function renderFeedbackPanel() {
+  if (feedbackTab === 'ai') { renderAiDiagPanel(); return; }
+  renderManualFeedbackPanel();
+}
+
+function renderManualFeedbackPanel() {
   const body = document.getElementById('feedback-body');
   if (feedbackPanelMode === 'rated') {
     body.innerHTML = `
       <div class="fb-buttons">
         <button class="btn btn-secondary fb-btn" id="fb-good-btn">👍</button>
         <button class="btn btn-secondary fb-btn" id="fb-bad-btn">👎</button>
+        <button class="btn btn-secondary fb-btn fb-btn-text" id="fb-nothit-btn">Not hit in both</button>
       </div>`;
     document.getElementById('fb-good-btn').addEventListener('click', () => { feedbackPanelMode = 'good_reason'; renderFeedbackPanel(); });
     document.getElementById('fb-bad-btn').addEventListener('click', () => { feedbackPanelMode = 'reason'; renderFeedbackPanel(); });
+    document.getElementById('fb-nothit-btn').addEventListener('click', () => submitFeedback(NOT_HIT_BOTH, null));
   } else if (feedbackPanelMode === 'good_reason') {
     body.innerHTML = `
       <button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← 戻る</button>
@@ -1075,6 +1142,7 @@ function submitFeedback(result, reason) {
   recordFeedback(feedbackContext, result, reason);
   feedbackPanelMode = 'idle';
   feedbackContext = null;
+  aiDiagState = 'idle'; aiDiagProposal = null;
   renderFeedbackPanel();
   if (currentCsvFileId) renderCSVViewport(); // このクエリがCSV行に紐づく場合、結果アイコン/薄字を反映
 
@@ -1083,6 +1151,246 @@ function submitFeedback(result, reason) {
     jumpToCSVRow(csvIndex + 1);
   }
 }
+
+// ============================================================
+// AI DIAGNOSIS (「AIによる評価」タブ。Mapboxがクエリに適切な結果を返せているかをAIに判定させ、
+// 人がAccept/Declineして確定させるアシスト機能。自動ログ記録はしない)
+// ============================================================
+const AI_DIAG_MODEL_IDS = { haiku: 'claude-haiku-4-5-20251001', sonnet: 'claude-sonnet-5' };
+const LS_AI_DIAG_MODEL        = 'apc_ai_diag_model';
+const LS_AI_DIAG_IGNORE_BBOX  = 'apc_ai_diag_ignore_bbox';
+const LS_AI_DIAG_LOG          = 'apc_ai_diagnosis_log';
+
+let aiDiagSettings = {
+  model: localStorage.getItem(LS_AI_DIAG_MODEL) || 'haiku',
+  ignoreBbox: localStorage.getItem(LS_AI_DIAG_IGNORE_BBOX) === 'true',
+};
+function saveAiDiagSettings() {
+  localStorage.setItem(LS_AI_DIAG_MODEL, aiDiagSettings.model);
+  localStorage.setItem(LS_AI_DIAG_IGNORE_BBOX, String(aiDiagSettings.ignoreBbox));
+}
+
+function loadAiDiagLog() { try { return JSON.parse(localStorage.getItem(LS_AI_DIAG_LOG) || '[]'); } catch { return []; } }
+function saveAiDiagLog(log) { localStorage.setItem(LS_AI_DIAG_LOG, JSON.stringify(log)); }
+let aiDiagLog = loadAiDiagLog();
+
+function recordAiDiagLog(entry) {
+  aiDiagLog.push({ ...entry, timestamp: new Date().toISOString() });
+  saveAiDiagLog(aiDiagLog);
+}
+
+let aiDiagState    = 'idle'; // 'idle' | 'analyzing' | 'proposal' | 'decline_input' | 'error'
+let aiDiagProposal = null;   // { category:'good'|'bad'|'not_hit_both', goodReason, badTag, rank, reasoning }
+let aiDiagError    = '';
+
+const AI_DIAG_SYSTEM_PROMPT = `あなたはタクシー配車業務等で使われる地図検索(Mapbox Search Box API)の品質診断アシスタントです。
+ユーザーが入力した検索クエリに対して、Mapboxが適切な結果(POIや住所)を返せているかを、Google Places側の結果も参考にしながら判定します。
+
+判定手順(この順番を厳守):
+1. クエリに対してMapbox候補の中に妥当な一致がないか確認する。
+   - 一致候補があり、それが1位(最初の候補)なら category="good", goodReason="Perfect (Correct POI at top)"
+   - 一致候補はあるが1位ではないなら category="good", goodReason="Almost! (Correct POI but not ranked at top)"、rankにその順位(1始まり)を入れる
+2. Mapbox候補に妥当な一致が無い場合、Google候補の中に妥当な一致がないか確認する。
+   - Google側にも一致があるなら category="bad" とし、badTagに以下のタグ一覧から最も近いものを1つだけ選ぶ:
+     ${FEEDBACK_REASONS.flatMap(g => g.items).join(', ')}
+   - Google側にも一致が無いなら category="not_hit_both"
+
+各候補には一致ステータス(both=name/住所とも一致候補あり, name=名前のみ一致候補あり, address=位置のみ近似, none=一致候補なし)と、
+検索の中心地点(proximity)から3km以内かどうかのPフラグが付与されています。これらはヒントとして使ってよいですが、最終判断はクエリの意味とcandidateのname/addressから行ってください。
+
+必ず以下のJSON形式のみで出力してください。説明文やコードブロックのマークダウンは付けないでください。
+{"category": "good" | "bad" | "not_hit_both", "goodReason": string | null, "badTag": string | null, "rank": number | null, "reasoning": "日本語で1〜2文の短い理由"}`;
+
+// bbox無視トグルON時、診断専用にMapboxをbbox無しで再検索する(画面表示中のmapboxRawResultsは変更しない)
+async function searchMapboxIgnoringBbox(query) {
+  const params = new URLSearchParams({ q: query });
+  for (const [k, v] of Object.entries(state.mapboxParams)) {
+    if (k === 'bbox') continue;
+    const s = serializeMapboxParam(v);
+    if (s !== null) params.set(k, s);
+  }
+  params.set('access_token', MAPBOX_TOKEN);
+  const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/forward?${params}`);
+  if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
+  const data = await res.json();
+  return (data.features ?? []).map(f => ({
+    ...f.properties,
+    coordinates: { longitude: f.geometry?.coordinates?.[0] ?? 0, latitude: f.geometry?.coordinates?.[1] ?? 0 },
+  }));
+}
+
+// AIに渡す情報を「クエリ・リクエストパラメータ・比較結果ステータス・name/address」だけに絞って組み立てる
+async function buildAiDiagnosisPayload(query) {
+  let mList = Array.isArray(mapboxRawResults) ? mapboxRawResults : [];
+  let bboxIgnoredForDiagnosis = false;
+  if (aiDiagSettings.ignoreBbox && Array.isArray(state.mapboxParams.bbox) && state.mapboxParams.bbox.length === 4) {
+    mList = await searchMapboxIgnoringBbox(query);
+    bboxIgnoredForDiagnosis = true;
+  }
+  const gList = Array.isArray(googleRawResults) ? googleRawResults : [];
+
+  const gName = r => r.name, gCoord = r => ({ lat: r.geometry?.location?.lat, lng: r.geometry?.location?.lng });
+  const mName = r => r.name, mCoord = r => ({ lat: r.coordinates?.latitude, lng: r.coordinates?.longitude });
+  const treatNameAsAddress = isCurrentQueryAddressType();
+
+  const mCats = computeMatchCategories(mList, mName, mCoord, gList, gName, gCoord, treatNameAsAddress);
+  const gCats = computeMatchCategories(gList, gName, gCoord, mList, mName, mCoord, treatNameAsAddress);
+
+  const gCenter = state.googleParams.location;
+  const mCenter = state.mapboxParams.proximity;
+  const near = (lat, lng, cLat, cLng) => !!nearProximityInfo(cLat, cLng, lat, lng).badge;
+
+  const mapboxCandidates = mList.map((r, i) => ({
+    rank: i + 1, name: r.name ?? null, address: r.full_address ?? null,
+    matchStatus: mCats[i], near3km: near(r.coordinates?.latitude, r.coordinates?.longitude, mCenter?.lat, mCenter?.lng),
+  }));
+  const googleCandidates = gList.map((r, i) => ({
+    rank: i + 1, name: r.name ?? null, address: r.formatted_address ?? null,
+    matchStatus: gCats[i], near3km: near(r.geometry?.location?.lat, r.geometry?.location?.lng, gCenter?.lat, gCenter?.lng),
+  }));
+
+  return {
+    query,
+    requestParams: {
+      mapboxProximity: state.mapboxParams.proximity ?? null,
+      mapboxBbox: bboxIgnoredForDiagnosis ? null : (state.mapboxParams.bbox ?? null),
+      bboxIgnoredForDiagnosis,
+      googleLocation: state.googleParams.location ?? null,
+    },
+    mapboxCandidates,
+    googleCandidates,
+  };
+}
+
+function renderAiDiagPanel() {
+  const body = document.getElementById('feedback-body');
+  if (!feedbackContext) {
+    body.innerHTML = `<p class="status-msg" style="padding:0;">検索を実行してください</p>`;
+    return;
+  }
+  if (aiDiagState === 'analyzing') {
+    body.innerHTML = `<div class="ai-diag-analyzing">Analyzing...</div>`;
+    return;
+  }
+  if (aiDiagState === 'error') {
+    body.innerHTML = `
+      <div class="ai-diag-toolbar">
+        <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ 設定</button>
+        <button class="btn btn-primary" id="ai-diag-run-btn">▶ 評価を実行</button>
+      </div>
+      <p class="status-msg status-error" style="padding:0;">${esc(aiDiagError)}</p>`;
+    wireAiDiagToolbar();
+    return;
+  }
+  if (aiDiagState === 'proposal' && aiDiagProposal) {
+    const p = aiDiagProposal;
+    const catLabel = p.category === 'good' ? (p.goodReason || 'Good') : p.category === 'not_hit_both' ? 'Not hit in both' : 'Bad';
+    const catCls = p.category === 'good' ? 'cat-good' : p.category === 'not_hit_both' ? 'cat-nothit' : 'cat-bad';
+    body.innerHTML = `
+      <div class="ai-diag-toolbar">
+        <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ 設定</button>
+      </div>
+      <div class="ai-diag-card">
+        <div class="ai-diag-card-cat ${catCls}">${esc(catLabel)}</div>
+        ${p.category === 'good' && p.rank ? `<div class="ai-diag-card-tag">${p.rank}位で一致</div>` : ''}
+        ${p.category === 'bad' && p.badTag ? `<div class="ai-diag-card-tag">タグ: ${esc(p.badTag)}</div>` : ''}
+        <div class="ai-diag-card-reason">${esc(p.reasoning || '')}</div>
+        <div class="ai-diag-card-actions">
+          <button class="btn btn-secondary" id="ai-diag-accept-btn">Accept</button>
+          <button class="btn btn-secondary" id="ai-diag-decline-btn">Decline</button>
+        </div>
+      </div>`;
+    document.getElementById('ai-diag-settings-btn').addEventListener('click', openAiDiagSettings);
+    document.getElementById('ai-diag-accept-btn').addEventListener('click', acceptAiProposal);
+    document.getElementById('ai-diag-decline-btn').addEventListener('click', () => { aiDiagState = 'decline_input'; renderAiDiagPanel(); });
+    return;
+  }
+  if (aiDiagState === 'decline_input' && aiDiagProposal) {
+    body.innerHTML = `
+      <div class="ai-diag-card">
+        <div class="ai-diag-card-cat">AI提案をDecline</div>
+        <textarea id="ai-diag-decline-reason" placeholder="Declineの理由を自由入力"></textarea>
+        <div class="ai-diag-card-actions">
+          <button class="btn btn-secondary" id="ai-diag-decline-submit-btn">送信</button>
+          <button class="btn btn-secondary" id="ai-diag-decline-cancel-btn">キャンセル</button>
+        </div>
+      </div>`;
+    document.getElementById('ai-diag-decline-submit-btn').addEventListener('click', () => {
+      const reasonText = document.getElementById('ai-diag-decline-reason').value.trim();
+      submitAiDiagDecision('decline', reasonText);
+    });
+    document.getElementById('ai-diag-decline-cancel-btn').addEventListener('click', () => { aiDiagState = 'proposal'; renderAiDiagPanel(); });
+    return;
+  }
+  // idle
+  body.innerHTML = `
+    <div class="ai-diag-toolbar">
+      <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ 設定</button>
+      <button class="btn btn-primary" id="ai-diag-run-btn">▶ 評価を実行</button>
+    </div>`;
+  wireAiDiagToolbar();
+}
+
+function wireAiDiagToolbar() {
+  document.getElementById('ai-diag-settings-btn').addEventListener('click', openAiDiagSettings);
+  document.getElementById('ai-diag-run-btn').addEventListener('click', runAiDiagnosis);
+}
+
+async function runAiDiagnosis() {
+  if (!feedbackContext) return;
+  aiDiagState = 'analyzing';
+  renderAiDiagPanel();
+  try {
+    const payload = await buildAiDiagnosisPayload(feedbackContext.query);
+    const modelId = AI_DIAG_MODEL_IDS[aiDiagSettings.model] || AI_DIAG_MODEL_IDS.haiku;
+    const raw = await callClaude(AI_DIAG_SYSTEM_PROMPT, [{ role: 'user', content: JSON.stringify(payload) }], 500, modelId);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('AIの応答がJSON形式ではありませんでした');
+    const parsed = JSON.parse(match[0]);
+    if (!['good', 'bad', 'not_hit_both'].includes(parsed.category)) throw new Error('AIのcategoryが不正です');
+    aiDiagProposal = parsed;
+    aiDiagState = 'proposal';
+  } catch (err) {
+    aiDiagError = String(err.message || err);
+    aiDiagState = 'error';
+  }
+  renderAiDiagPanel();
+}
+
+function acceptAiProposal() {
+  submitAiDiagDecision('accept', null);
+}
+
+function submitAiDiagDecision(decision, declineReason) {
+  const p = aiDiagProposal;
+  recordAiDiagLog({
+    query: feedbackContext?.query ?? null, fileName: feedbackContext?.fileName ?? null, rowIndex: feedbackContext?.rowIndex ?? null,
+    model: aiDiagSettings.model, ignoreBbox: aiDiagSettings.ignoreBbox,
+    proposal: p, decision, declineReason: declineReason || null,
+  });
+  if (decision === 'accept' && feedbackContext) {
+    const reason = p.category === 'good' ? p.goodReason : p.category === 'bad' ? p.badTag : null;
+    recordFeedback(feedbackContext, p.category, reason);
+    if (currentCsvFileId) renderCSVViewport();
+  }
+  aiDiagState = 'idle';
+  aiDiagProposal = null;
+  renderAiDiagPanel();
+}
+
+function openAiDiagSettings() {
+  document.getElementById('ai-diag-model-select').value = aiDiagSettings.model;
+  document.getElementById('ai-diag-ignore-bbox-checkbox').checked = aiDiagSettings.ignoreBbox;
+  document.getElementById('ai-diag-settings-dialog').classList.add('open');
+}
+document.getElementById('ai-diag-settings-save').addEventListener('click', () => {
+  aiDiagSettings = {
+    model: document.getElementById('ai-diag-model-select').value,
+    ignoreBbox: document.getElementById('ai-diag-ignore-bbox-checkbox').checked,
+  };
+  saveAiDiagSettings();
+  closeDialog('ai-diag-settings-dialog');
+});
 
 // ============================================================
 // QUERY HISTORY (↑/↓キーで遡る。最大100件)
@@ -1832,6 +2140,7 @@ async function doSearch() {
     query,
   };
   feedbackPanelMode = 'rated';
+  aiDiagState = 'idle'; aiDiagProposal = null;
   renderFeedbackPanel();
 }
 
@@ -1903,8 +2212,9 @@ function getFilteredCsvIndices() {
   const needle = csvFilterText.trim().toLowerCase();
   const indices = csvRawRows.map((_, i) => i).filter(i => {
     const fb = getRowFeedback(i);
-    if (csvFilterResult === 'good'     && (!fb || fb.result !== 'good')) return false;
-    if (csvFilterResult === 'bad'      && (!fb || fb.result !== 'bad'))  return false;
+    if (csvFilterResult === 'good'         && (!fb || fb.result !== 'good'))         return false;
+    if (csvFilterResult === 'bad'          && (!fb || fb.result !== 'bad'))          return false;
+    if (csvFilterResult === 'not_hit_both' && (!fb || fb.result !== NOT_HIT_BOTH))   return false;
     if (csvFilterResult === 'untested' && fb) return false;
     if (csvFilterReason !== 'all' && (!fb || fb.reason !== csvFilterReason)) return false;
     if (csvHasQueryType && csvQueryTypeSelected.size < csvQueryTypeValues.length) {
@@ -2015,7 +2325,7 @@ function renderCSVViewport() {
     const i = indices[k];
     const r = csvRawRows[i];
     const fb = getRowFeedback(i);
-    const resultIcon = fb ? (fb.result === 'good' ? '👍' : '👎') : '';
+    const resultIcon = fb ? (fb.result === 'good' ? '👍' : fb.result === NOT_HIT_BOTH ? 'Not hit' : '👎') : '';
     const reasonText = fb ? esc(fb.reason || '') : '';
     const queryTypeTd = csvHasQueryType ? `<td>${esc(r[csvQueryTypeColumn])}</td>` : '';
     const queryCountTd = csvHasQueryCount ? `<td>${esc(r[csvQueryCountColumn])}</td>` : '';
@@ -2953,7 +3263,7 @@ function renderHistoryTable() {
       <td>${esc(e.fileName || '-')}</td>
       <td>${e.rowIndex != null ? e.rowIndex + 1 : '-'}</td>
       <td title="${esc(e.query)}">${esc(e.query)}</td>
-      <td>${e.result === 'good' ? '👍' : '👎'}</td>
+      <td>${e.result === 'good' ? '👍' : e.result === NOT_HIT_BOTH ? 'Not hit' : '👎'}</td>
       <td title="${esc(e.reason || '')}">${esc(e.reason || '')}</td>
     </tr>`).join('');
 }
