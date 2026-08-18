@@ -48,5 +48,10 @@
     "title": "tilequery_isochrone_test",
     "description": "Tilequery / Isochrone APIのテストツール",
     "path": "./search_tilequery_isochrone_testツール/"
+  },
+  {
+    "title": "latlng_simplification",
+    "description": "緯度経度を丸めるとマーカー位置・住所がどうズレるか確認するツール",
+    "path": "./latlng_simplification/"
   }
 ]

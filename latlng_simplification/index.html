@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lat/Lng Simplification</title>
+  <meta name="description" content="緯度経度を丸めるとマーカー位置がどれだけズレるか確認するツール">
+
+  <link rel="shortcut icon" href="https://static-assets.mapbox.com/branding/favicon/v1/favicon.ico" type="image/x-icon"/>
+
+  <!-- Mapbox GL JS（geonator_liteと同じバージョン） -->
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.11.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.11.0/mapbox-gl.js"></script>
+
+  <style>
+    /* 配色はgeonator_liteと共通の変数をそのまま流用（アクセント#3887be=生の緯度経度マーカー、
+       レッド#c00=丸めた後のマーカーとして、既存の意味付けにそのまま乗せる）。 */
+    :root {
+      --accent: #3887be;
+      --accent-dark: #2c6a94;
+      --accent-soft: rgba(56, 135, 190, 0.10);
+      --ink: #1f2328;
+      --ink-soft: #555;
+      --ink-faint: #888;
+      --line: #ddd;
+      --line-soft: #e5e5e5;
+      --surface: #fff;
+      --surface-sunken: #fafafa;
+      --danger: #c00;
+      --danger-soft: rgba(204, 0, 0, 0.08);
+      --radius: 10px;
+      --radius-sm: 6px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+      color: var(--ink);
+    }
+    #app { position: relative; height: 100vh; height: 100dvh; overflow: hidden; }
+    #map { position: absolute; inset: 0; }
+
+    #mapHeader {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+      height: 56px; box-sizing: border-box;
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--surface); border-bottom: 1px solid var(--line);
+      padding: 0 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+    }
+    h1 {
+      font-size: 17px; margin: 0; font-weight: 700; letter-spacing: 0.2px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    h1::before {
+      content: ""; width: 9px; height: 9px; border-radius: 50%;
+      background: var(--accent); display: inline-block;
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    #headerHint { font-size: 12px; color: var(--ink-faint); }
+
+    /* コンソール：画面右に常時表示する固定パネル（内容が少ないため、
+       geonator_liteのようなハンバーガー開閉ではなく常設パネルにする） */
+    #panel {
+      position: absolute; top: 76px; right: 20px; bottom: 20px; z-index: 10;
+      width: 340px; max-width: calc(100vw - 40px);
+      background: var(--surface-sunken); border: 1px solid var(--line);
+      border-radius: var(--radius); box-shadow: 0 2px 16px rgba(0,0,0,0.15);
+      padding: 18px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: #c9c9c9 transparent;
+    }
+    #panel::-webkit-scrollbar { width: 8px; }
+    #panel::-webkit-scrollbar-thumb { background: #c9c9c9; border-radius: 8px; }
+
+    .row { margin-bottom: 16px; }
+    .row:last-child { margin-bottom: 0; }
+    .row label { display: block; font-size: 12px; color: var(--ink-soft); margin-bottom: 5px; font-weight: 600; }
+
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .decimals-val {
+      font-size: 13px; font-weight: 700; color: var(--accent-dark);
+      font-variant-numeric: tabular-nums;
+    }
+    .decimals-val.raw { color: var(--ink-faint); font-weight: 400; }
+
+    .coord-card {
+      border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px;
+      font-variant-numeric: tabular-nums; line-height: 1.6;
+      border: 1px solid var(--line-soft);
+    }
+    .coord-card.raw { background: var(--accent-soft); border-color: rgba(56,135,190,0.25); }
+    .coord-card.rounded { background: var(--danger-soft); border-color: rgba(204,0,0,0.25); }
+    .coord-card .dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      margin-right: 6px; vertical-align: middle;
+    }
+    .coord-card.raw .dot { background: var(--accent); }
+    .coord-card.rounded .dot { background: var(--danger); }
+    .coord-card .label { font-weight: 700; }
+    .coord-card .empty { color: var(--ink-faint); font-weight: 400; }
+    .address-line {
+      margin-top: 5px; padding-top: 5px; border-top: 1px dashed rgba(0,0,0,0.12);
+      font-size: 12px; font-variant-numeric: normal; line-height: 1.4;
+    }
+    .address-line.loading { color: var(--ink-faint); }
+    .address-line.error { color: var(--danger); }
+
+    #offsetBox {
+      font-size: 13px; color: var(--ink-soft); background: var(--surface);
+      border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+      padding: 9px 12px; font-variant-numeric: tabular-nums;
+    }
+    #offsetBox .offset-m { font-weight: 700; color: var(--ink); font-size: 15px; }
+
+    #resetBtn {
+      width: 100%; padding: 8px; font-size: 13px; font-weight: 600;
+      background: var(--surface); color: var(--ink-soft); border: 1px solid var(--line);
+      border-radius: var(--radius-sm); cursor: pointer; transition: background-color .15s ease;
+    }
+    #resetBtn:hover { background: #f0f0f0; color: var(--ink); }
+
+    .precision-table {
+      width: 100%; border-collapse: collapse; font-size: 11.5px; color: var(--ink-soft);
+    }
+    .precision-table th, .precision-table td {
+      text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line-soft);
+      font-variant-numeric: tabular-nums;
+    }
+    .precision-table th { color: var(--ink-faint); font-weight: 600; }
+    .precision-table tr.current { background: var(--accent-soft); }
+    .precision-table tr.current td { color: var(--ink); font-weight: 700; }
+
+    .hint { font-size: 12px; color: var(--ink-faint); line-height: 1.6; }
+
+    @media (max-width: 640px) {
+      #mapHeader { padding: 0 14px; height: 52px; }
+      h1 { font-size: 15px; }
+      #headerHint { display: none; }
+      #panel {
+        top: auto; bottom: 0; left: 0; right: 0; width: auto; max-width: none;
+        max-height: 46vh; border-radius: var(--radius) var(--radius) 0 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="map"></div>
+
+    <div id="mapHeader">
+      <h1>Lat/Lng Simplification</h1>
+      <span id="headerHint">地図をクリックしてマーカーを設置</span>
+    </div>
+
+    <div id="panel">
+      <div class="row">
+        <label for="decimalsSlider">丸める桁数（小数点以下）
+          <span class="decimals-val" id="decimalsVal">15（生の緯度経度）</span>
+        </label>
+        <input type="range" id="decimalsSlider" min="0" max="15" step="1" value="15">
+      </div>
+
+      <div class="row">
+        <label>マーカー位置</label>
+        <div class="coord-card raw" id="rawCard">
+          <span class="dot"></span><span class="label">生の緯度経度（青）</span><br>
+          <span class="empty">地図をクリックしてください</span>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="coord-card rounded" id="roundedCard">
+          <span class="dot"></span><span class="label">丸めた緯度経度（赤）</span><br>
+          <span class="empty">—</span>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>位置のズレ</label>
+        <div id="offsetBox">
+          <span class="empty" style="color:var(--ink-faint);">—</span>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="resetBtn" type="button">クリア</button>
+      </div>
+
+      <div class="row">
+        <label>参考：桁数ごとのおおよその精度</label>
+        <table class="precision-table" id="precisionTable"></table>
+      </div>
+
+      <div class="row hint">
+        緯度経度は<code>toFixed(n)</code>で四捨五入して丸めています。実際のズレは緯度によって多少前後します（経度1度あたりの距離は赤道から離れるほど小さくなるため）。住所はMapbox Geocoding API（reverse geocoding）で取得しています。
+      </div>
+    </div>
+  </div>
+
+  <!-- config -->
+  <script src="./config.js"></script>
+
+  <script>
+    mapboxgl.accessToken = CONFIG.MAPBOX_ACCESS_TOKEN;
+
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: CONFIG.MAP_STYLE,
+      center: [139.7671, 35.6812], // Tokyo
+      zoom: 12,
+      attributionControl: false,
+    });
+    map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
+    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+
+    // ── 状態 ──
+    let rawPoint = null;     // { lat, lng } 生の緯度経度（クリック時に確定・以降固定）
+    let rawMarker = null;
+    let roundedMarker = null;
+    const LINE_SOURCE_ID = 'offset-line';
+
+    // ── reverse geocoding（住所表示） ──
+    // "lat,lng" → 住所文字列(or null=見つからず) のキャッシュ。同じ座標に対する
+    // 再フェッチを避ける（スライダー操作中に同じ丸め値へ戻ってきた場合など）。
+    const addressCache = new Map();
+    let roundedFetchTimer = null; // スライダードラッグ中の連打を防ぐdebounce用
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    async function fetchAddress(lat, lng) {
+      const url = `https://api.mapbox.com/search/geocode/v6/reverse` +
+        `?longitude=${lng}&latitude=${lat}&language=ja` +
+        `&access_token=${CONFIG.MAPBOX_ACCESS_TOKEN}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`reverse geocode HTTP ${res.status}`);
+      const data = await res.json();
+      const feat = data.features && data.features[0];
+      return feat ? (feat.properties.full_address || feat.properties.name || null) : null;
+    }
+
+    // 住所欄の初期HTML（同期）。キャッシュ済みならそのまま表示、未取得なら「取得中」を
+    // 出しつつdata-key属性に座標キーを刻んでおく（後述ensureAddressの非同期結果が、
+    // 別の座標に切り替わった後の古い応答で上書きしないようにするための照合用）。
+    function addressPlaceholderHTML(lat, lng, elId) {
+      const key = `${lat},${lng}`;
+      if (addressCache.has(key)) {
+        const addr = addressCache.get(key);
+        return `<div class="address-line" id="${elId}" data-key="${key}">` +
+          `${addr ? escapeHtml(addr) : '住所が見つかりませんでした'}</div>`;
+      }
+      return `<div class="address-line loading" id="${elId}" data-key="${key}">住所を取得中…</div>`;
+    }
+
+    // 実際の非同期フェッチ。キャッシュ済みなら何もしない（placeholderで表示済み）。
+    function ensureAddress(lat, lng, elId) {
+      const key = `${lat},${lng}`;
+      if (addressCache.has(key)) return;
+      fetchAddress(lat, lng)
+        .then((addr) => {
+          addressCache.set(key, addr);
+          const el = document.getElementById(elId);
+          if (!el || el.dataset.key !== key) return; // 座標が切り替わった後の古い応答
+          el.classList.remove('loading');
+          el.textContent = addr || '住所が見つかりませんでした';
+        })
+        .catch((err) => {
+          console.error('[latlng_simplification] reverse geocode failed', err);
+          const el = document.getElementById(elId);
+          if (!el || el.dataset.key !== key) return;
+          el.classList.remove('loading');
+          el.classList.add('error');
+          el.textContent = '住所の取得に失敗しました';
+        });
+    }
+
+    function buildCardHTML({ label, coordText, lat, lng, addressElId }) {
+      return `<span class="dot"></span><span class="label">${label}</span><br>` +
+        `${coordText}` +
+        addressPlaceholderHTML(lat, lng, addressElId);
+    }
+
+    // ── 精度参考テーブル（赤道上の近似値。桁を1つ増やすごとに約1/10になる） ──
+    const PRECISION_APPROX_M = [
+      111320, 11132, 1113.2, 111.32, 11.132, 1.1132, 0.11132, 0.011132,
+      0.0011132, 0.00011132, 0.000011132, 0.0000011132, 0.00000011132,
+      0.000000011132, 0.0000000011132, 0.00000000011132,
+    ];
+
+    function formatMeters(m) {
+      if (m >= 1000) return (m / 1000).toFixed(m >= 10000 ? 0 : 1) + ' km';
+      if (m >= 1) return m.toFixed(m >= 100 ? 0 : 1) + ' m';
+      if (m >= 0.01) return (m * 100).toFixed(1) + ' cm';
+      return (m * 1000).toFixed(2) + ' mm';
+    }
+
+    function renderPrecisionTable(activeDecimals) {
+      const rows = PRECISION_APPROX_M.map((m, n) => {
+        const cls = n === activeDecimals ? ' class="current"' : '';
+        return `<tr${cls}><td>${n}</td><td>${formatMeters(m)}</td></tr>`;
+      }).join('');
+      document.getElementById('precisionTable').innerHTML =
+        `<tr><th>桁数</th><th>1単位あたりの目安</th></tr>${rows}`;
+    }
+
+    // ── 丸め処理 ──
+    // toFixed(n)で四捨五入した文字列をNumberに戻す。n=15は事実上「丸めない」に近い
+    // （float64の有効桁は約15〜17桁なので、これ以上は誤差の範囲でしか変わらない）。
+    function roundCoord(value, decimals) {
+      return Number(value.toFixed(decimals));
+    }
+
+    function haversineMeters(lat1, lng1, lat2, lng2) {
+      const R = 6371000;
+      const toRad = (d) => (d * Math.PI) / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLng = toRad(lng2 - lng1);
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function currentDecimals() {
+      return Number(document.getElementById('decimalsSlider').value);
+    }
+
+    function updateDecimalsLabel() {
+      const n = currentDecimals();
+      const el = document.getElementById('decimalsVal');
+      el.textContent = n === 15 ? `${n}（生の緯度経度）` : String(n);
+      el.classList.toggle('raw', n === 15);
+    }
+
+    function ensureLineLayer() {
+      if (map.getSource(LINE_SOURCE_ID)) return;
+      map.addSource(LINE_SOURCE_ID, {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      map.addLayer({
+        id: LINE_SOURCE_ID,
+        type: 'line',
+        source: LINE_SOURCE_ID,
+        paint: {
+          'line-color': '#888',
+          'line-width': 1.5,
+          'line-dasharray': [2, 2],
+        },
+      });
+    }
+
+    function updateLine(rounded) {
+      ensureLineLayer();
+      const src = map.getSource(LINE_SOURCE_ID);
+      if (!rawPoint || !rounded) {
+        src.setData({ type: 'FeatureCollection', features: [] });
+        return;
+      }
+      src.setData({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [rawPoint.lng, rawPoint.lat],
+              [rounded.lng, rounded.lat],
+            ],
+          },
+        }],
+      });
+    }
+
+    function render() {
+      const decimals = currentDecimals();
+      updateDecimalsLabel();
+      renderPrecisionTable(decimals);
+
+      if (!rawPoint) {
+        updateLine(null);
+        return;
+      }
+
+      const rounded = {
+        lat: roundCoord(rawPoint.lat, decimals),
+        lng: roundCoord(rawPoint.lng, decimals),
+      };
+
+      // 生の緯度経度の住所：クリックの都度1回だけ確定する値なので、debounceせず即フェッチ
+      // （キャッシュ済みなら addressPlaceholderHTML が同期的に表示するので二重フェッチはしない）。
+      document.getElementById('rawCard').innerHTML = buildCardHTML({
+        label: '生の緯度経度（青）',
+        coordText: `${rawPoint.lat.toFixed(15)}, ${rawPoint.lng.toFixed(15)}`,
+        lat: rawPoint.lat, lng: rawPoint.lng, addressElId: 'rawAddressLine',
+      });
+      ensureAddress(rawPoint.lat, rawPoint.lng, 'rawAddressLine');
+
+      // 丸めた緯度経度の住所：スライダードラッグ中は値が高頻度で変わるため、フェッチ自体は
+      // 350ms のdebounceをかける（座標/マーカー/ズレ距離の表示はここでは待たず即時反映する）。
+      document.getElementById('roundedCard').innerHTML = buildCardHTML({
+        label: `丸めた緯度経度（赤・小数点以下${decimals}桁）`,
+        coordText: `${rounded.lat.toFixed(decimals)}, ${rounded.lng.toFixed(decimals)}`,
+        lat: rounded.lat, lng: rounded.lng, addressElId: 'roundedAddressLine',
+      });
+      clearTimeout(roundedFetchTimer);
+      roundedFetchTimer = setTimeout(() => ensureAddress(rounded.lat, rounded.lng, 'roundedAddressLine'), 350);
+
+      const offsetM = haversineMeters(rawPoint.lat, rawPoint.lng, rounded.lat, rounded.lng);
+      document.getElementById('offsetBox').innerHTML =
+        offsetM === 0
+          ? `位置は一致しています（ズレなし）`
+          : `<span class="offset-m">${formatMeters(offsetM)}</span> ズレています`;
+
+      if (!rawMarker) {
+        rawMarker = new mapboxgl.Marker({ color: '#3887be' })
+          .setLngLat([rawPoint.lng, rawPoint.lat]).addTo(map);
+      } else {
+        rawMarker.setLngLat([rawPoint.lng, rawPoint.lat]);
+      }
+
+      if (!roundedMarker) {
+        roundedMarker = new mapboxgl.Marker({ color: '#c00' })
+          .setLngLat([rounded.lng, rounded.lat]).addTo(map);
+      } else {
+        roundedMarker.setLngLat([rounded.lng, rounded.lat]);
+      }
+
+      updateLine(rounded);
+    }
+
+    map.on('click', (e) => {
+      rawPoint = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+      render();
+    });
+
+    document.getElementById('decimalsSlider').addEventListener('input', render);
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      rawPoint = null;
+      clearTimeout(roundedFetchTimer);
+      if (rawMarker) { rawMarker.remove(); rawMarker = null; }
+      if (roundedMarker) { roundedMarker.remove(); roundedMarker = null; }
+      document.getElementById('rawCard').innerHTML =
+        `<span class="dot"></span><span class="label">生の緯度経度（青）</span><br>` +
+        `<span class="empty">地図をクリックしてください</span>`;
+      document.getElementById('roundedCard').innerHTML =
+        `<span class="dot"></span><span class="label">丸めた緯度経度（赤）</span><br>` +
+        `<span class="empty">—</span>`;
+      document.getElementById('offsetBox').innerHTML =
+        `<span class="empty" style="color:var(--ink-faint);">—</span>`;
+      updateLine(null);
+    });
+
+    // 初期表示（マーカー未設置でも精度テーブル/ラベルは出しておく）
+    updateDecimalsLabel();
+    renderPrecisionTable(currentDecimals());
+  </script>
+</body>
+</html>
