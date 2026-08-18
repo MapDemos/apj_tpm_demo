@@ -330,16 +330,16 @@
   <button id="csv-jump-btn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;">Go</button>
   <span class="header-label-sm" id="csv-jump-hint"></span>
   <span class="header-sep"></span>
-  <span class="header-label-sm">結果:</span>
+  <span class="header-label-sm">Result:</span>
   <select id="csv-filter-result">
     <option value="all">All</option>
     <option value="good">👍</option>
     <option value="bad">👎</option>
     <option value="not_hit_both">Not hit in both</option>
     <option value="unknown_query">Unknown query</option>
-    <option value="untested">未実施</option>
+    <option value="untested">Untested</option>
   </select>
-  <span class="header-label-sm">理由:</span>
+  <span class="header-label-sm">Reason:</span>
   <select id="csv-filter-reason"><option value="all">All</option></select>
   <input type="text" id="csv-filter-text" placeholder="🔍 フリーワード検索" />
   <button id="csv-filter-text-btn" class="btn btn-secondary" title="検索実行(Enter)" style="font-size:11px;padding:4px 6px;line-height:1;">⏎</button>
@@ -407,12 +407,12 @@
     </div>
   </div>
   <div id="feedback-panel">
-    <div class="pane-header">フィードバック</div>
+    <div class="pane-header">Feedback</div>
     <div id="feedback-tabs">
-      <button class="fb-tab active" id="fb-tab-manual" data-tab="manual">マニュアル</button>
-      <button class="fb-tab" id="fb-tab-ai" data-tab="ai">AIによる評価</button>
+      <button class="fb-tab active" id="fb-tab-manual" data-tab="manual">Manual</button>
+      <button class="fb-tab" id="fb-tab-ai" data-tab="ai">AI Evaluation</button>
     </div>
-    <div id="feedback-body"><p class="status-msg" style="padding:0;">検索を実行してください</p></div>
+    <div id="feedback-body"><p class="status-msg" style="padding:0;">Run a search first</p></div>
   </div>
 </div>
 
@@ -599,7 +599,7 @@
       </div>
       <table id="history-table">
         <thead>
-          <tr><th>日時</th><th>ファイル</th><th>行</th><th>クエリ</th><th>結果</th><th>理由</th></tr>
+          <tr><th>Time</th><th>File</th><th>Row</th><th>Query</th><th>Result</th><th>Reason</th></tr>
         </thead>
         <tbody id="history-tbody"></tbody>
       </table>
@@ -643,12 +643,12 @@
 <div class="dialog-overlay" id="ai-diag-settings-dialog">
   <div class="dialog" style="max-width:420px;">
     <div class="dialog-header">
-      <span class="dialog-title">⚙️ AIによる評価 設定</span>
+      <span class="dialog-title">⚙️ AI Evaluation Settings</span>
       <button class="dialog-close" data-close="ai-diag-settings-dialog">✕</button>
     </div>
     <div class="dialog-body">
       <div class="setup-field" style="margin-bottom:14px;">
-        <label>使用モデル</label>
+        <label>Model</label>
         <select id="ai-diag-model-select" style="padding:9px 12px;background:#2a2a2a;border:1px solid #444;border-radius:4px;color:#fff;font-size:12px;">
           <option value="haiku">Haiku 4.5</option>
           <option value="sonnet">Sonnet 5</option>
@@ -657,10 +657,10 @@
       <div class="setup-field" style="margin-bottom:14px;">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ccc;font-family:inherit;">
           <input type="checkbox" id="ai-diag-ignore-bbox-checkbox" />
-          bboxを無視して評価する(Mapbox検索をbbox無しでやり直してから評価)
+          Ignore bbox when evaluating (re-run Mapbox search without bbox first)
         </label>
       </div>
-      <button id="ai-diag-settings-save" class="btn btn-primary" style="width:100%;padding:9px;">保存</button>
+      <button id="ai-diag-settings-save" class="btn btn-primary" style="width:100%;padding:9px;">Save</button>
     </div>
   </div>
 </div>
@@ -1136,7 +1136,7 @@ function renderManualFeedbackPanel() {
     document.getElementById('fb-unknown-btn').addEventListener('click', () => submitFeedback(UNKNOWN_QUERY, null));
   } else if (feedbackPanelMode === 'good_reason') {
     body.innerHTML = `
-      <button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← 戻る</button>
+      <button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← Back</button>
       <div class="fb-reason-list">
         ${GOOD_REASONS.map(label => `<button class="btn btn-secondary fb-reason-btn" data-reason="${esc(label)}">${esc(label)}</button>`).join('')}
       </div>`;
@@ -1145,7 +1145,7 @@ function renderManualFeedbackPanel() {
       btn.addEventListener('click', () => submitFeedback('good', btn.dataset.reason));
     });
   } else if (feedbackPanelMode === 'reason') {
-    body.innerHTML = `<button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← 戻る</button>` + FEEDBACK_REASONS.map(group => `
+    body.innerHTML = `<button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← Back</button>` + FEEDBACK_REASONS.map(group => `
       <div class="fb-reason-group">${esc(group.category)}</div>
       <div class="fb-reason-list">
         ${group.items.map(label => `<button class="btn btn-secondary fb-reason-btn" data-reason="${esc(label)}">${esc(label)}</button>`).join('')}
@@ -1155,7 +1155,7 @@ function renderManualFeedbackPanel() {
       btn.addEventListener('click', () => submitFeedback('bad', btn.dataset.reason));
     });
   } else {
-    body.innerHTML = `<p class="status-msg" style="padding:0;">検索を実行してください</p>`;
+    body.innerHTML = `<p class="status-msg" style="padding:0;">Run a search first</p>`;
   }
 }
 
@@ -1336,15 +1336,15 @@ function formatAiDiagUsage(usage) {
   if (usage.cacheReadInputTokens)     parts.push(`cache read ${usage.cacheReadInputTokens}`);
   if (usage.cacheCreationInputTokens) parts.push(`cache write ${usage.cacheCreationInputTokens}`);
   if (usage.outputTokens != null) parts.push(`out ${usage.outputTokens}`);
-  const tokens = parts.length ? `${parts.join(' / ')} tok` : 'トークン数不明';
-  const cost = usage.costJpy != null ? ` / 概算¥${usage.costJpy < 0.01 ? '<0.01' : usage.costJpy.toFixed(2)}` : '';
+  const tokens = parts.length ? `${parts.join(' / ')} tok` : 'token count unknown';
+  const cost = usage.costJpy != null ? ` / ≈¥${usage.costJpy < 0.01 ? '<0.01' : usage.costJpy.toFixed(2)}` : '';
   return `${modelLabel} / ${tokens}${cost}`;
 }
 
 function renderAiDiagPanel() {
   const body = document.getElementById('feedback-body');
   if (!feedbackContext) {
-    body.innerHTML = `<p class="status-msg" style="padding:0;">検索を実行してください</p>`;
+    body.innerHTML = `<p class="status-msg" style="padding:0;">Run a search first</p>`;
     return;
   }
   if (aiDiagState === 'analyzing') {
@@ -1354,8 +1354,8 @@ function renderAiDiagPanel() {
   if (aiDiagState === 'error') {
     body.innerHTML = `
       <div class="ai-diag-toolbar">
-        <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ 設定</button>
-        <button class="btn btn-primary" id="ai-diag-run-btn">▶ 評価を実行</button>
+        <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ Settings</button>
+        <button class="btn btn-primary" id="ai-diag-run-btn">▶ Run Evaluation</button>
       </div>
       <p class="status-msg status-error" style="padding:0;">${esc(aiDiagError)}</p>`;
     wireAiDiagToolbar();
@@ -1369,12 +1369,12 @@ function renderAiDiagPanel() {
     const catCls = CAT_CLASSES[p.category] ?? '';
     body.innerHTML = `
       <div class="ai-diag-toolbar">
-        <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ 設定</button>
+        <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ Settings</button>
       </div>
       <div class="ai-diag-card">
         <div class="ai-diag-card-cat ${catCls}">${esc(catLabel)}</div>
-        ${p.category === 'good' && p.rank ? `<div class="ai-diag-card-tag">${p.rank}位で一致</div>` : ''}
-        ${p.category === 'bad' && p.badTag ? `<div class="ai-diag-card-tag">タグ: ${esc(p.badTag)}</div>` : ''}
+        ${p.category === 'good' && p.rank ? `<div class="ai-diag-card-tag">Matched at rank ${p.rank}</div>` : ''}
+        ${p.category === 'bad' && p.badTag ? `<div class="ai-diag-card-tag">Tag: ${esc(p.badTag)}</div>` : ''}
         <div class="ai-diag-card-reason">${esc(p.reasoning || '')}</div>
         <div class="ai-diag-card-usage">${esc(formatAiDiagUsage(p.usage))}</div>
         <div class="ai-diag-card-actions">
@@ -1390,11 +1390,11 @@ function renderAiDiagPanel() {
   if (aiDiagState === 'decline_input' && aiDiagProposal) {
     body.innerHTML = `
       <div class="ai-diag-card">
-        <div class="ai-diag-card-cat">AI提案をDecline</div>
-        <textarea id="ai-diag-decline-reason" placeholder="Declineの理由を自由入力"></textarea>
+        <div class="ai-diag-card-cat">Decline AI Suggestion</div>
+        <textarea id="ai-diag-decline-reason" placeholder="Enter reason for declining"></textarea>
         <div class="ai-diag-card-actions">
-          <button class="btn btn-secondary" id="ai-diag-decline-submit-btn">送信</button>
-          <button class="btn btn-secondary" id="ai-diag-decline-cancel-btn">キャンセル</button>
+          <button class="btn btn-secondary" id="ai-diag-decline-submit-btn">Submit</button>
+          <button class="btn btn-secondary" id="ai-diag-decline-cancel-btn">Cancel</button>
         </div>
       </div>`;
     document.getElementById('ai-diag-decline-submit-btn').addEventListener('click', () => {
@@ -1407,8 +1407,8 @@ function renderAiDiagPanel() {
   // idle
   body.innerHTML = `
     <div class="ai-diag-toolbar">
-      <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ 設定</button>
-      <button class="btn btn-primary" id="ai-diag-run-btn">▶ 評価を実行</button>
+      <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ Settings</button>
+      <button class="btn btn-primary" id="ai-diag-run-btn">▶ Run Evaluation</button>
     </div>`;
   wireAiDiagToolbar();
 }
@@ -1446,18 +1446,18 @@ async function runAiDiagnosis() {
       usage.cacheReadInputTokens     += data?.usage?.cache_read_input_tokens     ?? 0;
 
       const match = raw.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error(`AIの応答がJSON形式ではありませんでした(ターン${turn + 1})`);
+      if (!match) throw new Error(`AI response was not valid JSON (turn ${turn + 1})`);
       parsed = JSON.parse(match[0]);
       messages.push({ role: 'assistant', content: raw });
 
       if (parsed.category != null) break; // 判定確定。以降のターンは送らない
       if (turn === turnPayloads.length - 1) {
         // 最終ターン(Google候補まで見た)でも未確定 = プロンプト不備のフォールバック
-        parsed = { category: 'not_hit_both', reasoning: '(AIが最終ターンまでに判定を確定できませんでした)' };
+        parsed = { category: 'not_hit_both', reasoning: '(AI could not reach a final verdict by the last turn)' };
       }
     }
 
-    if (!['good', 'bad', 'not_hit_both', 'unknown_query'].includes(parsed.category)) throw new Error('AIのcategoryが不正です');
+    if (!['good', 'bad', 'not_hit_both', 'unknown_query'].includes(parsed.category)) throw new Error('AI returned an invalid category');
     usage.model = modelKey;
     usage.costJpy = estimateAiDiagCostJpy(modelKey, usage);
     parsed.usage = usage;
