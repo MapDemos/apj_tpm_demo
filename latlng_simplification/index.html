@@ -76,6 +76,19 @@
     .row:last-child { margin-bottom: 0; }
     .row label { display: block; font-size: 12px; color: var(--ink-soft); margin-bottom: 5px; font-weight: 600; }
 
+    /* 丸め方式トグル（四捨五入/切り捨て）：geonator_liteの.settings-modesと同じピル型 */
+    .mode-toggle {
+      display: inline-flex; gap: 2px; padding: 3px;
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    }
+    .mode-toggle-btn {
+      background: none; border: none; padding: 5px 12px; cursor: pointer;
+      font-size: 12px; font-weight: 600; color: var(--ink-soft); border-radius: 4px;
+    }
+    .mode-toggle-btn:hover { color: var(--ink); }
+    .mode-toggle-btn.active { background: var(--accent); color: #fff; }
+    .mode-toggle-btn.active:hover { background: var(--accent-dark); }
+
     input[type="range"] { width: 100%; accent-color: var(--accent); }
     .decimals-val {
       font-size: 13px; font-weight: 700; color: var(--accent-dark);
@@ -154,6 +167,14 @@
 
     <div id="panel">
       <div class="row">
+        <label>丸め方式</label>
+        <div class="mode-toggle" id="roundModeToggle">
+          <button type="button" class="mode-toggle-btn active" data-mode="round">四捨五入</button>
+          <button type="button" class="mode-toggle-btn" data-mode="truncate">切り捨て</button>
+        </div>
+      </div>
+
+      <div class="row">
         <label for="decimalsSlider">丸める桁数（小数点以下）
           <span class="decimals-val" id="decimalsVal">15（生の緯度経度）</span>
         </label>
@@ -192,7 +213,7 @@
       </div>
 
       <div class="row hint">
-        緯度経度は<code>toFixed(n)</code>で四捨五入して丸めています。実際のズレは緯度によって多少前後します（経度1度あたりの距離は赤道から離れるほど小さくなるため）。住所はMapbox Geocoding API（reverse geocoding）で取得しています。
+        「四捨五入」は誤差が最大でその桁の単位の半分・向きもランダムですが、「切り捨て」は誤差が最大で単位まるまる（四捨五入の最大2倍）になり、常に同じ方向（0に近づく方向）へズレます。同じ桁数でも、クリックした座標の下位桁次第でズレ幅は毎回変わります。住所はMapbox Geocoding API（reverse geocoding）で取得しています。
       </div>
     </div>
   </div>
@@ -307,10 +328,31 @@
     }
 
     // ── 丸め処理 ──
+    let roundMode = 'round'; // 'round'(四捨五入) | 'truncate'(切り捨て)
+
     // toFixed(n)で四捨五入した文字列をNumberに戻す。n=15は事実上「丸めない」に近い
     // （float64の有効桁は約15〜17桁なので、これ以上は誤差の範囲でしか変わらない）。
     function roundCoord(value, decimals) {
       return Number(value.toFixed(decimals));
+    }
+
+    // 四捨五入せず、指定桁より下をただ切り落とす（0方向に丸める＝truncate）。
+    // Number.toFixedは四捨五入してしまうので使えず、value自体の文字列表現（JSの
+    // Number→String変換。lat/lngの範囲では指数表記にならない）を桁位置で直接切る。
+    // 乗算/除算(value*10**n)による方式は10**15付近でfloat64の丸め誤差が乗ってしまうため避けている。
+    function truncateCoord(value, decimals) {
+      const sign = value < 0 ? '-' : '';
+      const absStr = Math.abs(value).toString();
+      const dotIdx = absStr.indexOf('.');
+      if (dotIdx === -1) return value; // 整数（小数部なし）はそのまま
+      if (decimals <= 0) return Number(sign + absStr.slice(0, dotIdx));
+      const intPart = absStr.slice(0, dotIdx);
+      const fracPart = absStr.slice(dotIdx + 1, dotIdx + 1 + decimals);
+      return Number(`${sign}${intPart}.${fracPart}`);
+    }
+
+    function simplifyCoord(value, decimals, mode) {
+      return mode === 'truncate' ? truncateCoord(value, decimals) : roundCoord(value, decimals);
     }
 
     function haversineMeters(lat1, lng1, lat2, lng2) {
@@ -386,9 +428,10 @@
       }
 
       const rounded = {
-        lat: roundCoord(rawPoint.lat, decimals),
-        lng: roundCoord(rawPoint.lng, decimals),
+        lat: simplifyCoord(rawPoint.lat, decimals, roundMode),
+        lng: simplifyCoord(rawPoint.lng, decimals, roundMode),
       };
+      const modeLabel = roundMode === 'truncate' ? '切り捨て' : '四捨五入';
 
       // 生の緯度経度の住所：クリックの都度1回だけ確定する値なので、debounceせず即フェッチ
       // （キャッシュ済みなら addressPlaceholderHTML が同期的に表示するので二重フェッチはしない）。
@@ -402,7 +445,7 @@
       // 丸めた緯度経度の住所：スライダードラッグ中は値が高頻度で変わるため、フェッチ自体は
       // 350ms のdebounceをかける（座標/マーカー/ズレ距離の表示はここでは待たず即時反映する）。
       document.getElementById('roundedCard').innerHTML = buildCardHTML({
-        label: `丸めた緯度経度（赤・小数点以下${decimals}桁）`,
+        label: `丸めた緯度経度（赤・${modeLabel}・小数点以下${decimals}桁）`,
         coordText: `${rounded.lat.toFixed(decimals)}, ${rounded.lng.toFixed(decimals)}`,
         lat: rounded.lat, lng: rounded.lng, addressElId: 'roundedAddressLine',
       });
@@ -438,6 +481,16 @@
     });
 
     document.getElementById('decimalsSlider').addEventListener('input', render);
+
+    document.querySelectorAll('#roundModeToggle .mode-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.mode === roundMode) return;
+        roundMode = btn.dataset.mode;
+        document.querySelectorAll('#roundModeToggle .mode-toggle-btn')
+          .forEach((b) => b.classList.toggle('active', b === btn));
+        render();
+      });
+    });
 
     document.getElementById('resetBtn').addEventListener('click', () => {
       rawPoint = null;
