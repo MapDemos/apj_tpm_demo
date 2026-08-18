@@ -872,7 +872,7 @@ const MAPBOX_FIELDS = [
   { path:'types',  label:'types', widget:'multiselect', options: MAPBOX_TYPES },
   { path:'poi_category', label:'poi_category', widget:'text-array' },
   { path:'poi_category_exclusion', label:'poi_category_exclusion', widget:'text-array' },
-  { path:'limit', label:'limit (≤10)', widget:'number', min:1, max:10 },
+  { path:'limit', label:'limit (≤30, private beta)', widget:'number', min:1, max:30 },
   { path:'language', label:'language', widget:'datalist', options: LANGUAGE_CODES },
   { path:'country',  label:'country',  widget:'datalist', options: COUNTRY_CODES },
   { path:'near', label:'near', widget:'text' },
@@ -1226,21 +1226,40 @@ let aiDiagError    = '';
 const AI_DIAG_SYSTEM_PROMPT = `あなたはタクシー配車業務等で使われる地図検索(Mapbox Search Box API)の品質診断アシスタントです。
 ユーザーが入力した検索クエリに対して、Mapboxが適切な結果(POIや住所)を返せているかを、Google Places側の結果も参考にしながら判定します。
 
+この対話は最大3ターンに分けて情報が送られます(判定に必要な分だけ確認するため、毎回全情報を渡すわけではありません):
+- 1ターン目: {"q": "検索クエリ文字列"} のみ
+- 2ターン目(1ターン目で判定が確定しなかった場合のみ送られる): {"prox": "緯度,経度"|null, "bbox": "minLng,minLat,maxLng,maxLat"|null, "bboxIgnored": boolean, "mb": ["name|matchStatus|distance", ...]}
+  - prox: 検索の中心地点(MapboxのproximityとGoogleのlocationは常に同一なので1つにまとめてある)
+  - bbox: Mapbox検索の絞り込み範囲。bboxIgnoredがtrueの場合はこの制約を外して再検索した候補になっている
+  - mb: Mapbox候補。配列の並び順=検索結果の順位(先頭が1位)
+- 3ターン目(2ターン目でも判定が確定しなかった場合のみ送られる): {"gg": ["name|matchStatus|distance", ...]} (Google候補。mbと同じフォーマット・並び順=順位)
+
+mb/ggの各要素の"name|matchStatus|distance"は:
+- name: 候補の名称
+- matchStatus: both(name/位置ともMapbox・Google間で一致候補あり) | name(名前のみ一致候補あり) | address(位置のみ近似) | none(一致候補なし) ※これはクエリとの一致ではなく、Mapbox候補とGoogle候補を突き合わせた結果なので注意
+- distance: proxからの距離。mまたはkm表記(例:320m, 4.2km)。空文字なら不明
+
+出力ルール(重要): その時点の情報だけでは判定を確定できない場合、次のターンの情報が必要という意味で必ず次のJSONのみを出力してください: {"category": null}
+判定を確定できる場合は、下記の判定手順に従い、最終形式のJSONを出力してください。
+
 判定手順(この順番を厳守):
-0. まずクエリ自体を見て、そもそも何を探そうとしているのか判断できるか確認する。
-   - クエリが壊れている(文字が欠落・意味不明な断片等)、または曖昧すぎてPOI名/住所/カテゴリのどれを意図しているか特定できない場合は category="unknown_query" とし、他の判定は行わない
-1. クエリの意図が読み取れる場合、Mapbox候補の中に妥当な一致がないか確認する。
-   - 一致候補があり、それが1位(最初の候補)なら category="good", goodReason="Perfect (Correct POI at top)"
-   - 一致候補はあるが1位ではないなら category="good", goodReason="Almost! (Correct POI but not ranked at top)"、rankにその順位(1始まり)を入れる
-2. Mapbox候補に妥当な一致が無い場合、Google候補の中に妥当な一致がないか確認する。
-   - Google側にも一致があるなら category="bad" とし、badTagに以下のタグ一覧から最も近いものを1つだけ選ぶ:
+0. 1ターン目({q}のみ)の時点で、クエリ自体を見て、そもそも何を探そうとしているのか判断できるか確認する。
+   - クエリが壊れている(文字が欠落・意味不明な断片等)、または曖昧すぎてPOI名/住所/カテゴリのどれを意図しているか特定できない場合は category="unknown_query" として確定する
+   - それ以外の場合は、まだmb(Mapbox候補)を見ていないので {"category": null} を返す(2ターン目へ)
+1. 2ターン目({mb}が見える状態)で、mbの中に妥当な一致がないか確認する。
+   - 注意(同名候補が複数ある場合): mb内に名前が(ほぼ)同一の候補が複数ある場合、配列の順位だけで判断しないこと。順位が上位にあるという理由だけで、それを正解と決めつけてはいけない。そのうちdistanceが最も近い候補を実際の正解候補として優先し、以下の判定・rankの値は、その距離が近い候補の配列上の順位を使うこと(同名異place、例えば同名の駅・店舗が全国に複数存在するケースで、遠方の候補が偶然上位に来ることがあるため)
+   - 一致候補があり、それが1位(配列の先頭。同名候補が複数ある場合は上記ルールで選んだ候補の順位)なら category="good", goodReason="Perfect (Correct POI at top)" として確定する
+   - 一致候補はあるが1位ではないなら category="good", goodReason="Almost! (Correct POI but not ranked at top)"、rankにその順位(配列のindex+1、1始まり)を入れて確定する
+   - 明確な一致が無ければ、まだgg(Google候補)を見ていないので {"category": null} を返す(3ターン目へ)
+2. 3ターン目({gg}も見える状態)で、ggの中に妥当な一致がないか確認する。
+   - 一致候補が見つかった場合、まず次のレスキュー判定を行う: そのGoogle候補がggの1位(配列の先頭)であり、かつ2ターン目のmbの中にその候補とmatchStatus=both または name の候補が存在する場合、それはMapbox・Google双方のデータに実在し、Googleが自信を持って1位に選んでいる証拠なので、Bad判定にはせず、該当するmb候補の順位に応じて category="good"(1位なら goodReason="Perfect (Correct POI at top)"、それ以外は goodReason="Almost! (Correct POI but not ranked at top)" とrank)として確定する
+   - 上記レスキューに該当しない一致がggにあるなら category="bad" とし、badTagに以下のタグ一覧から最も近いものを1つだけ選んで確定する:
      ${FEEDBACK_REASONS.flatMap(g => g.items).join(', ')}
-   - Google側にも一致が無いなら category="not_hit_both"
+   - ggにも一致が無いなら category="not_hit_both" として確定する
 
-各候補には一致ステータス(both=name/住所とも一致候補あり, name=名前のみ一致候補あり, address=位置のみ近似, none=一致候補なし)と、
-検索の中心地点(proximity)から3km以内かどうかのPフラグが付与されています。これらはヒントとして使ってよいですが、最終判断はクエリの意味とcandidateのname/addressから行ってください。
+matchStatus/distanceはヒントとして使ってよいですが、最終判断はクエリの意味とcandidateのnameから行ってください。Google側の一致判定もMapbox側と同じ厳しさで行い、こじつけ的な一致(読みが違う、部分一致のみ等)は有効な一致とみなさないでください。
 
-必ず以下のJSON形式のみで出力してください。説明文やコードブロックのマークダウンは付けないでください。
+判定を確定する時は、必ず以下のJSON形式のみで出力してください。説明文やコードブロックのマークダウンは付けないでください。
 {"category": "good" | "bad" | "not_hit_both" | "unknown_query", "goodReason": string | null, "badTag": string | null, "rank": number | null, "reasoning": "日本語で1〜2文の短い理由"}`;
 
 // bbox無視トグルON時、診断専用にMapboxをbbox無しで再検索する(画面表示中のmapboxRawResultsは変更しない)
@@ -1261,8 +1280,12 @@ async function searchMapboxIgnoringBbox(query) {
   }));
 }
 
-// AIに渡す情報を「クエリ・リクエストパラメータ・比較結果ステータス・name/address」だけに絞って組み立てる
-async function buildAiDiagnosisPayload(query) {
+// AIとの対話を3ターンに分けるためのペイロードを組み立てる。
+// 1ターン目=query, 2ターン目=Mapbox候補, 3ターン目=Google候補。判定が早いターンで確定すれば、
+// 後続ターン(特にGoogle候補)は呼び出し側がAPIに送らないので、その分のinトークンが丸ごと発生しない。
+// 各ターンとも「クエリ・proximity・比較結果ステータス・name・距離」だけに絞る(住所・生座標は渡さない)。
+// トークン節約のため、候補はJSON object配列ではなく"name|matchStatus|distance"のパイプ区切り文字列配列にする
+async function buildAiDiagTurnPayloads(query) {
   let mList = Array.isArray(mapboxRawResults) ? mapboxRawResults : [];
   let bboxIgnoredForDiagnosis = false;
   if (aiDiagSettings.ignoreBbox && Array.isArray(state.mapboxParams.bbox) && state.mapboxParams.bbox.length === 4) {
@@ -1275,33 +1298,31 @@ async function buildAiDiagnosisPayload(query) {
   const mName = r => r.name, mCoord = r => ({ lat: r.coordinates?.latitude, lng: r.coordinates?.longitude });
   const treatNameAsAddress = isCurrentQueryAddressType();
 
+  // matchStatusはMapbox↔Google間の突き合わせ結果であり、両リストが無いと計算できないため、
+  // ここで両方まとめて計算しておく(ターンを分けて"送る"のとは別の話)
   const mCats = computeMatchCategories(mList, mName, mCoord, gList, gName, gCoord, treatNameAsAddress);
   const gCats = computeMatchCategories(gList, gName, gCoord, mList, mName, mCoord, treatNameAsAddress);
 
-  const gCenter = state.googleParams.location;
-  const mCenter = state.mapboxParams.proximity;
-  const near = (lat, lng, cLat, cLng) => !!nearProximityInfo(cLat, cLng, lat, lng).badge;
+  // MapboxのproximityとGoogleのlocationは常に同一の値を使っている前提のため、1つに統合する
+  const center = state.mapboxParams.proximity ?? state.googleParams.location ?? null;
+  const proxStr = (center?.lat != null && center?.lng != null) ? `${center.lat},${center.lng}` : null;
+  const distanceOf = (lat, lng) => formatDistanceCompact(nearProximityInfo(center?.lat, center?.lng, lat, lng).km) ?? '';
 
-  const mapboxCandidates = mList.map((r, i) => ({
-    rank: i + 1, name: r.name ?? null, address: r.full_address ?? null,
-    matchStatus: mCats[i], near3km: near(r.coordinates?.latitude, r.coordinates?.longitude, mCenter?.lat, mCenter?.lng),
-  }));
-  const googleCandidates = gList.map((r, i) => ({
-    rank: i + 1, name: r.name ?? null, address: r.formatted_address ?? null,
-    matchStatus: gCats[i], near3km: near(r.geometry?.location?.lat, r.geometry?.location?.lng, gCenter?.lat, gCenter?.lng),
-  }));
+  const toRow = (name, matchStatus, distance) => [name ?? '', matchStatus, distance].join('|');
+  const mapboxRows = mList.map((r, i) => toRow(r.name, mCats[i], distanceOf(r.coordinates?.latitude, r.coordinates?.longitude)));
+  const googleRows = gList.map((r, i) => toRow(r.name, gCats[i], distanceOf(r.geometry?.location?.lat, r.geometry?.location?.lng)));
 
-  return {
-    query,
-    requestParams: {
-      mapboxProximity: state.mapboxParams.proximity ?? null,
-      mapboxBbox: bboxIgnoredForDiagnosis ? null : (state.mapboxParams.bbox ?? null),
-      bboxIgnoredForDiagnosis,
-      googleLocation: state.googleParams.location ?? null,
+  return [
+    { q: query },
+    {
+      prox: proxStr,
+      bbox: (!bboxIgnoredForDiagnosis && Array.isArray(state.mapboxParams.bbox) && state.mapboxParams.bbox.length === 4)
+        ? state.mapboxParams.bbox.join(',') : null,
+      bboxIgnored: bboxIgnoredForDiagnosis,
+      mb: mapboxRows,
     },
-    mapboxCandidates,
-    googleCandidates,
-  };
+    { gg: googleRows },
+  ];
 }
 
 function formatAiDiagUsage(usage) {
@@ -1399,26 +1420,43 @@ async function runAiDiagnosis() {
   aiDiagState = 'analyzing';
   renderAiDiagPanel();
   try {
-    const payload = await buildAiDiagnosisPayload(feedbackContext.query);
+    // ターン1=query, ターン2=Mapbox候補, ターン3=Google候補。判定が確定したターンで打ち切るので、
+    // 例えばターン2で「Good」に決着すればGoogle候補は一度もAPIに送信されない
+    const turnPayloads = await buildAiDiagTurnPayloads(feedbackContext.query);
     const modelKey = aiDiagSettings.model;
     const modelId = AI_DIAG_MODEL_IDS[modelKey] || AI_DIAG_MODEL_IDS.haiku;
     // 判定手順+タグ一覧は毎回完全に同一の文字列なので、system側だけPrompt Cachingの対象にする
     // (Mapbox/Google候補等が入るuserメッセージはクエリごとに変わるためキャッシュ対象外)
     const systemBlocks = [{ type: 'text', text: AI_DIAG_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
-    const data = await callClaudeRaw(systemBlocks, [{ role: 'user', content: JSON.stringify(payload) }], 500, modelId);
-    const raw = extractClaudeText(data);
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('AIの応答がJSON形式ではありませんでした');
-    const parsed = JSON.parse(match[0]);
+
+    const messages = [];
+    const usage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+    let parsed = null;
+
+    for (let turn = 0; turn < turnPayloads.length; turn++) {
+      messages.push({ role: 'user', content: JSON.stringify(turnPayloads[turn]) });
+      const data = await callClaudeRaw(systemBlocks, messages, 500, modelId);
+      const raw = extractClaudeText(data);
+      usage.inputTokens              += data?.usage?.input_tokens               ?? 0;
+      usage.outputTokens             += data?.usage?.output_tokens              ?? 0;
+      usage.cacheCreationInputTokens += data?.usage?.cache_creation_input_tokens ?? 0;
+      usage.cacheReadInputTokens     += data?.usage?.cache_read_input_tokens     ?? 0;
+
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error(`AIの応答がJSON形式ではありませんでした(ターン${turn + 1})`);
+      parsed = JSON.parse(match[0]);
+      messages.push({ role: 'assistant', content: raw });
+
+      if (parsed.category != null) break; // 判定確定。以降のターンは送らない
+      if (turn === turnPayloads.length - 1) {
+        // 最終ターン(Google候補まで見た)でも未確定 = プロンプト不備のフォールバック
+        parsed = { category: 'not_hit_both', reasoning: '(AIが最終ターンまでに判定を確定できませんでした)' };
+      }
+    }
+
     if (!['good', 'bad', 'not_hit_both', 'unknown_query'].includes(parsed.category)) throw new Error('AIのcategoryが不正です');
-    const usage = {
-      model: modelKey,
-      inputTokens:             data?.usage?.input_tokens              ?? null,
-      outputTokens:            data?.usage?.output_tokens             ?? null,
-      cacheCreationInputTokens: data?.usage?.cache_creation_input_tokens ?? null,
-      cacheReadInputTokens:     data?.usage?.cache_read_input_tokens     ?? null,
-    };
-    usage.costJpy = (usage.inputTokens != null && usage.outputTokens != null) ? estimateAiDiagCostJpy(modelKey, usage) : null;
+    usage.model = modelKey;
+    usage.costJpy = estimateAiDiagCostJpy(modelKey, usage);
     parsed.usage = usage;
     aiDiagProposal = parsed;
     aiDiagState = 'proposal';
@@ -1838,15 +1876,20 @@ function haversineDistanceKm(lat1, lng1, lat2, lng2) {
   const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
   return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
-const NEAR_PROXIMITY_KM = 3;
-// proximity(Mapbox)/location(Google)からresultまでの距離を判定し、NEAR_PROXIMITY_KM以内なら
-// { badge: 🅿️マークのHTML, tooltip: 吹き出しに足すテキスト } を返す(未設定/範囲外はどちらも空文字)
+const NEAR_PROXIMITY_KM = 5;
+// proximity(Mapbox)/location(Google)からresultまでの距離を常に計算し、
+// { badge: 🅿️マークのHTML(NEAR_PROXIMITY_KM以内の時だけ), tooltip: 吹き出し用テキスト(距離が分かれば常に付く), km: 距離(km、不明ならnull) } を返す
 function nearProximityInfo(centerLat, centerLng, resultLat, resultLng) {
-  if (centerLat == null || centerLng == null || resultLat == null || resultLng == null) return { badge: '', tooltip: '' };
-  if (!isFinite(centerLat) || !isFinite(centerLng) || !isFinite(resultLat) || !isFinite(resultLng)) return { badge: '', tooltip: '' };
+  if (centerLat == null || centerLng == null || resultLat == null || resultLng == null) return { badge: '', tooltip: '', km: null };
+  if (!isFinite(centerLat) || !isFinite(centerLng) || !isFinite(resultLat) || !isFinite(resultLng)) return { badge: '', tooltip: '', km: null };
   const km = haversineDistanceKm(centerLat, centerLng, resultLat, resultLng);
-  if (km > NEAR_PROXIMITY_KM) return { badge: '', tooltip: '' };
-  return { badge: `<span class="proximity-badge">P</span>`, tooltip: `proximity/locationから${km.toFixed(1)}km(${NEAR_PROXIMITY_KM}km以内)` };
+  if (km > NEAR_PROXIMITY_KM) return { badge: '', tooltip: `proximity/locationから${km.toFixed(1)}km(${NEAR_PROXIMITY_KM}km超)`, km };
+  return { badge: `<span class="proximity-badge">P</span>`, tooltip: `proximity/locationから${km.toFixed(1)}km(${NEAR_PROXIMITY_KM}km以内)`, km };
+}
+// AIに渡す用の距離コンパクト表記(1km未満はm、以上はkm小数点1桁)
+function formatDistanceCompact(km) {
+  if (km == null || !isFinite(km)) return null;
+  return km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
 }
 
 function renderGoogleResults(data) {
@@ -2010,16 +2053,19 @@ function namesMatch(a, b, treatAsAddress) {
   return na === nb;
 }
 
-// 緯度経度を小数点3桁(約100m格子)に丸めて一致するかどうかで「同じ場所」を判定する。
+// 2点間の実距離(haversine)がCOORD_MATCH_THRESHOLD_KM以内かどうかで「同じ場所」を判定する。
 // (住所文字列は「号」の有無などプロバイダ間のデータ詳細度の差で不一致になりやすいため、
-// address欄の一致判定は文字列比較ではなく座標ベースにしている)
+// address欄の一致判定は文字列比較ではなく座標ベースにしている。
+// 以前は小数点3桁=約100m格子への丸め一致だったが、格子境界をまたぐと近接点でも不一致になる問題があったため、
+// 実距離ベース(50m以内)に変更)
+const COORD_MATCH_THRESHOLD_KM = 0.05;
 function coordinatesMatch(a, b) {
   if (!a || !b) return false;
   const { lat: latA, lng: lngA } = a;
   const { lat: latB, lng: lngB } = b;
   if (latA == null || lngA == null || latB == null || lngB == null) return false;
   if (!Number.isFinite(latA) || !Number.isFinite(lngA) || !Number.isFinite(latB) || !Number.isFinite(lngB)) return false;
-  return latA.toFixed(3) === latB.toFixed(3) && lngA.toFixed(3) === lngB.toFixed(3);
+  return haversineDistanceKm(latA, lngA, latB, lngB) <= COORD_MATCH_THRESHOLD_KM;
 }
 
 // listA の各要素について、listB内のどれかとname/座標が一致するかを判定し 'none'|'name'|'address'|'both' を返す
