@@ -106,8 +106,8 @@
     .resizer:hover, .resizer.dragging { background: #2563eb; }
     .resizer::after { content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 40px; height: 2px; background: #555; border-radius: 2px; }
 
-    #map-row { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; min-height: 0; flex-shrink: 0; }
-    #results-row { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; min-height: 0; flex: 1; }
+    #map-row { display: grid; grid-template-columns: 2fr 3fr; overflow: hidden; min-height: 0; flex-shrink: 0; }
+    #results-row { display: grid; grid-template-columns: 2fr 3fr; overflow: hidden; min-height: 0; flex: 1; }
     .pane-half { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
     .pane-half:first-child { border-right: 1px solid #333; }
 
@@ -133,16 +133,32 @@
     .ai-diag-card-cat { font-weight: bold; font-size: 13px; margin-bottom: 6px; }
     .ai-diag-card-cat.cat-good { color: #4ade80; }
     .ai-diag-card-cat.cat-bad { color: #f87171; }
-    .ai-diag-card-cat.cat-nothit { color: #999; }
-    .ai-diag-card-cat.cat-unknown { color: #fbbf24; }
+    .ai-diag-card-cat.cat-unclear { color: #fbbf24; }
     .ai-diag-card-tag { color: #ccc; margin-bottom: 6px; }
     .ai-diag-card-reason { color: #999; line-height: 1.5; margin-bottom: 10px; white-space: pre-wrap; }
     .ai-diag-card-usage { color: #666; font-size: 10px; margin-bottom: 10px; }
     .ai-diag-card-actions { display: flex; gap: 8px; }
     .ai-diag-card-actions .btn { flex: 1; font-size: 11px; padding: 7px 0; }
+
+    .ask-ai-processing { color: #888; font-size: 12px; padding: 20px 0; text-align: center; }
+    .ask-ai-error { color: #f87171; font-size: 12px; }
+    .ask-ai-checklist { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+    .ask-ai-check { background: #262626; border: 1px solid #444; border-radius: 6px; padding: 8px 10px; font-size: 11px; }
+    .ask-ai-check-head { display: flex; align-items: center; gap: 6px; font-weight: bold; margin-bottom: 4px; }
+    .ask-ai-check-verdict { font-size: 10px; padding: 1px 6px; border-radius: 10px; border: 1px solid #444; }
+    .ask-ai-check-verdict.v-ok       { color: #4ade80; border-color: #4ade80; }
+    .ask-ai-check-verdict.v-warn     { color: #fbbf24; border-color: #fbbf24; }
+    .ask-ai-check-verdict.v-ng       { color: #f87171; border-color: #f87171; }
+    .ask-ai-check-verdict.v-unknown  { color: #888; border-color: #666; }
+    .ask-ai-check-detail { color: #999; line-height: 1.5; white-space: pre-wrap; }
+    .ask-ai-summary { color: #ccc; line-height: 1.5; white-space: pre-wrap; margin-bottom: 10px; }
+    .ask-ai-model-tag { color: #666; font-size: 10px; margin-bottom: 10px; }
     #ai-diag-decline-reason { width: 100%; min-height: 60px; margin: 8px 0; padding: 6px 8px; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; color: #fff; font-size: 11px; font-family: inherit; resize: vertical; box-sizing: border-box; }
     .fb-reason-btn { text-align: left; font-size: 11px; padding: 6px 8px; }
     .fb-back-btn { width: 100%; text-align: left; font-size: 11px; padding: 6px 8px; margin-bottom: 10px; color: #999; }
+    .fb-checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #ccc; padding: 4px 2px; cursor: pointer; }
+    .fb-conditional-freetext { width: 100%; margin-top: 8px; padding: 6px 8px; background: #2a2a2a; border: 1px solid #444; border-radius: 3px; color: #fff; font-size: 11px; box-sizing: border-box; }
+    .csv-toolbar-checkbox { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #ccc; white-space: nowrap; cursor: pointer; }
     .pane-header { padding: 7px 12px; font-size: 11px; color: #888; background: #1a1a1a; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
     .pane-header .ph-spacer { flex: 1; }
     .result-count { font-size: 11px; font-weight: bold; }
@@ -161,8 +177,17 @@
       display: inline-block; margin-right: 3px; background: #dc2626; color: #fff;
       font-weight: bold; border-radius: 2px; padding: 0 3px; line-height: 1.6;
     }
+    .duplicate-badge { margin-left: 5px; color: #888; font-weight: normal; font-size: 9px; font-style: italic; }
     .result-address { font-size: 10px; color: #888; margin-bottom: 1px; }
     .result-type { font-size: 9px; color: #555; }
+    .result-actions { margin-left: auto; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; }
+    .result-copy-btn, .result-ask-ai-btn {
+      flex-shrink: 0; background: none; border: 1px solid #444; border-radius: 3px;
+      color: #888; font-size: 11px; padding: 2px 6px; cursor: pointer; line-height: 1.4; white-space: nowrap;
+    }
+    .result-copy-btn:hover, .result-ask-ai-btn:hover { background: #2a2a2a; color: #fff; }
+    .result-ask-ai-btn { border-color: #2563eb; color: #60a5fa; }
+    .result-ask-ai-btn:hover { background: #1a2744; color: #fff; }
     .status-msg { padding: 16px 12px; font-size: 13px; color: #555; }
     .status-error { color: #e74c3c; }
 
@@ -210,6 +235,7 @@
     .dialog-close { background: none; border: none; color: #888; cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; }
     .dialog-close:hover { color: #fff; }
     .dialog-body { flex: 1; overflow-y: auto; padding: 16px; }
+    .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid #333; flex-shrink: 0; }
     .editors-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
     .editor-label { font-size: 11px; color: #666; margin-bottom: 6px; font-family: monospace; }
     .editor-wrap { border: 1px solid #333; border-radius: 4px; overflow: hidden; }
@@ -274,14 +300,14 @@
     <div class="setup-field">
       <label>Google API Key</label>
       <div class="show-toggle">
-        <input type="password" id="setup-google-key" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+        <input type="password" id="setup-google-key" name="google-api-key" placeholder="AIza..." autocomplete="new-password" spellcheck="false" />
         <button type="button" onclick="toggleVis('setup-google-key', this)">表示</button>
       </div>
     </div>
     <div class="setup-field">
       <label>Mapbox Access Token</label>
       <div class="show-toggle">
-        <input type="password" id="setup-mapbox-token" placeholder="pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw" autocomplete="off" spellcheck="false" />
+        <input type="password" id="setup-mapbox-token" name="mapbox-access-token" placeholder="pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw" autocomplete="new-password" spellcheck="false" />
         <button type="button" onclick="toggleVis('setup-mapbox-token', this)">表示</button>
       </div>
     </div>
@@ -312,7 +338,8 @@
   <button class="btn btn-secondary" id="open-query-btn">📋 QUERY</button>
   <button class="btn btn-secondary" id="open-results-btn">📋 RESULTS</button>
   <button class="btn btn-secondary" id="open-history-btn">📜 HISTORY</button>
-  <button class="btn btn-secondary" id="open-token-btn" style="font-size:11px;padding:5px 10px;">🔑 Token</button>
+  <button class="btn btn-secondary" id="open-ai-settings-btn">⚙️ AI Settings</button>
+  <button class="btn btn-secondary" id="open-token-btn">🔑 Token</button>
 </div>
 
 <!-- CSV Controls Row (ヘッダーの真下、1行に収める) -->
@@ -330,13 +357,15 @@
   <button id="csv-jump-btn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;">Go</button>
   <span class="header-label-sm" id="csv-jump-hint"></span>
   <span class="header-sep"></span>
+  <label class="csv-toolbar-checkbox" title="CSV読み込み中のクエリのみ、実際の検索からbboxを常に除外する"><input type="checkbox" id="csv-ignore-bbox-checkbox" /> Ignore bbox</label>
+  <label class="csv-toolbar-checkbox" title="CSV読み込み中のクエリのみ、実際の検索からnavigation_profileを常に除外する"><input type="checkbox" id="csv-ignore-navprofile-checkbox" /> Ignore nav profile</label>
+  <span class="header-sep"></span>
   <span class="header-label-sm">Result:</span>
   <select id="csv-filter-result">
     <option value="all">All</option>
     <option value="good">👍</option>
     <option value="bad">👎</option>
-    <option value="not_hit_both">Not hit in both</option>
-    <option value="unknown_query">Unknown query</option>
+    <option value="unclear">Unclear</option>
     <option value="untested">Untested</option>
   </select>
   <span class="header-label-sm">Reason:</span>
@@ -463,6 +492,10 @@
           <div class="editor-wrap" id="mapbox-param-json-wrap" style="display:none;"></div>
         </div>
       </div>
+    </div>
+    <div class="dialog-footer">
+      <button class="btn btn-secondary" id="query-dialog-cancel-btn" style="padding:8px 16px;">Cancel</button>
+      <button class="btn btn-primary" id="query-dialog-apply-btn" style="padding:8px 16px;">Apply</button>
     </div>
   </div>
 </div>
@@ -599,7 +632,7 @@
       </div>
       <table id="history-table">
         <thead>
-          <tr><th>Time</th><th>File</th><th>Row</th><th>Query</th><th>Result</th><th>Reason</th></tr>
+          <tr><th>Time</th><th>File</th><th>Row</th><th>Query</th><th>Result</th><th>Reason</th><th>Google OK</th></tr>
         </thead>
         <tbody id="history-tbody"></tbody>
       </table>
@@ -640,13 +673,26 @@
   </div>
 </div>
 
-<div class="dialog-overlay" id="ai-diag-settings-dialog">
-  <div class="dialog" style="max-width:420px;">
+<!-- AI関連3機能(CSV自動列マッピング/AI Evaluation/Ask AI)の設定をヘッダーの1エントリに統一したダイアログ -->
+<div class="dialog-overlay" id="ai-settings-dialog">
+  <div class="dialog" style="max-width:460px;">
     <div class="dialog-header">
-      <span class="dialog-title">⚙️ AI Evaluation Settings</span>
-      <button class="dialog-close" data-close="ai-diag-settings-dialog">✕</button>
+      <span class="dialog-title">⚙️ AI Settings</span>
+      <button class="dialog-close" data-close="ai-settings-dialog">✕</button>
     </div>
     <div class="dialog-body">
+      <div style="font-size:11px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">📂 CSV Scan(ファイル読み込み時の列自動判定)</div>
+      <div class="setup-field" style="margin-bottom:14px;">
+        <label>Model</label>
+        <select id="csv-scan-model-select" style="padding:9px 12px;background:#2a2a2a;border:1px solid #444;border-radius:4px;color:#fff;font-size:12px;">
+          <option value="haiku">Haiku 4.5</option>
+          <option value="sonnet">Sonnet 5</option>
+        </select>
+      </div>
+
+      <div style="border-top:1px solid #333;margin:16px 0;"></div>
+
+      <div style="font-size:11px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">📊 AI Evaluation(バッチ診断)</div>
       <div class="setup-field" style="margin-bottom:14px;">
         <label>Model</label>
         <select id="ai-diag-model-select" style="padding:9px 12px;background:#2a2a2a;border:1px solid #444;border-radius:4px;color:#fff;font-size:12px;">
@@ -660,8 +706,37 @@
           Ignore bbox when evaluating (re-run Mapbox search without bbox first)
         </label>
       </div>
-      <button id="ai-diag-settings-save" class="btn btn-primary" style="width:100%;padding:9px;">Save</button>
+      <div class="setup-field" style="margin-bottom:14px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#ccc;font-family:inherit;">
+          <input type="checkbox" id="ai-diag-check-google-ok-checkbox" />
+          Also ask AI to check "Is google result ok?" (extra API call, off by default)
+        </label>
+      </div>
+
+      <div style="border-top:1px solid #333;margin:16px 0;"></div>
+
+      <div style="font-size:11px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">🤖 Ask AI(単体POIチェック)</div>
+      <div class="setup-field" style="margin-bottom:14px;">
+        <label>Model(低頻度チェックのためデフォルトはSonnet 5)</label>
+        <select id="ask-ai-model-select" style="padding:9px 12px;background:#2a2a2a;border:1px solid #444;border-radius:4px;color:#fff;font-size:12px;">
+          <option value="haiku">Haiku 4.5</option>
+          <option value="sonnet">Sonnet 5</option>
+        </select>
+      </div>
+
+      <button id="ai-settings-save" class="btn btn-primary" style="width:100%;padding:9px;">Save</button>
     </div>
+  </div>
+</div>
+
+<!-- Ask AI (Mapbox result POI check) Dialog -->
+<div class="dialog-overlay" id="ask-ai-dialog">
+  <div class="dialog" style="max-width:560px;">
+    <div class="dialog-header">
+      <span class="dialog-title">🤖 Ask AI: POI Check</span>
+      <button class="dialog-close" data-close="ask-ai-dialog">✕</button>
+    </div>
+    <div class="dialog-body" id="ask-ai-body"></div>
   </div>
 </div>
 
@@ -900,7 +975,7 @@ function renderParamForm(container, fields, stateObj, onChange) {
       input = document.createElement('select');
       input.innerHTML = `<option value="">(none)</option>` + f.options.map(o => `<option value="${o}">${o}</option>`).join('');
       input.value = rawVal ?? '';
-      input.addEventListener('change', () => { setPath(stateObj, f.path, input.value === '' ? undefined : input.value); onChange(); });
+      input.addEventListener('change', () => { setPath(stateObj, f.path, input.value === '' ? undefined : input.value); onChange(f.path); });
     } else if (f.widget === 'multiselect') {
       input = document.createElement('div');
       input.className = 'param-multiselect';
@@ -908,7 +983,7 @@ function renderParamForm(container, fields, stateObj, onChange) {
       input.innerHTML = f.options.map(o => `<label><input type="checkbox" data-opt="${o}" ${current.includes(o) ? 'checked' : ''}/> ${o}</label>`).join('');
       input.addEventListener('change', () => {
         const checked = Array.from(input.querySelectorAll('input:checked')).map(c => c.dataset.opt);
-        setPath(stateObj, f.path, checked); onChange();
+        setPath(stateObj, f.path, checked); onChange(f.path);
       });
     } else if (f.widget === 'text-array') {
       input = document.createElement('input'); input.type = 'text';
@@ -918,7 +993,7 @@ function renderParamForm(container, fields, stateObj, onChange) {
       input.placeholder = 'カンマ区切り';
       input.addEventListener('change', () => {
         const arr = input.value.split(',').map(s => s.trim()).filter(Boolean);
-        setPath(stateObj, f.path, arr); onChange();
+        setPath(stateObj, f.path, arr); onChange(f.path);
       });
     } else if (f.widget === 'datalist') {
       const listId = `dl_${f.path}`.replace(/[^a-zA-Z0-9]/g, '_');
@@ -927,7 +1002,7 @@ function renderParamForm(container, fields, stateObj, onChange) {
       const dl = document.createElement('datalist'); dl.id = listId;
       dl.innerHTML = f.options.map(o => `<option value="${o}">`).join('');
       row.appendChild(dl);
-      input.addEventListener('change', () => { setPath(stateObj, f.path, input.value === '' ? undefined : input.value); onChange(); });
+      input.addEventListener('change', () => { setPath(stateObj, f.path, input.value === '' ? undefined : input.value); onChange(f.path); });
     } else if (f.widget === 'array-first-datalist') {
       const listId = `dl_${f.path}`.replace(/[^a-zA-Z0-9]/g, '_');
       input = document.createElement('input'); input.type = 'text'; input.setAttribute('list', listId);
@@ -936,7 +1011,7 @@ function renderParamForm(container, fields, stateObj, onChange) {
       const dl = document.createElement('datalist'); dl.id = listId;
       dl.innerHTML = f.options.map(o => `<option value="${o}">`).join('');
       row.appendChild(dl);
-      input.addEventListener('change', () => { setPath(stateObj, f.path, input.value ? [input.value] : []); onChange(); });
+      input.addEventListener('change', () => { setPath(stateObj, f.path, input.value ? [input.value] : []); onChange(f.path); });
     } else if (f.widget === 'number') {
       input = document.createElement('input'); input.type = 'number';
       if (f.min != null) input.min = f.min;
@@ -946,19 +1021,17 @@ function renderParamForm(container, fields, stateObj, onChange) {
       input.addEventListener('change', () => {
         const v = input.value === '' ? undefined : Number(input.value);
         setPath(stateObj, f.path, v);
-        // proximity/bboxをFormで直接編集した場合は手動編集とみなし、以後の自動追従による上書きを止める
-        if (f.path === 'proximity.lat' || f.path === 'proximity.lng') mapboxProximityManual = true;
-        if (/^bbox\.\d$/.test(f.path)) mapboxBboxManual = true;
-        onChange();
+        // proximity/bbox手動編集フラグの反映はApply時にqueryDialogTouchedを見て行う(ここではドラフトを触るだけ)
+        onChange(f.path);
       });
     } else if (f.widget === 'checkbox') {
       input = document.createElement('input'); input.type = 'checkbox';
       input.checked = !!rawVal;
-      input.addEventListener('change', () => { setPath(stateObj, f.path, input.checked || undefined); onChange(); });
+      input.addEventListener('change', () => { setPath(stateObj, f.path, input.checked || undefined); onChange(f.path); });
     } else {
       input = document.createElement('input'); input.type = 'text';
       input.value = rawVal ?? '';
-      input.addEventListener('change', () => { setPath(stateObj, f.path, input.value === '' ? undefined : input.value); onChange(); });
+      input.addEventListener('change', () => { setPath(stateObj, f.path, input.value === '' ? undefined : input.value); onChange(f.path); });
     }
 
     row.appendChild(input);
@@ -1013,6 +1086,15 @@ let state = {
 let mapboxProximityManual = false;
 let mapboxBboxManual      = false;
 
+// proximity/bbox以外のパラメータ(types, poi_category, limit, language, country, near, navigation_profile等)を
+// Form/JSONエディタで手動編集した場合、CSV行選択(applyCsvRowToState)による無条件上書きから保護するためのフィールド集合。
+// (bbox/proximityと違って「行が変わったら自動でリセット」ではなく、Resetボタンを押すまで保持し続ける)
+let manualMapboxFields = new Set();
+let manualGoogleFields = new Set();
+function markFieldManual(engine, path) {
+  (engine === 'mapbox' ? manualMapboxFields : manualGoogleFields).add(path);
+}
+
 // ============================================================
 // CSV STATE
 // ============================================================
@@ -1022,6 +1104,11 @@ let csvIndex      = -1;
 let csvMapping    = null; // { columns: [{header, mapboxRole, googleRole}] }
 let currentCsvFileName = '';
 let currentCsvFileId   = ''; // ファイル名+内容ハッシュ。同じファイルの再読込を検知するためのキー
+
+// CSV読み込み中のクエリにのみ有効な、実際のMapbox検索パラメータからbbox/navigation_profileを
+// 丸ごと除外する単純なオーバーライド(手動クエリでは無視・AI自動診断ロジックとは無関係)
+let csvIgnoreBbox       = false;
+let csvIgnoreNavProfile = false;
 
 // query_type列(CSVマッピング確認モーダルでMapbox/Googleどちらの役割でもない列として選択。#の右隣に表示し、ヘッダークリックでチェックボックスフィルタを開く)
 let csvQueryTypeColumn   = null;   // 選択されたCSV列名。未選択/(none)ならnull
@@ -1051,17 +1138,24 @@ const FEEDBACK_REASONS = [
   { category: 'Bug', items: ['poi duplication', 'wrong poi', 'wrong address'] },
   { category: 'Others', items: ['location intent', 'category intent', 'prominence score'] },
 ];
-// GOODを押した際の内訳(順位まで含めて精度を見る方針のため、1位での正解/正解はしているが1位ではない、を区別する)
-const GOOD_REASONS = ['Perfect (Correct POI at top)', 'Almost! (Correct POI but not ranked at top)'];
-// Mapbox・Google両方とも該当候補が無かったケース(理由分岐なし、押した時点で即確定)
-const NOT_HIT_BOTH = 'not_hit_both';
-// クエリ自体が壊れている/曖昧すぎて何を探しているか判断できないケース
-const UNKNOWN_QUERY = 'unknown_query';
+// GOODを押した際の内訳(順位まで含めて精度を見る方針のため、1位での正解/正解はしているが1位ではない、を区別する)。
+// Conditionalは「今のパラメータ設定ではNGだが、パラメータを直せば通る」ケース(テスト設定のミスと製品側の
+// 実力不足を切り分けるため、bad扱いにはしない)。選択時のみ追加でCONDITIONAL_GOOD_PRESETS+自由入力を聞く
+const CONDITIONAL_GOOD_REASON = 'Conditional (would pass with a param fix)';
+const GOOD_REASONS = ['Perfect (Correct POI at top)', 'Almost! (Correct POI but not ranked at top)', CONDITIONAL_GOOD_REASON];
+// Conditionalを選んだ時のプリセットチェックボックス(複数選択可・自由入力と併用)
+const CONDITIONAL_GOOD_PRESETS = ['Types filter excluded correct type'];
+// 判定結果は3分類(good/bad/unclear)。旧not_hit_both(Mapbox/Google両方ヒットせず)は独立カテゴリとして扱わず、
+// 「Is google result ok?」のNoで表現する(ツールの目的はSearch Box自体の品質検証で、Google側の結果も
+// 無かったというのはあくまで補足情報のため)
+// unclearの内訳: クエリ自体が壊れている/意味不明ならunknown query、クエリは読み取れるが粒度不足で
+// 複数の実在候補に分かれ特定できない場合はtoo ambiguous query
+const UNCLEAR_REASONS = ['unknown query', 'too ambiguous query'];
 function resultIconOf(result) {
   if (result === 'good') return '👍';
-  if (result === NOT_HIT_BOTH) return 'Not hit';
-  if (result === UNKNOWN_QUERY) return 'Unknown';
-  return '👎';
+  if (result === 'unclear') return 'Unclear';
+  if (result === 'bad') return '👎';
+  return result || '';
 }
 
 const LS_FEEDBACK = 'apc_feedback_log';
@@ -1092,9 +1186,13 @@ function getRowFeedback(rowIdx) {
   return getLatestFeedbackForKey(`${currentCsvFileId}::${rowIdx}`);
 }
 
-function recordFeedback(ctx, result, reason) {
+// googleOk: 'yes'|'no'|'skip'|null(Is google result ok?への回答。good/bad/unclearどれでも共通で聞く独立軸)
+// conditionalReasons: string[]|null(reasonが「Conditional」の時だけ、何を直せば通ったかのプリセット+自由入力)
+function recordFeedback(ctx, result, reason, googleOk, conditionalReasons) {
   const entry = {
     key: feedbackKey(ctx), result, reason: reason || null,
+    googleOk: googleOk || null,
+    conditionalReasons: (conditionalReasons && conditionalReasons.length) ? conditionalReasons : null,
     query: ctx.query, fileName: ctx.fileName || null, rowIndex: ctx.rowIndex ?? null,
     timestamp: new Date().toISOString(),
   };
@@ -1104,7 +1202,10 @@ function recordFeedback(ctx, result, reason) {
 }
 
 let feedbackContext  = null;   // { fileId, fileName, rowIndex, query } —直近の検索がどのクエリ/行に対するものか
-let feedbackPanelMode = 'idle'; // 'idle' | 'rated' | 'good_reason' | 'reason'
+// 'idle' | 'rated' | 'good_reason' | 'conditional_detail' | 'reason' | 'unclear_reason' | 'google_ok'
+let feedbackPanelMode = 'idle';
+// カテゴリ選択〜reason選択〜google_okの複数ステップにまたがって確定前の選択を保持する
+let feedbackPending = null; // { category, reason, conditionalReasons }
 let feedbackTab = 'manual'; // 'manual' | 'ai'
 
 function switchFeedbackTab(tab) {
@@ -1120,6 +1221,13 @@ function renderFeedbackPanel() {
   renderManualFeedbackPanel();
 }
 
+// カテゴリ+reasonが決まった後、共通の「Is google result ok?」ステップに進む
+function goToGoogleOkStep(category, reason, conditionalReasons) {
+  feedbackPending = { category, reason, conditionalReasons: conditionalReasons || null };
+  feedbackPanelMode = 'google_ok';
+  renderFeedbackPanel();
+}
+
 function renderManualFeedbackPanel() {
   const body = document.getElementById('feedback-body');
   if (feedbackPanelMode === 'rated') {
@@ -1127,13 +1235,11 @@ function renderManualFeedbackPanel() {
       <div class="fb-buttons">
         <button class="btn btn-secondary fb-btn" id="fb-good-btn">👍</button>
         <button class="btn btn-secondary fb-btn" id="fb-bad-btn">👎</button>
-        <button class="btn btn-secondary fb-btn fb-btn-text" id="fb-nothit-btn">Not hit in both</button>
-        <button class="btn btn-secondary fb-btn fb-btn-text" id="fb-unknown-btn">Unknown query</button>
+        <button class="btn btn-secondary fb-btn fb-btn-text" id="fb-unclear-btn">Unclear</button>
       </div>`;
     document.getElementById('fb-good-btn').addEventListener('click', () => { feedbackPanelMode = 'good_reason'; renderFeedbackPanel(); });
     document.getElementById('fb-bad-btn').addEventListener('click', () => { feedbackPanelMode = 'reason'; renderFeedbackPanel(); });
-    document.getElementById('fb-nothit-btn').addEventListener('click', () => submitFeedback(NOT_HIT_BOTH, null));
-    document.getElementById('fb-unknown-btn').addEventListener('click', () => submitFeedback(UNKNOWN_QUERY, null));
+    document.getElementById('fb-unclear-btn').addEventListener('click', () => { feedbackPanelMode = 'unclear_reason'; renderFeedbackPanel(); });
   } else if (feedbackPanelMode === 'good_reason') {
     body.innerHTML = `
       <button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← Back</button>
@@ -1142,7 +1248,28 @@ function renderManualFeedbackPanel() {
       </div>`;
     document.getElementById('fb-back-btn').addEventListener('click', () => { feedbackPanelMode = 'rated'; renderFeedbackPanel(); });
     body.querySelectorAll('.fb-reason-btn').forEach(btn => {
-      btn.addEventListener('click', () => submitFeedback('good', btn.dataset.reason));
+      btn.addEventListener('click', () => {
+        if (btn.dataset.reason === CONDITIONAL_GOOD_REASON) { feedbackPanelMode = 'conditional_detail'; renderFeedbackPanel(); return; }
+        goToGoogleOkStep('good', btn.dataset.reason, null);
+      });
+    });
+  } else if (feedbackPanelMode === 'conditional_detail') {
+    body.innerHTML = `
+      <button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← Back</button>
+      <div class="fb-reason-group">What would fix it? (select all that apply)</div>
+      <div class="fb-reason-list">
+        ${CONDITIONAL_GOOD_PRESETS.map(label => `
+          <label class="fb-checkbox-label"><input type="checkbox" class="fb-conditional-checkbox" value="${esc(label)}" /> ${esc(label)}</label>
+        `).join('')}
+      </div>
+      <input type="text" id="fb-conditional-freetext" class="fb-conditional-freetext" placeholder="Other (free text)" />
+      <button class="btn btn-primary fb-next-btn" id="fb-conditional-next-btn" style="width:100%;margin-top:10px;">Next →</button>`;
+    document.getElementById('fb-back-btn').addEventListener('click', () => { feedbackPanelMode = 'good_reason'; renderFeedbackPanel(); });
+    document.getElementById('fb-conditional-next-btn').addEventListener('click', () => {
+      const checked = [...body.querySelectorAll('.fb-conditional-checkbox:checked')].map(c => c.value);
+      const freetext = document.getElementById('fb-conditional-freetext').value.trim();
+      if (freetext) checked.push(freetext);
+      goToGoogleOkStep('good', CONDITIONAL_GOOD_REASON, checked);
     });
   } else if (feedbackPanelMode === 'reason') {
     body.innerHTML = `<button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← Back</button>` + FEEDBACK_REASONS.map(group => `
@@ -1152,17 +1279,42 @@ function renderManualFeedbackPanel() {
       </div>`).join('');
     document.getElementById('fb-back-btn').addEventListener('click', () => { feedbackPanelMode = 'rated'; renderFeedbackPanel(); });
     body.querySelectorAll('.fb-reason-btn').forEach(btn => {
-      btn.addEventListener('click', () => submitFeedback('bad', btn.dataset.reason));
+      btn.addEventListener('click', () => goToGoogleOkStep('bad', btn.dataset.reason, null));
     });
+  } else if (feedbackPanelMode === 'unclear_reason') {
+    body.innerHTML = `
+      <button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← Back</button>
+      <div class="fb-reason-list">
+        ${UNCLEAR_REASONS.map(label => `<button class="btn btn-secondary fb-reason-btn" data-reason="${esc(label)}">${esc(label)}</button>`).join('')}
+      </div>`;
+    document.getElementById('fb-back-btn').addEventListener('click', () => { feedbackPanelMode = 'rated'; renderFeedbackPanel(); });
+    body.querySelectorAll('.fb-reason-btn').forEach(btn => {
+      btn.addEventListener('click', () => goToGoogleOkStep('unclear', btn.dataset.reason, null));
+    });
+  } else if (feedbackPanelMode === 'google_ok' && feedbackPending) {
+    body.innerHTML = `
+      <button class="btn btn-secondary fb-back-btn" id="fb-back-btn">← Back</button>
+      <div class="fb-reason-group">Is google result ok?</div>
+      <div class="fb-buttons">
+        <button class="btn btn-secondary fb-btn" id="fb-google-yes-btn">Yes</button>
+        <button class="btn btn-secondary fb-btn" id="fb-google-no-btn">No</button>
+        <button class="btn btn-secondary fb-btn fb-btn-text" id="fb-google-skip-btn">Skip</button>
+      </div>`;
+    // カテゴリ/reasonの選び直しが必要な場合は最初からやり直す(どのステップに戻すかの分岐を増やさないため)
+    document.getElementById('fb-back-btn').addEventListener('click', () => { feedbackPending = null; feedbackPanelMode = 'rated'; renderFeedbackPanel(); });
+    document.getElementById('fb-google-yes-btn').addEventListener('click', () => submitFeedback(feedbackPending.category, feedbackPending.reason, 'yes', feedbackPending.conditionalReasons));
+    document.getElementById('fb-google-no-btn').addEventListener('click', () => submitFeedback(feedbackPending.category, feedbackPending.reason, 'no', feedbackPending.conditionalReasons));
+    document.getElementById('fb-google-skip-btn').addEventListener('click', () => submitFeedback(feedbackPending.category, feedbackPending.reason, 'skip', feedbackPending.conditionalReasons));
   } else {
     body.innerHTML = `<p class="status-msg" style="padding:0;">Run a search first</p>`;
   }
 }
 
-function submitFeedback(result, reason) {
+function submitFeedback(result, reason, googleOk, conditionalReasons) {
   if (!feedbackContext) return;
-  recordFeedback(feedbackContext, result, reason);
+  recordFeedback(feedbackContext, result, reason, googleOk, conditionalReasons);
   feedbackPanelMode = 'idle';
+  feedbackPending = null;
   feedbackContext = null;
   aiDiagState = 'idle'; aiDiagProposal = null;
   renderFeedbackPanel();
@@ -1197,17 +1349,37 @@ function estimateAiDiagCostJpy(model, usage) {
     + ((usage.outputTokens ?? 0) / 1e6) * p.output;
   return usd * AI_DIAG_USD_TO_JPY;
 }
-const LS_AI_DIAG_MODEL        = 'apc_ai_diag_model';
-const LS_AI_DIAG_IGNORE_BBOX  = 'apc_ai_diag_ignore_bbox';
+const LS_AI_DIAG_MODEL          = 'apc_ai_diag_model';
+const LS_AI_DIAG_IGNORE_BBOX    = 'apc_ai_diag_ignore_bbox';
+// 「Is google result ok?」をAIにも判定させるかどうか。追加のAPI呼び出しが発生し得るため、デフォルトはOFF
+const LS_AI_DIAG_CHECK_GOOGLE_OK = 'apc_ai_diag_check_google_ok';
 const LS_AI_DIAG_LOG          = 'apc_ai_diagnosis_log';
 
 let aiDiagSettings = {
   model: localStorage.getItem(LS_AI_DIAG_MODEL) || 'haiku',
   ignoreBbox: localStorage.getItem(LS_AI_DIAG_IGNORE_BBOX) === 'true',
+  checkGoogleOk: localStorage.getItem(LS_AI_DIAG_CHECK_GOOGLE_OK) === 'true',
 };
 function saveAiDiagSettings() {
   localStorage.setItem(LS_AI_DIAG_MODEL, aiDiagSettings.model);
   localStorage.setItem(LS_AI_DIAG_IGNORE_BBOX, String(aiDiagSettings.ignoreBbox));
+  localStorage.setItem(LS_AI_DIAG_CHECK_GOOGLE_OK, String(aiDiagSettings.checkGoogleOk));
+}
+
+// CSVファイル読み込み時の列自動マッピング(analyzeCsvColumns)用のモデル設定。
+// 診断/Ask AIとは別軸の設定だが、ヘッダーの「⚙️ AI Settings」に統一表示する
+const LS_CSV_SCAN_MODEL = 'apc_csv_scan_model';
+let csvScanModel = localStorage.getItem(LS_CSV_SCAN_MODEL) || 'haiku';
+function saveCsvScanModel() {
+  localStorage.setItem(LS_CSV_SCAN_MODEL, csvScanModel);
+}
+
+// Ask AI(単体POIチェック)用のモデル設定。低頻度・精度優先の性質上デフォルトはsonnetだが、
+// コストを抑えたい場合のためにhaikuも選択できるようにする
+const LS_ASK_AI_MODEL = 'apc_ask_ai_model';
+let askAiModel = localStorage.getItem(LS_ASK_AI_MODEL) || 'sonnet';
+function saveAskAiModel() {
+  localStorage.setItem(LS_ASK_AI_MODEL, askAiModel);
 }
 
 function loadAiDiagLog() { try { return JSON.parse(localStorage.getItem(LS_AI_DIAG_LOG) || '[]'); } catch { return []; } }
@@ -1220,60 +1392,126 @@ function recordAiDiagLog(entry) {
 }
 
 let aiDiagState    = 'idle'; // 'idle' | 'analyzing' | 'proposal' | 'decline_input' | 'error'
-let aiDiagProposal = null;   // { category:'good'|'bad'|'not_hit_both'|'unknown_query', goodReason, badTag, rank, reasoning }
+let aiDiagProposal = null;   // { category:'good'|'bad'|'unclear', reason, conditionalReasons, rank, googleOk, reasoning }
 let aiDiagError    = '';
 
-const AI_DIAG_SYSTEM_PROMPT = `あなたはタクシー配車業務等で使われる地図検索(Mapbox Search Box API)の品質診断アシスタントです。
-ユーザーが入力した検索クエリに対して、Mapboxが適切な結果(POIや住所)を返せているかを、Google Places側の結果も参考にしながら判定します。
+// ============================================================
+// AI診断: 4つの専用プロンプト(分類 / Mapbox単独判定 / Google単独判定 / カバレッジ判定)
+// 1本の会話を複数ターンに分けるのではなく、それぞれ独立した単発呼び出しにする。
+// 理由: 会話を繋げると前のターンのやり取り(空振り応答含む)を毎回丸ごと再送信する必要があり、
+// ターンが進むほどinトークンが増えてしまう。独立呼び出しなら各回で必要な情報だけを渡せばよく、
+// かつそのステップで使わないルール/タグ一覧を含めずに済む(例: Mapbox単独判定にBADタグ一覧は不要)。
+// ============================================================
 
-この対話は最大3ターンに分けて情報が送られます(判定に必要な分だけ確認するため、毎回全情報を渡すわけではありません):
-- 1ターン目: {"q": "検索クエリ文字列"} のみ
-- 2ターン目(1ターン目で判定が確定しなかった場合のみ送られる): {"prox": "緯度,経度"|null, "bbox": "minLng,minLat,maxLng,maxLat"|null, "bboxIgnored": boolean, "mb": ["name|matchStatus|distance", ...]}
-  - prox: 検索の中心地点(MapboxのproximityとGoogleのlocationは常に同一なので1つにまとめてある)
-  - bbox: Mapbox検索の絞り込み範囲。bboxIgnoredがtrueの場合はこの制約を外して再検索した候補になっている
-  - mb: Mapbox候補。配列の並び順=検索結果の順位(先頭が1位)
-- 3ターン目(2ターン目でも判定が確定しなかった場合のみ送られる): {"gg": ["name|matchStatus|distance", ...]} (Google候補。mbと同じフォーマット・並び順=順位)
+// address/region/place/locality/neighborhoodは「答えが1つに定まる地名・住所系」として同じグループ(粒度違い)。
+// フロー分岐(specific flow行き)・types不整合チェックの対象判定は全てこの配列を参照する
+const ADDRESS_LIKE_TYPES = ['address', 'region', 'place', 'locality', 'neighborhood'];
+// 分類結果ごとに期待されるMapbox `types`値へのマッピング(types不整合チェックで使う。
+// poi_brand/poi_category/others/unknownは単一のtypes値に対応しないため対象外)
+const MAPBOX_TYPE_EXPECTATION = { poi: 'poi', address: 'address', region: 'region', place: 'place', locality: 'locality', neighborhood: 'neighborhood' };
+const AI_DIAG_QUERY_TYPES = ['poi', ...ADDRESS_LIKE_TYPES, 'poi_brand', 'poi_category', 'others', 'unknown'];
 
-mb/ggの各要素の"name|matchStatus|distance"は:
+// クエリの分類(唯一の正解があるPOI/住所・地名か、カバレッジが問題になるカテゴリ/ブランドか)
+const AI_DIAG_CLASSIFY_PROMPT = `あなたはタクシー配車業務等で使われる地図検索クエリの分類器です。
+渡されたクエリ文字列を、次の10種類のうち最も適切な1つに分類してください。
+
+「答えが1つに定まる」タイプ(固有名詞・住所・地名。粒度が違うだけで同じグループ):
+- poi: 固有の1つの場所を指すPOI名(例: 東京タワー、〇〇内科クリニック)
+- address: 番地まで含む純粋な住所文字列(例: 東京都渋谷区渋谷2-1-1)。市区町村・町名等の地名だけのクエリはここに含めないこと
+- region: 都道府県(例: 神奈川県)
+- place: 市区町村(例: 鎌倉市)
+- locality: 町名(例: 台東区入谷)
+- neighborhood: 丁目まで(例: 鎌倉市常盤四丁目)
+
+「答えが1つに定まらない」タイプ:
+- poi_brand: 特定のチェーン/ブランド名の指定(例: セブンイレブン、スターバックス)。同一ブランドの店舗が複数存在し、正解が1つに定まらない(近くの店舗が複数該当し得る)
+- poi_category: 業種・カテゴリでの指定(例: カフェ、コンビニ、病院)。同様に複数の店舗/施設が該当し得る
+
+その他:
+- others: 上記のいずれにも当てはまらないが、クエリの意図自体は読み取れる場合
+- unknown: クエリが壊れている(文字が欠落・意味不明な断片等)、または曖昧すぎて何を探しているのか判断できない場合
+
+出力は必ず以下のJSON形式のみ。説明文やコードブロックのマークダウンは付けないでください。
+{"type": "poi" | "address" | "region" | "place" | "locality" | "neighborhood" | "poi_brand" | "poi_category" | "others" | "unknown", "reasoning": "日本語で1文の短い理由"}`;
+
+// specific(poi/address/region/place/locality/neighborhood/others)フロー: ステップ1、
+// Mapbox候補だけを見て判定する(Google側はまだ見せない)
+const AI_DIAG_MAPBOX_PROMPT = `あなたはタクシー配車業務等で使われる地図検索(Mapbox Search Box API)の品質診断アシスタントです。
+これから渡されるクエリは「固有の1つの答えがある」タイプ(POI名・住所・地名等)です。Mapboxの検索結果(候補群mb)の中に、クエリが意図した対象と一致する候補があるかどうかだけを判定してください(Google側の結果はこの時点ではまだ見えません)。
+
+入力は次の省略形式のJSON:
+{"q": "クエリ文字列", "prox": "緯度,経度"|null, "bbox": "minLng,minLat,maxLng,maxLat"|null, "bboxIgnored": boolean, "mb": ["name|posMatch|distance", ...]}
+mbの各要素の"name|posMatch|distance"は:
 - name: 候補の名称
-- matchStatus: both(name/位置ともMapbox・Google間で一致候補あり) | name(名前のみ一致候補あり) | address(位置のみ近似) | none(一致候補なし) ※これはクエリとの一致ではなく、Mapbox候補とGoogle候補を突き合わせた結果なので注意
+- posMatch: address(座標が近いGoogle候補[非表示]がある) | none(無い) ※あくまで座標だけの機械的な近さ判定。名前が一致するかどうかの判断には使わず、必ずクエリの意味とcandidateのnameから自分で判断すること
 - distance: proxからの距離。mまたはkm表記(例:320m, 4.2km)。空文字なら不明
+mbの配列の並び順=Mapbox検索結果の順位(先頭が1位)。
 
-出力ルール(重要): その時点の情報だけでは判定を確定できない場合、次のターンの情報が必要という意味で必ず次のJSONのみを出力してください: {"category": null}
-判定を確定できる場合は、下記の判定手順に従い、最終形式のJSONを出力してください。
+判定ルール:
+- 最終判断はクエリの意味とcandidateのnameから行うこと。posMatch/distanceは座標の近さのヒントに留める
+- 注意(同名候補が複数ある場合): mb内に名前が(ほぼ)同一の候補が複数ある場合、配列の順位だけで判断しないこと。順位が上位にあるという理由だけで正解と決めつけてはいけない。そのうちdistanceが最も近い候補を実際の正解候補として優先し、rankの値もその候補の配列上の順位を使うこと(同名異place、例えば同名の駅・店舗が全国に複数存在するケースで、遠方の候補が偶然上位に来ることがあるため)
+- 注意(距離が極端に近い場合の救済): 候補の名前がクエリと完全には一致しなくても、地名の一部・業種・同音異字表記等の部分的な符合が最低限あり、かつdistanceが極端に小さい場合は、クエリが意図した対象である可能性が高いと判断してよい(例: 「広 双葉病院」に対し、「地方独立行政法人広島県立病院機構県立二葉の里病院」という長い正式名称の候補が極端に近い場合。「二葉」と「双葉」は同音のため正当な一致とみなせる)。ただし名称に全く関連性が見出せない場合は、近いというだけで一致とみなさないこと。
+  「極端に近い」の許容距離は候補の種類によって相対的に判断すること: コンビニ・チェーン店・個人商店のような小さく高密度に存在する施設は狭め(目安50〜100m)、病院・駅・大学・商業施設・工場のような大規模な敷地を持つ施設は広め(目安300〜500m、敷地の広さやジオコーディングの精度上この程度の誤差は正当にあり得る)に取る。候補名から施設の種類を推測し、上記を目安にスケールさせること。
 
-判定手順(この順番を厳守):
-0. 1ターン目({q}のみ)の時点で、クエリ自体を見て、そもそも何を探そうとしているのか判断できるか確認する。
-   - クエリが壊れている(文字が欠落・意味不明な断片等)、または曖昧すぎてPOI名/住所/カテゴリのどれを意図しているか特定できない場合は category="unknown_query" として確定する
-   - それ以外の場合は、まだmb(Mapbox候補)を見ていないので {"category": null} を返す(2ターン目へ)
-1. 2ターン目({mb}が見える状態)で、mbの中に妥当な一致がないか確認する。
-   - 注意(同名候補が複数ある場合): mb内に名前が(ほぼ)同一の候補が複数ある場合、配列の順位だけで判断しないこと。順位が上位にあるという理由だけで、それを正解と決めつけてはいけない。そのうちdistanceが最も近い候補を実際の正解候補として優先し、以下の判定・rankの値は、その距離が近い候補の配列上の順位を使うこと(同名異place、例えば同名の駅・店舗が全国に複数存在するケースで、遠方の候補が偶然上位に来ることがあるため)
-   - 一致候補があり、それが1位(配列の先頭。同名候補が複数ある場合は上記ルールで選んだ候補の順位)なら category="good", goodReason="Perfect (Correct POI at top)" として確定する
-   - 一致候補はあるが1位ではないなら category="good", goodReason="Almost! (Correct POI but not ranked at top)"、rankにその順位(配列のindex+1、1始まり)を入れて確定する
-   - 明確な一致が無ければ、まだgg(Google候補)を見ていないので {"category": null} を返す(3ターン目へ)
-2. 3ターン目({gg}も見える状態)で、ggの中に妥当な一致がないか確認する。
-   - 一致候補が見つかった場合、まず次のレスキュー判定を行う: そのGoogle候補がggの1位(配列の先頭)であり、かつ2ターン目のmbの中にその候補とmatchStatus=both または name の候補が存在する場合、それはMapbox・Google双方のデータに実在し、Googleが自信を持って1位に選んでいる証拠なので、Bad判定にはせず、該当するmb候補の順位に応じて category="good"(1位なら goodReason="Perfect (Correct POI at top)"、それ以外は goodReason="Almost! (Correct POI but not ranked at top)" とrank)として確定する
-   - 上記レスキューに該当しない一致がggにあるなら category="bad" とし、badTagに以下のタグ一覧から最も近いものを1つだけ選んで確定する:
-     ${FEEDBACK_REASONS.flatMap(g => g.items).join(', ')}
-   - ggにも一致が無いなら category="not_hit_both" として確定する
+出力は必ず以下のJSON形式のみ。
+{"matched": true | false, "rank": number | null (matched=trueの時、その候補の配列上の順位。1始まり), "reasoning": "日本語で1文の短い理由"}`;
 
-matchStatus/distanceはヒントとして使ってよいですが、最終判断はクエリの意味とcandidateのnameから行ってください。Google側の一致判定もMapbox側と同じ厳しさで行い、こじつけ的な一致(読みが違う、部分一致のみ等)は有効な一致とみなさないでください。
+// specific(poi/address/others)フロー: ステップ2、Mapboxで一致が見つからなかった場合にGoogle候補だけを見て判定する
+const AI_DIAG_GOOGLE_PROMPT = `あなたはタクシー配車業務等で使われる地図検索(Mapbox Search Box API)の品質診断アシスタントです。
+これから渡されるクエリは「固有の1つの答えがある」タイプ(POI名・住所・地名等)ですが、Mapbox側の候補では一致する候補が見つかりませんでした。Google Places側の検索結果(候補群gg)の中に、クエリが意図した対象と一致する候補があるかどうかを判定してください。
 
-注意(距離が極端に近い場合の救済): 候補の名前がクエリと完全には一致しなくても、地名の一部・業種・同音異字表記等の部分的な符合が最低限あり、かつdistanceが極端に小さい場合は、クエリが意図した対象である可能性が高いと判断してよい(例: 「広 双葉病院」というクエリに対し、「地方独立行政法人広島県立病院機構県立二葉の里病院」という長い正式名称の候補があり、それが極端に近い場合。「二葉」と「双葉」は同音のため、これは正当な一致とみなせる)。ただし名称に全く関連性が見出せない場合は、近いというだけで一致とみなさないこと。
-「極端に近い」の許容距離は候補の種類によって相対的に判断すること: コンビニ・チェーン店・個人商店のような小さく高密度に存在する施設は狭め(目安50〜100m。これを超えるなら、より近くに正しい別の候補がある可能性が高い)、病院・駅・大学・商業施設・工場のような大規模な敷地を持つ施設は広め(目安300〜500m。敷地の広さやジオコーディングの精度上、この程度の誤差は正当にあり得る)に取る。候補名から施設の種類を推測し、上記を目安にスケールさせること。
+入力は次の省略形式のJSON:
+{"q": "クエリ文字列", "gg": ["name|posMatch|distance", ...]}
+ggの各要素の"name|posMatch|distance"は:
+- name: 候補の名称
+- posMatch: address(座標が近いMapbox候補[今回は一致しなかった候補群]がある) | none(無い) ※あくまで座標だけの機械的な近さ判定。名前が一致するかどうかの判断には使わないこと
+- distance: proxからの距離。mまたはkm表記。空文字なら不明
+ggの配列の並び順=Google検索結果の順位(先頭が1位)。
 
-判定を確定する時は、必ず以下のJSON形式のみで出力してください。説明文やコードブロックのマークダウンは付けないでください。
-{"category": "good" | "bad" | "not_hit_both" | "unknown_query", "goodReason": string | null, "badTag": string | null, "rank": number | null, "reasoning": "日本語で1〜2文の短い理由"}`;
+判定ルール:
+- Mapbox側の判定と同じ厳しさで判定すること。こじつけ的な一致(読みが違う、部分一致のみ等)は有効な一致とみなさないこと
+- 注意(同名候補が複数ある場合): ggに名前が(ほぼ)同一の候補が複数ある場合、配列の順位だけで判断せず、distanceが最も近い候補を優先すること
+- 注意(距離が極端に近い場合の救済): 候補の名前がクエリと完全には一致しなくても、地名の一部・業種・同音異字表記等の部分的な符合が最低限あり、かつdistanceが極端に小さい場合は、クエリが意図した対象である可能性が高いと判断してよい。「極端に近い」の許容距離は施設の種類で相対的に判断すること(コンビニ等の小規模施設は目安50〜100m、病院・駅等の大規模施設は目安300〜500m)
 
-// bbox無視トグルON時、診断専用にMapboxをbbox無しで再検索する(画面表示中のmapboxRawResultsは変更しない)
-async function searchMapboxIgnoringBbox(query) {
+一致が見つかった場合、matched=trueとし、badTagに以下のタグ一覧から最も近いものを1つだけ選んでください:
+${FEEDBACK_REASONS.flatMap(g => g.items).join(', ')}
+
+出力は必ず以下のJSON形式のみ。
+{"matched": true | false, "badTag": string | null, "reasoning": "日本語で1文の短い理由"}`;
+
+// poi_brand/poi_categoryフロー: Googleをground truthとみなし、Google候補それぞれにMapbox側の対応候補があるか(カバレッジ)を判定する
+const AI_DIAG_COVERAGE_PROMPT = `あなたはタクシー配車業務等で使われる地図検索(Mapbox Search Box API)の品質診断アシスタントです。
+これから渡されるクエリは「カテゴリ/ブランド」タイプ(例: カフェ、セブンイレブン)で、正解が1つに定まらず、適切な候補がどれだけ見つかるか(カバレッジ)が問題になります。
+Google Placesの検索結果をground truth(正解の基準)とみなし、Google候補(gg)それぞれについて、Mapbox候補(mb)の中に対応するものがあるかを判定してください。
+
+入力は次の省略形式のJSON:
+{"q": "クエリ文字列", "mb": ["name|posMatch|distance", ...], "gg": ["name|posMatch|distance", ...]}
+各要素の"name|posMatch|distance"のposMatchは、mb/gg間の座標が近いかどうかだけを機械的に判定した結果(address=近い候補あり|none=なし)。名前が一致するかどうかの判断にはこの値を使わず、必ずAI自身の意味理解(表記ゆれ・同音異字等を含む)で行うこと。
+
+gg配列のうち、Mapbox側(mb)に対応する候補が無いと判断したものの配列インデックス(0始まり)を全てuncoveredIndexesに列挙してください。1つも無ければ空配列にしてください。
+
+出力は必ず以下のJSON形式のみ。
+{"uncoveredIndexes": [number, ...], "reasoning": "日本語で1〜2文の短い説明"}`;
+
+// runAiDiagnosis実行中に裏で発生する追加API呼び出し数(bbox無視の再検索・types不整合の再検索・
+// poi_brand/poi_category個別検証など)を数えるカウンタ。実行開始時にresetAiDiagApiCallCounts()でリセットする。
+// GoogleはAI診断中に再フェッチすることが無いため常に0(カード表示の透明性のため明示的に持たせておく)
+let aiDiagApiCallCounts = { mapbox: 0, google: 0 };
+function resetAiDiagApiCallCounts() { aiDiagApiCallCounts = { mapbox: 0, google: 0 }; }
+
+// 診断専用の再検索の共通ヘルパー。dropBbox(bbox無視トグル)とtypesOverride(types不整合チェック時、
+// その1値だけに絞って再検索)のどちらか/両方を指定できる。画面表示中のmapboxRawResultsは変更しない。
+async function searchMapboxDiag(query, { dropBbox = false, typesOverride = null } = {}) {
   const params = new URLSearchParams({ q: query });
   for (const [k, v] of Object.entries(state.mapboxParams)) {
-    if (k === 'bbox') continue;
+    if (dropBbox && k === 'bbox') continue;
+    if (typesOverride && k === 'types') continue;
     const s = serializeMapboxParam(v);
     if (s !== null) params.set(k, s);
   }
+  if (typesOverride) params.set('types', typesOverride);
   params.set('access_token', MAPBOX_TOKEN);
+  aiDiagApiCallCounts.mapbox++;
   const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/forward?${params}`);
   if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
   const data = await res.json();
@@ -1282,13 +1520,21 @@ async function searchMapboxIgnoringBbox(query) {
     coordinates: { longitude: f.geometry?.coordinates?.[0] ?? 0, latitude: f.geometry?.coordinates?.[1] ?? 0 },
   }));
 }
+// bbox無視トグルON時、診断専用にMapboxをbbox無しで再検索する。
+// poi_brand/poi_categoryフローの追加検証(該当POI名での個別検索)にも同じ関数を使う
+function searchMapboxIgnoringBbox(query) { return searchMapboxDiag(query, { dropBbox: true }); }
+// types不整合チェック時、期待されるtypes値1つだけに絞って再検索する
+function searchMapboxWithTypesOverride(query, expectedType) { return searchMapboxDiag(query, { typesOverride: expectedType }); }
 
-// AIとの対話を3ターンに分けるためのペイロードを組み立てる。
-// 1ターン目=query, 2ターン目=Mapbox候補, 3ターン目=Google候補。判定が早いターンで確定すれば、
-// 後続ターン(特にGoogle候補)は呼び出し側がAPIに送らないので、その分のinトークンが丸ごと発生しない。
-// 各ターンとも「クエリ・proximity・比較結果ステータス・name・距離」だけに絞る(住所・生座標は渡さない)。
-// トークン節約のため、候補はJSON object配列ではなく"name|matchStatus|distance"のパイプ区切り文字列配列にする
-async function buildAiDiagTurnPayloads(query) {
+// proximity/locationからの距離を診断プロンプト向けの短い文字列に変換する(空/不明なら空文字)
+function formatDiagDistance(center, lat, lng) {
+  return formatDistanceCompact(nearProximityInfo(center?.lat, center?.lng, lat, lng).km) ?? '';
+}
+
+// AI診断に必要な素材(Mapbox/Google生データ・突き合わせ結果・行フォーマット済み文字列)をまとめて用意する。
+// 各行とも「proximity・座標近似ステータス・name・距離」だけに絞る(住所・生座標は渡さない)。
+// トークン節約のため、候補はJSON object配列ではなく"name|posMatch|distance"のパイプ区切り文字列配列にする
+async function buildAiDiagContext(query) {
   let mList = Array.isArray(mapboxRawResults) ? mapboxRawResults : [];
   let bboxIgnoredForDiagnosis = false;
   if (aiDiagSettings.ignoreBbox && Array.isArray(state.mapboxParams.bbox) && state.mapboxParams.bbox.length === 4) {
@@ -1297,48 +1543,194 @@ async function buildAiDiagTurnPayloads(query) {
   }
   const gList = Array.isArray(googleRawResults) ? googleRawResults : [];
 
-  const gName = r => r.name, gCoord = r => ({ lat: r.geometry?.location?.lat, lng: r.geometry?.location?.lng });
-  const mName = r => r.name, mCoord = r => ({ lat: r.coordinates?.latitude, lng: r.coordinates?.longitude });
+  const gName = r => r.name, gCoord = r => ({ lat: r.geometry?.location?.lat, lng: r.geometry?.location?.lng }), gAddr = r => r.formatted_address;
+  const mName = r => r.name, mCoord = r => ({ lat: r.coordinates?.latitude, lng: r.coordinates?.longitude }), mAddr = r => r.full_address;
   const treatNameAsAddress = isCurrentQueryAddressType();
 
-  // matchStatusはMapbox↔Google間の突き合わせ結果であり、両リストが無いと計算できないため、
-  // ここで両方まとめて計算しておく(ターンを分けて"送る"のとは別の話)
-  const mCats = computeMatchCategories(mList, mName, mCoord, gList, gName, gCoord, treatNameAsAddress);
-  const gCats = computeMatchCategories(gList, gName, gCoord, mList, mName, mCoord, treatNameAsAddress);
+  // posMatchはMapbox↔Google間の座標近似だけを見た結果であり、両リストが無いと計算できないため、ここで両方まとめて計算する。
+  // name一致はAI自身の意味理解に委ねる方針のため、ここでは計算しない(computeAddressMatchOnly参照)
+  const mPosMatch = computeAddressMatchOnly(mList, mCoord, mAddr, gList, gCoord, gAddr);
+  const gPosMatch = computeAddressMatchOnly(gList, gCoord, gAddr, mList, mCoord, mAddr);
 
   // MapboxのproximityとGoogleのlocationは常に同一の値を使っている前提のため、1つに統合する
   const center = state.mapboxParams.proximity ?? state.googleParams.location ?? null;
   const proxStr = (center?.lat != null && center?.lng != null) ? `${center.lat},${center.lng}` : null;
-  const distanceOf = (lat, lng) => formatDistanceCompact(nearProximityInfo(center?.lat, center?.lng, lat, lng).km) ?? '';
+  const distanceOf = (lat, lng) => formatDiagDistance(center, lat, lng);
 
-  const toRow = (name, matchStatus, distance) => [name ?? '', matchStatus, distance].join('|');
-  const mapboxRows = mList.map((r, i) => toRow(r.name, mCats[i], distanceOf(r.coordinates?.latitude, r.coordinates?.longitude)));
-  const googleRows = gList.map((r, i) => toRow(r.name, gCats[i], distanceOf(r.geometry?.location?.lat, r.geometry?.location?.lng)));
+  const toRow = (name, posMatch, distance) => [name ?? '', posMatch, distance].join('|');
+  const mapboxRows = mList.map((r, i) => toRow(r.name, mPosMatch[i], distanceOf(r.coordinates?.latitude, r.coordinates?.longitude)));
+  const googleRows = gList.map((r, i) => toRow(r.name, gPosMatch[i], distanceOf(r.geometry?.location?.lat, r.geometry?.location?.lng)));
 
-  return [
-    { q: query },
-    {
-      prox: proxStr,
-      bbox: (!bboxIgnoredForDiagnosis && Array.isArray(state.mapboxParams.bbox) && state.mapboxParams.bbox.length === 4)
-        ? state.mapboxParams.bbox.join(',') : null,
-      bboxIgnored: bboxIgnoredForDiagnosis,
-      mb: mapboxRows,
-    },
-    { gg: googleRows },
-  ];
+  const bboxStr = (!bboxIgnoredForDiagnosis && Array.isArray(state.mapboxParams.bbox) && state.mapboxParams.bbox.length === 4)
+    ? state.mapboxParams.bbox.join(',') : null;
+
+  return {
+    query, mList, gList, mPosMatch, gPosMatch, mapboxRows, googleRows,
+    proxStr, bboxStr, bboxIgnored: bboxIgnoredForDiagnosis,
+    mName, mCoord, mAddr, gName, gCoord, gAddr, treatNameAsAddress, center,
+  };
 }
 
-function formatAiDiagUsage(usage) {
+// AIの応答テキストからJSONを抜き出してparseする。見つからなければエラー(呼び出し元でaiDiagStateをerrorにする)
+function parseAiJson(raw, label) {
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error(`AI response was not valid JSON (${label})`);
+  return JSON.parse(match[0]);
+}
+
+// poi_brand/poi_categoryフローで「Mapbox側に対応候補が無い」と判定されたGoogle候補について、
+// そのPOI名で個別にMapbox Search Box forwardを実行し、本当に無いのか、ランキング外に埋もれているだけなのかを検証する。
+// (見つかった場合の座標近似判定は、既存のcoordinatesMatchより少し広め(200m)にしている。
+//  名前一致という強い手がかりで検索した上での座標確認なので、多少の座標ズレは許容してよいと判断)
+const AI_DIAG_COVERAGE_VERIFY_THRESHOLD_KM = 0.2;
+async function verifyMapboxHasPoi(googleItem) {
+  const name = googleItem?.name;
+  const gLat = googleItem?.geometry?.location?.lat, gLng = googleItem?.geometry?.location?.lng;
+  if (!name || gLat == null || gLng == null) return false;
+  let results;
+  try { results = await searchMapboxIgnoringBbox(name); } catch { return false; }
+  return results.some(r => {
+    const km = haversineDistanceKm(gLat, gLng, r.coordinates?.latitude, r.coordinates?.longitude);
+    return isFinite(km) && km <= AI_DIAG_COVERAGE_VERIFY_THRESHOLD_KM;
+  });
+}
+
+// good判定のPerfect/Almost内訳を、AI判定のrankから決める共通ヘルパー
+function goodReasonForRank(rank) {
+  return rank === 1 ? 'Perfect (Correct POI at top)' : 'Almost! (Correct POI but not ranked at top)';
+}
+
+// types不整合チェック: 分類結果の粒度が期待するMapbox `types`値と食い違っている場合(typesが指定されていて、
+// かつその値を含んでいない場合のみ)、期待値1つだけに絞って再検索し、もう一度Mapbox単独判定をやり直す。
+// ヒットすればConditional good(パラメータを直せば通る)として返す。mParsed/mDataは元の1st pass判定結果
+// (再検証が空振りだった場合、そちらのreasoningをフォールバックとして使う)
+async function tryTypesMismatchRescue(ctx, modelId, addUsage, qType) {
+  const expectedType = MAPBOX_TYPE_EXPECTATION[qType];
+  const currentTypes = Array.isArray(state.mapboxParams.types) ? state.mapboxParams.types : [];
+  if (!expectedType || currentTypes.length === 0 || currentTypes.includes(expectedType)) return null;
+
+  const fixedMList = await searchMapboxWithTypesOverride(ctx.query, expectedType);
+  const fixedPosMatch = computeAddressMatchOnly(fixedMList, ctx.mCoord, ctx.mAddr, ctx.gList, ctx.gCoord, ctx.gAddr);
+  const fixedRows = fixedMList.map((r, i) => [r.name ?? '', fixedPosMatch[i], formatDiagDistance(ctx.center, r.coordinates?.latitude, r.coordinates?.longitude)].join('|'));
+  const fixedPayload = { q: ctx.query, prox: ctx.proxStr, bbox: ctx.bboxStr, bboxIgnored: ctx.bboxIgnored, mb: fixedRows };
+  const fixedData = await callClaudeRaw(AI_DIAG_MAPBOX_PROMPT, [{ role: 'user', content: JSON.stringify(fixedPayload) }], 300, modelId);
+  addUsage(fixedData);
+  const fixedParsed = parseAiJson(extractClaudeText(fixedData), 'mapbox-types-fix');
+  if (!fixedParsed.matched) return null;
+  return {
+    category: 'good', reason: CONDITIONAL_GOOD_REASON,
+    conditionalReasons: ['Types filter excluded correct type'],
+    rank: fixedParsed.rank ?? null,
+    reasoning: `Re-searched with types=${expectedType} only: ${fixedParsed.reasoning || ''}`,
+  };
+}
+
+// specific(poi/address/region/place/locality/neighborhood/others)フロー本体
+async function runAiDiagSpecificFlow(ctx, modelId, addUsage, qType) {
+  const { mList, gList, mName, treatNameAsAddress } = ctx;
+
+  // JS側だけで判定できる無料のレスキュー: Googleの1位候補と名前が一致するMapbox候補があれば、
+  // AIを呼ばずに即Good確定する(この一致自体はcomputeMatchCategoriesと同じ機械的な正規化比較のため、AI判断は不要)
+  if (gList.length) {
+    const topGoogleName = ctx.gName(gList[0]);
+    for (let i = 0; i < mList.length; i++) {
+      if (namesMatch(mName(mList[i]), topGoogleName, treatNameAsAddress)) {
+        const rank = i + 1;
+        return {
+          category: 'good', reason: goodReasonForRank(rank), conditionalReasons: null, rank,
+          reasoning: `Google's top result is corroborated by a name-matching Mapbox candidate at rank ${rank} (mechanical cross-check, no AI call needed for this).`,
+        };
+      }
+    }
+  }
+
+  // ステップ1: Mapbox候補だけで判定
+  const mapboxPayload = { q: ctx.query, prox: ctx.proxStr, bbox: ctx.bboxStr, bboxIgnored: ctx.bboxIgnored, mb: ctx.mapboxRows };
+  const mData = await callClaudeRaw(AI_DIAG_MAPBOX_PROMPT, [{ role: 'user', content: JSON.stringify(mapboxPayload) }], 300, modelId);
+  addUsage(mData);
+  const mParsed = parseAiJson(extractClaudeText(mData), 'mapbox');
+  if (mParsed.matched) {
+    return {
+      category: 'good', reason: goodReasonForRank(mParsed.rank), conditionalReasons: null,
+      rank: mParsed.rank ?? null, reasoning: mParsed.reasoning || '',
+    };
+  }
+
+  // types不整合チェック(bad確定前に1回だけ試す)
+  const typesRescue = await tryTypesMismatchRescue(ctx, modelId, addUsage, qType);
+  if (typesRescue) return typesRescue;
+
+  // ステップ2: Mapboxで見つからなかった場合(types修正でも駄目だった場合含む)、Google候補だけで判定。
+  // ここでgoogleが一致したかどうかは、そのまま「Is google result ok?」の答えとしても使い回す
+  // (旧not_hit_both = Mapbox/Google両方ヒットせず、はgoogleOk='no'で表現する)
+  const googlePayload = { q: ctx.query, gg: ctx.googleRows };
+  const gData = await callClaudeRaw(AI_DIAG_GOOGLE_PROMPT, [{ role: 'user', content: JSON.stringify(googlePayload) }], 300, modelId);
+  addUsage(gData);
+  const gParsed = parseAiJson(extractClaudeText(gData), 'google');
+  return {
+    category: 'bad', reason: gParsed.matched ? (gParsed.badTag || null) : null, conditionalReasons: null, rank: null,
+    googleOk: gParsed.matched ? 'yes' : 'no',
+    reasoning: gParsed.reasoning || '',
+  };
+}
+
+// poi_brand/poi_categoryフロー本体(カバレッジ判定)。Googleをground truthとして使うフローのため、
+// 「Is google result ok?」は概念上当てはまらない(常にgoogleOk=null、設定がONでも追加チェックしない)
+async function runAiDiagCoverageFlow(ctx, modelId, addUsage, qType) {
+  const payload = { q: ctx.query, mb: ctx.mapboxRows, gg: ctx.googleRows };
+  const data = await callClaudeRaw(AI_DIAG_COVERAGE_PROMPT, [{ role: 'user', content: JSON.stringify(payload) }], 400, modelId);
+  addUsage(data);
+  const parsed = parseAiJson(extractClaudeText(data), 'coverage');
+  const uncoveredIndexes = Array.isArray(parsed.uncoveredIndexes) ? parsed.uncoveredIndexes : [];
+
+  // 未カバー判定された候補は、AI呼び出し無しでMapbox Search Box forwardによる個別検証を行う
+  // (ランキング外に埋もれているだけの可能性を排除するため。件数上限は設けない)
+  const stillMissing = [];
+  await Promise.all(uncoveredIndexes.map(async (idx) => {
+    const gItem = ctx.gList[idx];
+    if (!gItem) return;
+    const found = await verifyMapboxHasPoi(gItem);
+    if (!found) stillMissing.push(gItem.name);
+  }));
+
+  if (stillMissing.length > 0) {
+    const badTag = qType === 'poi_brand' ? 'poi coverage (brand)' : 'poi coverage';
+    return {
+      category: 'bad', reason: badTag, conditionalReasons: null, rank: null, googleOk: null,
+      reasoning: `Mapbox is missing: ${stillMissing.join(', ')} (verified via a dedicated Mapbox search per candidate).`,
+    };
+  }
+  return {
+    category: 'good', reason: null, conditionalReasons: null, rank: null, googleOk: null,
+    reasoning: parsed.reasoning || 'All Google-listed candidates for this category/brand are also present in Mapbox (directly or confirmed via a dedicated search).',
+  };
+}
+
+// AI診断設定「Check Google result quality too」がONの時だけ使う追加チェック。
+// specific flowでMapboxが最初から一致した(goodだった)場合、そのままではGoogle側を見ていないため、
+// AI_DIAG_GOOGLE_PROMPTを流用してGoogle候補単体で見て良い候補があるかを判定する
+async function checkGoogleResultOk(ctx, modelId, addUsage) {
+  const payload = { q: ctx.query, gg: ctx.googleRows };
+  const data = await callClaudeRaw(AI_DIAG_GOOGLE_PROMPT, [{ role: 'user', content: JSON.stringify(payload) }], 300, modelId);
+  addUsage(data);
+  const parsed = parseAiJson(extractClaudeText(data), 'google-ok');
+  return parsed.matched ? 'yes' : 'no';
+}
+
+// mapboxApiLabel: このusageで数えているMapbox API呼び出しの種類を表す表示ラベル(呼び出し元によって異なるため引数で渡す)
+function formatAiDiagUsage(usage, mapboxApiLabel = 'Search Box forward') {
   if (!usage) return '';
   const modelLabel = AI_DIAG_MODEL_LABELS[usage.model] || usage.model;
   const parts = [];
   if (usage.inputTokens != null) parts.push(`in ${usage.inputTokens}`);
-  if (usage.cacheReadInputTokens)     parts.push(`cache read ${usage.cacheReadInputTokens}`);
-  if (usage.cacheCreationInputTokens) parts.push(`cache write ${usage.cacheCreationInputTokens}`);
+  // 0でも「キャッシュが効いているか」を目視確認したいので、値が無い(null)場合だけ非表示にする
+  if (usage.cacheReadInputTokens != null)     parts.push(`cache read ${usage.cacheReadInputTokens}`);
+  if (usage.cacheCreationInputTokens != null) parts.push(`cache write ${usage.cacheCreationInputTokens}`);
   if (usage.outputTokens != null) parts.push(`out ${usage.outputTokens}`);
   const tokens = parts.length ? `${parts.join(' / ')} tok` : 'token count unknown';
   const cost = usage.costJpy != null ? ` / ≈¥${usage.costJpy < 0.01 ? '<0.01' : usage.costJpy.toFixed(2)}` : '';
-  return `${modelLabel} / ${tokens}${cost}`;
+  const apiCalls = ` / Mapbox API calls: ${usage.mapboxApiCalls ?? 0} (${mapboxApiLabel}) / Google API calls: ${usage.googleApiCalls ?? 0}`;
+  return `${modelLabel} / ${tokens}${cost}${apiCalls}`;
 }
 
 function renderAiDiagPanel() {
@@ -1354,7 +1746,6 @@ function renderAiDiagPanel() {
   if (aiDiagState === 'error') {
     body.innerHTML = `
       <div class="ai-diag-toolbar">
-        <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ Settings</button>
         <button class="btn btn-primary" id="ai-diag-run-btn">▶ Run Evaluation</button>
       </div>
       <p class="status-msg status-error" style="padding:0;">${esc(aiDiagError)}</p>`;
@@ -1363,18 +1754,17 @@ function renderAiDiagPanel() {
   }
   if (aiDiagState === 'proposal' && aiDiagProposal) {
     const p = aiDiagProposal;
-    const CAT_LABELS = { good: p.goodReason || 'Good', bad: 'Bad', not_hit_both: 'Not hit in both', unknown_query: 'Unknown query' };
-    const CAT_CLASSES = { good: 'cat-good', bad: 'cat-bad', not_hit_both: 'cat-nothit', unknown_query: 'cat-unknown' };
+    const CAT_LABELS = { good: p.reason || 'Good', bad: 'Bad', unclear: p.reason || 'Unclear' };
+    const CAT_CLASSES = { good: 'cat-good', bad: 'cat-bad', unclear: 'cat-unclear' };
     const catLabel = CAT_LABELS[p.category] ?? p.category;
     const catCls = CAT_CLASSES[p.category] ?? '';
     body.innerHTML = `
-      <div class="ai-diag-toolbar">
-        <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ Settings</button>
-      </div>
       <div class="ai-diag-card">
         <div class="ai-diag-card-cat ${catCls}">${esc(catLabel)}</div>
         ${p.category === 'good' && p.rank ? `<div class="ai-diag-card-tag">Matched at rank ${p.rank}</div>` : ''}
-        ${p.category === 'bad' && p.badTag ? `<div class="ai-diag-card-tag">Tag: ${esc(p.badTag)}</div>` : ''}
+        ${p.category === 'bad' && p.reason ? `<div class="ai-diag-card-tag">Tag: ${esc(p.reason)}</div>` : ''}
+        ${p.conditionalReasons && p.conditionalReasons.length ? `<div class="ai-diag-card-tag">Why: ${esc(p.conditionalReasons.join(', '))}</div>` : ''}
+        ${p.googleOk ? `<div class="ai-diag-card-tag">Google OK: ${esc(p.googleOk)}</div>` : ''}
         <div class="ai-diag-card-reason">${esc(p.reasoning || '')}</div>
         <div class="ai-diag-card-usage">${esc(formatAiDiagUsage(p.usage))}</div>
         <div class="ai-diag-card-actions">
@@ -1382,7 +1772,6 @@ function renderAiDiagPanel() {
           <button class="btn btn-secondary" id="ai-diag-decline-btn">Decline</button>
         </div>
       </div>`;
-    document.getElementById('ai-diag-settings-btn').addEventListener('click', openAiDiagSettings);
     document.getElementById('ai-diag-accept-btn').addEventListener('click', acceptAiProposal);
     document.getElementById('ai-diag-decline-btn').addEventListener('click', () => { aiDiagState = 'decline_input'; renderAiDiagPanel(); });
     return;
@@ -1407,14 +1796,12 @@ function renderAiDiagPanel() {
   // idle
   body.innerHTML = `
     <div class="ai-diag-toolbar">
-      <button class="btn btn-secondary" id="ai-diag-settings-btn">⚙ Settings</button>
       <button class="btn btn-primary" id="ai-diag-run-btn">▶ Run Evaluation</button>
     </div>`;
   wireAiDiagToolbar();
 }
 
 function wireAiDiagToolbar() {
-  document.getElementById('ai-diag-settings-btn').addEventListener('click', openAiDiagSettings);
   document.getElementById('ai-diag-run-btn').addEventListener('click', runAiDiagnosis);
 }
 
@@ -1422,44 +1809,52 @@ async function runAiDiagnosis() {
   if (!feedbackContext) return;
   aiDiagState = 'analyzing';
   renderAiDiagPanel();
+  resetAiDiagApiCallCounts();
   try {
-    // ターン1=query, ターン2=Mapbox候補, ターン3=Google候補。判定が確定したターンで打ち切るので、
-    // 例えばターン2で「Good」に決着すればGoogle候補は一度もAPIに送信されない
-    const turnPayloads = await buildAiDiagTurnPayloads(feedbackContext.query);
+    const query = feedbackContext.query;
     const modelKey = aiDiagSettings.model;
     const modelId = AI_DIAG_MODEL_IDS[modelKey] || AI_DIAG_MODEL_IDS.haiku;
-    // 判定手順+タグ一覧は毎回完全に同一の文字列なので、system側だけPrompt Cachingの対象にする
-    // (Mapbox/Google候補等が入るuserメッセージはクエリごとに変わるためキャッシュ対象外)
-    const systemBlocks = [{ type: 'text', text: AI_DIAG_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
-
-    const messages = [];
     const usage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
-    let parsed = null;
-
-    for (let turn = 0; turn < turnPayloads.length; turn++) {
-      messages.push({ role: 'user', content: JSON.stringify(turnPayloads[turn]) });
-      const data = await callClaudeRaw(systemBlocks, messages, 500, modelId);
-      const raw = extractClaudeText(data);
+    const addUsage = (data) => {
       usage.inputTokens              += data?.usage?.input_tokens               ?? 0;
       usage.outputTokens             += data?.usage?.output_tokens              ?? 0;
       usage.cacheCreationInputTokens += data?.usage?.cache_creation_input_tokens ?? 0;
       usage.cacheReadInputTokens     += data?.usage?.cache_read_input_tokens     ?? 0;
+    };
 
-      const match = raw.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error(`AI response was not valid JSON (turn ${turn + 1})`);
-      parsed = JSON.parse(match[0]);
-      messages.push({ role: 'assistant', content: raw });
-
-      if (parsed.category != null) break; // 判定確定。以降のターンは送らない
-      if (turn === turnPayloads.length - 1) {
-        // 最終ターン(Google候補まで見た)でも未確定 = プロンプト不備のフォールバック
-        parsed = { category: 'not_hit_both', reasoning: '(AI could not reach a final verdict by the last turn)' };
-      }
+    // ステップ0: クエリの分類(専用の最小プロンプトで単発呼び出し)。
+    // poi/address/region/place/locality/neighborhood/others → 唯一の正解を探すフロー、
+    // poi_brand/poi_category → カバレッジを見るフロー、unknown → 即unclear確定
+    const classifyData = await callClaudeRaw(AI_DIAG_CLASSIFY_PROMPT, [{ role: 'user', content: JSON.stringify({ q: query }) }], 200, modelId);
+    addUsage(classifyData);
+    const classifyParsed = parseAiJson(extractClaudeText(classifyData), 'classify');
+    const qType = classifyParsed.type;
+    if (!AI_DIAG_QUERY_TYPES.includes(qType)) {
+      throw new Error('AI returned an invalid query type');
     }
 
-    if (!['good', 'bad', 'not_hit_both', 'unknown_query'].includes(parsed.category)) throw new Error('AI returned an invalid category');
+    let parsed;
+    let ctx = null;
+    if (qType === 'unknown') {
+      parsed = { category: 'unclear', reason: UNCLEAR_REASONS[0], conditionalReasons: null, rank: null, googleOk: null, reasoning: classifyParsed.reasoning || '' };
+    } else {
+      ctx = await buildAiDiagContext(query);
+      parsed = (qType === 'poi_brand' || qType === 'poi_category')
+        ? await runAiDiagCoverageFlow(ctx, modelId, addUsage, qType)
+        : await runAiDiagSpecificFlow(ctx, modelId, addUsage, qType);
+    }
+
+    // googleOkがまだ未決定(specific flowでMapboxが最初から一致したケース)の場合のみ、
+    // 設定がONなら追加でGoogle単体チェックを行う。OFFならnullのまま(質問自体をスキップ)
+    if (parsed.googleOk === undefined) {
+      parsed.googleOk = (aiDiagSettings.checkGoogleOk && ctx) ? await checkGoogleResultOk(ctx, modelId, addUsage) : null;
+    }
+
+    if (!['good', 'bad', 'unclear'].includes(parsed.category)) throw new Error('AI returned an invalid category');
     usage.model = modelKey;
     usage.costJpy = estimateAiDiagCostJpy(modelKey, usage);
+    usage.mapboxApiCalls = aiDiagApiCallCounts.mapbox;
+    usage.googleApiCalls = aiDiagApiCallCounts.google;
     parsed.usage = usage;
     aiDiagProposal = parsed;
     aiDiagState = 'proposal';
@@ -1478,12 +1873,11 @@ function submitAiDiagDecision(decision, declineReason) {
   const p = aiDiagProposal;
   recordAiDiagLog({
     query: feedbackContext?.query ?? null, fileName: feedbackContext?.fileName ?? null, rowIndex: feedbackContext?.rowIndex ?? null,
-    model: aiDiagSettings.model, ignoreBbox: aiDiagSettings.ignoreBbox,
+    model: aiDiagSettings.model, ignoreBbox: aiDiagSettings.ignoreBbox, checkGoogleOk: aiDiagSettings.checkGoogleOk,
     proposal: p, decision, declineReason: declineReason || null,
   });
   if (decision === 'accept' && feedbackContext) {
-    const reason = p.category === 'good' ? p.goodReason : p.category === 'bad' ? p.badTag : null;
-    recordFeedback(feedbackContext, p.category, reason);
+    recordFeedback(feedbackContext, p.category, p.reason, p.googleOk, p.conditionalReasons);
     if (currentCsvFileId) renderCSVViewport();
   }
   aiDiagState = 'idle';
@@ -1491,18 +1885,29 @@ function submitAiDiagDecision(decision, declineReason) {
   renderAiDiagPanel();
 }
 
-function openAiDiagSettings() {
+// CSV Scan/AI Evaluation/Ask AIの3設定をヘッダーの1エントリに統一したダイアログ。
+// Ask AIはSonnet 5固定(選択不可)のため、ここでは表示のみで読み書きしない
+function openAiSettings() {
+  document.getElementById('csv-scan-model-select').value = csvScanModel;
   document.getElementById('ai-diag-model-select').value = aiDiagSettings.model;
   document.getElementById('ai-diag-ignore-bbox-checkbox').checked = aiDiagSettings.ignoreBbox;
-  document.getElementById('ai-diag-settings-dialog').classList.add('open');
+  document.getElementById('ai-diag-check-google-ok-checkbox').checked = aiDiagSettings.checkGoogleOk;
+  document.getElementById('ask-ai-model-select').value = askAiModel;
+  document.getElementById('ai-settings-dialog').classList.add('open');
 }
-document.getElementById('ai-diag-settings-save').addEventListener('click', () => {
+document.getElementById('open-ai-settings-btn').addEventListener('click', openAiSettings);
+document.getElementById('ai-settings-save').addEventListener('click', () => {
+  csvScanModel = document.getElementById('csv-scan-model-select').value;
+  saveCsvScanModel();
   aiDiagSettings = {
     model: document.getElementById('ai-diag-model-select').value,
     ignoreBbox: document.getElementById('ai-diag-ignore-bbox-checkbox').checked,
+    checkGoogleOk: document.getElementById('ai-diag-check-google-ok-checkbox').checked,
   };
   saveAiDiagSettings();
-  closeDialog('ai-diag-settings-dialog');
+  askAiModel = document.getElementById('ask-ai-model-select').value;
+  saveAskAiModel();
+  closeDialog('ai-settings-dialog');
 });
 
 // ============================================================
@@ -1846,7 +2251,11 @@ function serializeMapboxParam(value) {
 
 function buildMapboxParams(query, includeToken) {
   const params = new URLSearchParams({ q: query });
+  // csv-toolbarのIgnore bbox/nav profileチェックボックスは、CSV読み込み中のクエリにのみ適用する
+  const isCsvQuery = !!currentCsvFileId && csvIndex >= 0;
   for (const [k, v] of Object.entries(state.mapboxParams)) {
+    if (isCsvQuery && csvIgnoreBbox && k === 'bbox') continue;
+    if (isCsvQuery && csvIgnoreNavProfile && k === 'navigation_profile') continue;
     const s = serializeMapboxParam(v);
     if (s !== null) params.set(k, s);
   }
@@ -1926,34 +2335,302 @@ function renderMapboxResults(data) {
   if (data.error) { el.innerHTML = `<p class="status-msg status-error">${data.error}</p>`; countEl.textContent = ''; return; }
   if (!data.length) { el.innerHTML = `<p class="status-msg">No results</p>`; countEl.textContent = ''; return; }
   countEl.textContent = `${data.length} results`;
+
+  // 候補内重複チェック: namesMatchのうち「name側」の判定ロジック(normalizeNameForMatchによるNFKC+空白除去+完全一致)だけを使う。
+  // treatAsAddress=trueの前方/後方一致は緩すぎて(住所の一部が他の住所の末尾と偶然一致する等)誤検出が多いため使わない
+  const duplicateMatchIndexes = data.map((r, i) =>
+    data.map((other, j) => (i !== j && namesMatch(r.name, other.name, false)) ? j + 1 : null).filter(n => n != null));
+
   el.innerHTML = data.map((r, i) => `
     <div class="result-item" style="cursor:pointer;"
          data-lat="${r.coordinates.latitude}" data-lng="${r.coordinates.longitude}">
       <div class="result-index mapbox-index">${i+1}</div>
       <div>
-        <div class="result-name">${r.name??''}</div>
+        <div class="result-name">${r.name??''}${duplicateMatchIndexes[i].length ? ` <span class="duplicate-badge">duplicated with ${duplicateMatchIndexes[i].map(n => `#${n}`).join(', ')}</span>` : ''}</div>
         <div class="result-address">${r.full_address??''}</div>
         <div class="result-type">${[r.feature_type,...(r.poi_category??[])].filter(Boolean).join(' · ')}</div>
+      </div>
+      <div class="result-actions">
+        <button type="button" class="result-copy-btn" data-idx="${i}" title="Copy name/address/id">Copy</button>
+        <button type="button" class="result-ask-ai-btn" data-idx="${i}" title="Ask AI to check this result">Ask AI</button>
       </div>
     </div>`).join('');
 
   el.querySelectorAll('.result-item').forEach((item, i) => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.result-actions')) return;
       const lat = parseFloat(item.dataset.lat);
       const lng = parseFloat(item.dataset.lng);
       centerMapsTo(lat, lng);
       highlightMapboxMarker(i);
     });
   });
+
+  el.querySelectorAll('.result-ask-ai-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const r = data[parseInt(btn.dataset.idx, 10)];
+      openAskAiModal(r);
+    });
+  });
+
+  el.querySelectorAll('.result-copy-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const r = data[parseInt(btn.dataset.idx, 10)];
+      const text = `name:${r.name ?? ''}\naddress:${r.full_address ?? ''}\nid:${r.mapbox_id ?? ''}`;
+      navigator.clipboard.writeText(text);
+      const orig = btn.textContent;
+      btn.textContent = '✅';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    });
+  });
+}
+
+// ============================================================
+// ASK AI (Mapbox結果1件についてPOIの実在/最新性/タグ正確性をAIの世界知識でチェックさせ、
+// 住所と緯度経度の整合だけはAIに頼らずMapbox Temporary Geocoding API(reverse)で機械的に検証する)
+// モデルはAI診断のバッチ設定(aiDiagSettings.model)から独立させ、常にSonnet 5固定にする。
+// (Ask AIは1件ずつ手動で呼ぶ低頻度の操作でコストがほぼ問題にならない一方、実在性等の判定は
+//  モデルの世界知識の量そのものに依存するため、Haikuでは精度不足になりやすい)
+// ステートレスな単発呼び出し
+// ============================================================
+// temperatureは変更しない: モデルの知識量はtemperatureと無関係(学習時点で固定)で、上げてもJSON出力が
+// 崩れたり事実でない内容を断定しやすくなるリスクがあるだけ。「知識があれば断定してよい」はプロンプト文言側で担保する
+//
+// 【重要な限界】このAPI呼び出しはツール(Web検索等)を一切使わない素のMessages API呼び出しであり、
+// モデルは学習時点で凍結された知識だけで判断する。つまり「学習カットオフ以降に実際に起きた
+// 閉店・改名・住所変更」はどれだけプロンプトを工夫しても原理的に知り得ない。
+// ここでのプロンプト強化は「知っている範囲の精度(誤って過信/過小評価しない)」を上げるためのものであり、
+// 「今現在の状態を確実に言い当てられるようにする」ものではない。
+// Mapbox Search Box APIのpoi_category canonical_id一覧(日本、285件)。
+// 出典: geonator_lite/data/category-taxonomy.js (CATEGORY_TAXONOMY)。プロジェクトを跨いだimportはできないため
+// 手動コピー。">"は親>子の階層(トップカテゴリのみの行、トップ>サブの行がそれぞれ独立したcanonical_id)。
+// tags_correctチェックで「poi_categoryがこの一覧の中でベストマッチか」を判定させるために使う
+const CATEGORY_TAXONOMY = [
+  "ショップ","ショップ>おもちゃ","ショップ>たばこ","ショップ>アウトドア用品","ショップ>アウトレット","ショップ>カメラ",
+  "ショップ>カー用品","ショップ>コンビニ","ショップ>ゴルフ用品","ショップ>ショッピングセンター","ショップ>ジュエリー",
+  "ショップ>スキー用品","ショップ>スポーツ用品","ショップ>スーパー","ショップ>チケット販売","ショップ>ディスカウントショップ",
+  "ショップ>ハンドバッグ","ショップ>バイク販売","ショップ>ファッション(女性)","ショップ>ファッション(男性)","ショップ>ブライダル",
+  "ショップ>ベッド","ショップ>ベビー用品","ショップ>ペット用品","ショップ>ホームセンター","ショップ>メガネ","ショップ>リサイクル",
+  "ショップ>中古車販売","ショップ>健康食品","ショップ>八百屋","ショップ>化粧品","ショップ>子ども服","ショップ>家具",
+  "ショップ>携帯電話","ショップ>文房具","ショップ>新車販売","ショップ>日用雑貨","ショップ>時計","ショップ>書籍","ショップ>百貨店",
+  "ショップ>米店","ショップ>肉屋","ショップ>自然食品","ショップ>自転車","ショップ>花屋","ショップ>薬局","ショップ>質屋",
+  "ショップ>酒店","ショップ>釣り用品","ショップ>電化製品","ショップ>靴","ショップ>音楽","ショップ>音楽楽器","ショップ>鮮魚店",
+  "トラベル","トラベル>ガソリンスタンド","トラベル>サービスエリア","トラベル>タクシー","トラベル>チャージステーション",
+  "トラベル>バス","トラベル>フェリー","トラベル>ホテル","トラベル>レンタカー","トラベル>公共の宿","トラベル>旅行代理店",
+  "トラベル>旅館","トラベル>民宿","トラベル>温泉","トラベル>港","トラベル>空港","トラベル>観光名所","トラベル>観光案内",
+  "トラベル>鉄道","トラベル>飛行機","トラベル>駅","トラベル>駐車場",
+  "レジャー","レジャー>お城","レジャー>ウィンタースポーツ","レジャー>カジノ","レジャー>カラオケボックス","レジャー>キャンプ場",
+  "レジャー>クルージング","レジャー>ゲームセンター","レジャー>ゴルフ","レジャー>サッカー","レジャー>スケート",
+  "レジャー>スポーツジム","レジャー>スポーツ競技場","レジャー>セーリング","レジャー>テニス","レジャー>テーマパーク",
+  "レジャー>ナイトクラブ","レジャー>バスケットボール","レジャー>パチンコ","レジャー>ビリヤード","レジャー>ボウリング",
+  "レジャー>ボクシング","レジャー>マリンスポーツ","レジャー>モーターレース","レジャー>ヨガ","レジャー>公園","レジャー>劇場",
+  "レジャー>動物園","レジャー>映画館","レジャー>植物園","レジャー>水族館","レジャー>水泳場","レジャー>牧場","レジャー>競馬",
+  "レジャー>美術館","レジャー>自転車レンタル","レジャー>野球","レジャー>釣り","レジャー>音楽ホール","レジャー博物館",
+  "レストラン","レストラン>うどん","レストラン>うなぎ","レストラン>お好み焼き","レストラン>かに","レストラン>しゃぶしゃぶ",
+  "レストラン>すき焼き","レストラン>その他","レストラン>そば","レストラン>たこ焼き","レストラン>ちゃんぽん",
+  "レストラン>とんかつ","レストラン>アイスクリーム","レストラン>アジアン料理","レストラン>アフリカ料理","レストラン>アメリカン",
+  "レストラン>イタリアン","レストラン>インド料理","レストラン>カフェ","レストラン>カレー","レストラン>ケバブ",
+  "レストラン>サンドイッチ","レストラン>シーフード","レストラン>ジャーマン","レストラン>スイーツ","レストラン>ステーキ",
+  "レストラン>スパニッシュ","レストラン>タイ料理","レストラン>タピオカ","レストラン>ドーナツ","レストラン>ハラル料理",
+  "レストラン>ハンバーガー","レストラン>バー","レストラン>パキスタン料理","レストラン>ビアガーデン","レストラン>ビュッフェ",
+  "レストラン>ビーガン料理","レストラン>ピザ","レストラン>ファストフード","レストラン>ファミレス","レストラン>フレンチ",
+  "レストラン>フードコート","レストラン>ブラジリアン","レストラン>ベジタリアン","レストラン>ベトナム料理",
+  "レストラン>ベーカリー","レストラン>ホットドッグ","レストラン>メキシカン","レストラン>ラーメン","レストラン>ロシアン",
+  "レストラン>ワインバー","レストラン>中華料理","レストラン>丼もの","レストラン>和菓子","レストラン>和食",
+  "レストラン>喫茶店（その他）","レストラン>地中海","レストラン>天ぷら","レストラン>寿司","レストラン>居酒屋",
+  "レストラン>弁当","レストラン>洋食","レストラン>焼き鳥","レストラン>焼肉","レストラン>西洋","レストラン>鍋料理",
+  "レストラン>韓国料理","レストラン>餃子",
+  "医療","医療>はり","医療>アレルギー科","医療>マッサージ","医療>リハビリテーション科","医療>内科","医療>外科",
+  "医療>婦人科","医療>小児科","医療>整体","医療>整形外科","医療>歯科","医療>産婦人科","医療>病院","医療>皮膚科",
+  "医療>眼科","医療>精神科","医療>美容外科","医療>耳鼻咽喉科","医療>薬局",
+  "生活","生活>そろばん教室","生活>アート教室","生活>コインランドリー","生活>コンサルタント","生活>サウナ","生活>タトゥー",
+  "生活>ダンス教室","生活>ドライクリーニング","生活>ネイルサロン","生活>ハウスクリーニング","生活>バイク修理",
+  "生活>バレエ教室","生活>パソコン教室","生活>ビジネススクール","生活>ビデオレンタル","生活>ピアスショップ",
+  "生活>ピアノ教室","生活>モスク","生活>レッカー","生活>レンタルショップ","生活>不動産","生活>中学校","生活>人材派遣",
+  "生活>会計士","生活>保育園","生活>保育所","生活>保険業","生活>倉庫","生活>児童施設","生活>公証人","生活>動物病院",
+  "生活>占い","生活>図書館","生活>国の機関","生活>大使館","生活>大学","生活>学校(その他)","生活>学習塾","生活>宅配便",
+  "生活>宗教(その他)","生活>害虫駆除","生活>寺院","生活>専門学校","生活>小学校","生活>幼稚園","生活>弁護士",
+  "生活>教会","生活>料理教室","生活>日焼けサロン","生活>水泳教室","生活>洗車場","生活>消防機関","生活>温泉浴場",
+  "生活>着付け","生活>短期大学","生活>神社","生活>福祉施設","生活>税理士","生活>美容(その他)","生活>美容院",
+  "生活>翻訳","生活>老人施設","生活>自動車修理","生活>自動車教習所","生活>葬祭業","生活>裁判所","生活>語学学校",
+  "生活>警察機関","生活>貸衣装","生活>運送","生活>郵便局","生活>金融(その他)","生活>銀行","生活>銭湯","生活>鍵",
+  "生活>防犯","生活>霊園","生活>靴修理","生活>音楽教室","生活>高等学校",
+];
+
+const ASK_AI_SYSTEM_PROMPT = `あなたは地図POIデータの品質チェックを行うアシスタントです。渡されたMapbox Search Box APIの検索結果1件(POI候補)について、あなたの知識に基づいて次の4項目を評価してください。
+
+1. exists: このPOIが今も実在すると考えられるか
+   - 単に「聞いたことがある/過去に存在した」だけでokにしないこと。倒産・閉店・チェーン全体の撤退・運営会社の吸収合併・再開発によるエリア一帯の取り壊し等、実在を疑わせる具体的な情報を知っているかどうかで判断すること
+   - 具体的なネガティブ情報を知っていればng。特に負の情報を知らず、実在を疑う理由もなければok。判断材料がなければunknown
+2. name_current: 名称が最新か
+   - 「昔からある名前だから今も同じはず」ではなく、改名・リブランド・買収に伴う名称変更のニュースを具体的に知っているかで判断すること。知っていればng(noteに新旧両方の名称を書く)、知らなければok/unknown
+3. address_current: 住所が最新か
+   - 住所変更・地番整理・移転・再開発による住所変更のニュースを具体的に知っているかで判断すること
+4. tags_correct: このPOIの実体(業種・扱っている商品/サービス)を踏まえたとき、poi_categoryが下記のMapboxカテゴリ一覧(このAPIが選択できるcanonical_idの全量)の中で最も適切な(ベストマッチな)分類になっているか
+   - poi_categoryが一覧に存在しない値であればng(ハルシネーション/廃止された値の可能性が高い。noteにその旨を書く)
+   - 一覧内の値ではあるが、同じ一覧の中にこのPOIの実体により合致する(より具体的、または実体そのものを指す)カテゴリが明らかに存在する場合はng(noteに、より適切と考えるカテゴリ名を一覧の表記そのままで書く)
+   - 一覧内の値で、かつそれが一覧の粒度の中で現実的に最も適切(または同程度に妥当)な選択であればok
+   - feature_typeが"poi"なのにpoi_categoryが空/nullの場合、一覧の中に明らかに当てはまるカテゴリがあればng(noteに提案カテゴリを書く)、判断がつかなければunknown
+   - feature_typeがpoi以外(address/place等)の場合、poi_categoryが無いのは正常なのでokとすること
+
+Mapboxカテゴリ一覧("親>子"は階層。この一覧に載っている表記からのみ判断すること):
+${CATEGORY_TAXONOMY.join(', ')}
+
+各項目についてverdict("ok"=問題なし, "ng"=問題あり, "unknown"=知識だけでは判断できない)とnote(日本語1文の根拠)を返してください。
+このPOIについて知っていることがあれば、遠慮せず自信を持って断定してください(exists/name_current/address_currentはあなたの世界知識をそのまま使ってよい)。ただし「ok」は「今現在確実にそうだ」ではなく「知っている範囲でネガティブな情報がない」という意味であることを自覚し、具体的な根拠なしに安易に確信を装わないこと。本当に知らない/聞いたことがない場合、または知識がいつ時点のものか自信が持てない場合は正直にunknownとし、根拠のない憶測で断定しないこと。
+
+出力は必ず以下のJSON形式のみ。説明文やコードブロックのマークダウンは付けないでください。
+{"summary": "日本語で全体の総評1〜2文", "checks": {
+  "exists": {"verdict": "ok"|"ng"|"unknown", "note": "..."},
+  "name_current": {"verdict": "ok"|"ng"|"unknown", "note": "..."},
+  "address_current": {"verdict": "ok"|"ng"|"unknown", "note": "..."},
+  "tags_correct": {"verdict": "ok"|"ng"|"unknown", "note": "..."}
+}}`;
+
+const ASK_AI_CHECK_DEFS = [
+  { key: 'exists',          label: 'POIが実在するか' },
+  { key: 'name_current',    label: '名前が最新か' },
+  { key: 'address_current', label: '住所が最新か' },
+  { key: 'coord_match',     label: '住所と緯度経度に齟齬がないか' },
+  { key: 'tags_correct',    label: 'タグ情報が正しいか' },
+];
+const ASK_AI_VERDICT_LABELS = { ok: '✅ OK', ng: '⚠️ NG', unknown: '❔ Unknown' };
+
+// 緯度経度→住所をMapbox Temporary Geocoding API(v5, reverse)で引き、full_addressと突き合わせる。
+// AIの推測に頼らず機械的に判定するため、既存の住所比較ロジック(normalizeAddressForMatch/namesMatch)を再利用する。
+// country=jp/language=jaを固定指定(このツール自体が日本の住所を前提にしているため)
+async function reverseGeocodeCheck(lat, lng, fullAddress) {
+  const params = new URLSearchParams({ country: 'jp', language: 'ja', access_token: MAPBOX_TOKEN });
+  const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?${params}`);
+  if (!res.ok) throw new Error(`Reverse geocoding HTTP error: ${res.status}`);
+  const data = await res.json();
+  const geocodedAddress = data.features?.[0]?.place_name ?? '';
+  if (!geocodedAddress) return { verdict: 'unknown', note: 'Reverse geocodingが結果を返しませんでした', geocodedAddress: '' };
+  const matched = namesMatch(fullAddress ?? '', geocodedAddress, true);
+  return {
+    verdict: matched ? 'ok' : 'ng',
+    note: matched
+      ? `Reverse geocoding結果と一致: ${geocodedAddress}`
+      : `Reverse geocoding結果と不一致。座標からの住所: ${geocodedAddress}`,
+    geocodedAddress,
+  };
+}
+
+function openAskAiModal(r) {
+  document.getElementById('ask-ai-dialog').classList.add('open');
+  document.getElementById('ask-ai-body').innerHTML = `<div class="ask-ai-processing">processing...</div>`;
+  runAskAi(r);
+}
+
+async function runAskAi(r) {
+  // AI診断のバッチ設定(aiDiagSettings.model)からは独立させた専用設定(askAiModel)を使う。
+  // デフォルトはsonnet(低頻度・精度優先)だが、コストを抑えたい場合はhaikuも選択できる
+  const modelKey = askAiModel;
+  const modelId = AI_DIAG_MODEL_IDS[modelKey] || AI_DIAG_MODEL_IDS.sonnet;
+  try {
+    const payload = {
+      name: r.name ?? null,
+      full_address: r.full_address ?? null,
+      feature_type: r.feature_type ?? null,
+      poi_category: r.poi_category ?? null,
+      maki: r.maki ?? null,
+      brand: r.brand ?? null,
+    };
+    const lat = r.coordinates?.latitude, lng = r.coordinates?.longitude;
+    // AIチェック(exists/name_current/address_current/tags_correct)とMapbox reverse geocoding(coord_match)は
+    // 互いに依存しないので並行実行する
+    const [aiData, coordResult] = await Promise.all([
+      callClaudeRaw(ASK_AI_SYSTEM_PROMPT, [{ role: 'user', content: JSON.stringify(payload) }], 700, modelId),
+      (lat != null && lng != null)
+        ? reverseGeocodeCheck(lat, lng, r.full_address).catch(err => ({ verdict: 'unknown', note: `Reverse geocoding失敗: ${err.message || err}` }))
+        : Promise.resolve({ verdict: 'unknown', note: '座標が取得できませんでした' }),
+    ]);
+    const parsed = parseAiJson(extractClaudeText(aiData), 'ask-ai');
+    parsed.checks = { ...parsed.checks, coord_match: coordResult };
+
+    const usage = {
+      model: modelKey,
+      inputTokens:  aiData?.usage?.input_tokens  ?? 0,
+      outputTokens: aiData?.usage?.output_tokens ?? 0,
+      cacheCreationInputTokens: aiData?.usage?.cache_creation_input_tokens ?? 0,
+      cacheReadInputTokens:     aiData?.usage?.cache_read_input_tokens     ?? 0,
+    };
+    usage.costJpy = estimateAiDiagCostJpy(modelKey, usage);
+    renderAskAiResult(parsed, AI_DIAG_MODEL_LABELS[modelKey] || modelId, usage);
+  } catch (err) {
+    document.getElementById('ask-ai-body').innerHTML = `<div class="ask-ai-error">Error: ${esc(err.message || String(err))}</div>`;
+  }
+}
+
+function renderAskAiResult(parsed, modelLabel, usage) {
+  const checks = parsed.checks || {};
+  document.getElementById('ask-ai-body').innerHTML = `
+    <div class="ask-ai-model-tag">${esc(formatAiDiagUsage({ ...usage, mapboxApiCalls: 1, googleApiCalls: 0 }, 'Geocoding v5 reverse'))}</div>
+    <div class="ask-ai-summary">${esc(parsed.summary || '')}</div>
+    <div class="ask-ai-checklist">
+      ${ASK_AI_CHECK_DEFS.map(def => {
+        const c = checks[def.key] || {};
+        const v = ['ok', 'ng', 'unknown'].includes(c.verdict) ? c.verdict : 'unknown';
+        return `<div class="ask-ai-check">
+          <div class="ask-ai-check-head">
+            <span>${esc(def.label)}</span>
+            <span class="ask-ai-check-verdict v-${v}">${ASK_AI_VERDICT_LABELS[v]}</span>
+          </div>
+          <div class="ask-ai-check-detail">${esc(c.note || '')}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 
 // ============================================================
 // NAME STRIP (Google/Mapboxの全結果nameを一覧表示し、名前/住所の一致をハイライト)
 // ============================================================
-// 全角/半角・カタカナ半角などをNFKCで統一し、空白を除去して比較用の文字列を作る
+// 全角/半角・カタカナ半角などをNFKCで統一し、異体字(髙→高等)・「ヶ/ケ/ガ/が」表記ゆれ・法人格を除去し、
+// 記号(ハイフン・&・中黒・括弧等)と空白を除去して比較用の文字列を作る。
+// 記号は個別に列挙せず、Unicode区分(\p{P}=punctuation, \p{S}=symbol)単位でまとめて除去する
+// (「セブン-イレブン」⇔「セブンイレブン」、「スターバックス・コーヒー」⇔「スターバックスコーヒー」、
+//  「稲村が崎」⇔「稲村ガ崎」、「株式会社セブン-イレブン・ジャパン」⇔「セブン-イレブン・ジャパン」等の表記ゆれを吸収)。
+// 括弧は記号(かっこ自体)だけ除去し中身の文字列は残す(例:「(渋谷店)」→「渋谷店」)。
+// 注意: 「ー」(カタカナ長音符, U+30FC)はUnicode上Letter区分でありP/Sに含まれないため、
+// 「スーパー」のような長音を含む語がこの除去で壊れることはない
 function normalizeNameForMatch(s) {
   if (!s) return '';
-  return s.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  let t = canonicalizeVariantKanji(s.normalize('NFKC'));
+  t = unifyKaNotation(t);
+  t = stripCorporateEntity(t);
+  return t.replace(/[\p{P}\p{S}]/gu, '').replace(/\s+/g, '').toLowerCase();
+}
+
+// POI名でGoogle/Mapbox間の法人格の有無・表記が非対称になりやすいため除去する(例:
+// 「株式会社セブン-イレブン・ジャパン」⇔「セブン-イレブン・ジャパン」、「(株)ローソン」⇔「ローソン」)。
+// 前株(先頭)/後株(末尾)どちらの位置にも出現するためアンカーせずグローバル置換する。
+// 「医療法人社団」等、より長く具体的な表記を先に列挙し、その部分文字列(医療法人)だけが先に食われて
+// 「社団」が消え残ることのないようにする(配列の並び順が重要)。
+const CORPORATE_ENTITY_RE = new RegExp([
+  '地方独立行政法人', '独立行政法人',
+  '医療法人社団', '医療法人',
+  '社会福祉法人', '学校法人', '宗教法人',
+  '特定非営利活動法人', '一般社団法人', '一般財団法人', '公益社団法人', '公益財団法人',
+  '株式会社', '有限会社', '合同会社', '合資会社', '合名会社',
+  '\\(株\\)', '（株）', '\\(有\\)', '（有）',
+].join('|'), 'g');
+function stripCorporateEntity(s) {
+  return s.replace(CORPORATE_ENTITY_RE, '');
+}
+
+// Google/Mapbox間で表記が割れやすい旧字体/異体字を新字体へ統一する(NFKCは字体の違いまでは統一しない)。
+// 安全性の高い頻出ペアのみを辞書化。将来ペアを追加しやすいようプレーンオブジェクトのままにしておく。
+// POI名・住所どちらの正規化からも呼ぶ(建物名・地名・店舗名のどれにも出現し得るため)。
+const VARIANT_KANJI_MAP = {
+  '髙': '高', '﨑': '崎', '邊': '辺', '邉': '辺',
+  '齋': '斎', '齊': '斉', '澤': '沢', '龍': '竜',
+  '國': '国', '學': '学',
+};
+const VARIANT_KANJI_RE = new RegExp(Object.keys(VARIANT_KANJI_MAP).join('|'), 'g');
+function canonicalizeVariantKanji(s) {
+  return s.replace(VARIANT_KANJI_RE, ch => VARIANT_KANJI_MAP[ch]);
 }
 
 // 都道府県名の先頭位置を探し、それより前(国名「日本」や郵便番号など)を丸ごと切り捨てる
@@ -1964,14 +2641,22 @@ function stripBeforePrefecture(s) {
   return m ? s.slice(m.index) : s;
 }
 
-// 「ヶ/ケ/が」は同じ地名でも表記が割れやすいため(千駄ヶ谷/千駄ケ谷/千駄が谷 等)、比較用に「が」へ統一する。
+// 「ヶ/ケ/ガ/が」は同じ地名でも表記が割れやすいため(千駄ヶ谷/千駄ケ谷/千駄が谷、稲村ヶ崎/稲村ガ崎/稲村が崎 等)、
+// 比較用に「が」へ統一する(ガは片仮名の濁点付き「ケ」+濁点、がは平仮名。同じ音でも表記元が異なるだけで別文字なので
+// NFKCでは変換されない。地名・店舗名どちらにも出現するため、name用/address用の正規化どちらからも呼ぶ)。
+// 漢字に挟まれた場合だけを対象にする(前後を要求): 「ガスト」「ケンタッキー」「メガネスーパー」のような
+// 通常のカタカナ語(前後がカタカナ)まで誤って書き換えてしまう事故を防ぐため。地名の「ヶ/ケ/ガ」は
+// 稲村ヶ崎・霞ヶ関・千駄ヶ谷のように必ず漢字+ヶ/ケ/ガ+漢字の形になるため、この限定で実害なく両立できる。
 function unifyKaNotation(s) {
-  return s.replace(/[ヶケ]/g, 'が');
+  return s.replace(/(?<=\p{Script=Han})[ヶケガ](?=\p{Script=Han})/gu, 'が');
 }
 
 // 都道府県の直後に続く「郡」区分は省略されることがある(例:「青森県上北郡六戸町」⇔「青森県六戸町」)ため、
 // 郡名(番地の数字やハイフンを含まない1〜6文字)+「郡」をまとめて除去する。
-const COUNTY_RE = /^(北海道|東京都|京都府|大阪府|[一-鿿々]{2,3}県)[^\d\s,、\-]{1,6}郡/;
+// ただし「郡」の直後から町/村に達するまでの間に「市」を挟む場合は除去しない(例:「奈良県大和郡山市」の
+// 「郡」は郡区分ではなく市名の一部。日本の行政区画上、郡の構成要素は町・村のみで市を含み得ないため、
+// 間に市があるという事実だけで「これは郡ではない」と機械的に判定できる)。
+const COUNTY_RE = /^(北海道|東京都|京都府|大阪府|[一-鿿々]{2,3}県)[^\d\s,、\-]{1,6}郡(?=[^\d\s,、\-市]{1,6}[町村])/;
 function stripCountySegment(s) {
   return s.replace(COUNTY_RE, '$1');
 }
@@ -2023,7 +2708,7 @@ function stripBuildingNameIfNoFloor(s) {
 // (Googleは郵便番号が入っていないケースがあるため、郵便番号自体は「あれば無視する」形にする)
 function normalizeAddressForMatch(s) {
   if (!s) return '';
-  let t = s.normalize('NFKC');
+  let t = canonicalizeVariantKanji(s.normalize('NFKC')); // 髙→高 等の異体字ゆれを吸収
   t = unifyKaNotation(t); // 「ヶ/ケ/が」の表記ゆれを吸収
   t = stripBeforePrefecture(t);
   t = stripCountySegment(t); // 「郡」区分の省略ゆれを吸収
@@ -2040,20 +2725,20 @@ function normalizeAddressForMatch(s) {
   return t.toLowerCase();
 }
 
-// ノイズ(全角半角/空白/丁目番地のハイフン表記ゆれ等)は正規化で吸収した上で、完全一致のみを一致とみなす
+// ノイズ(全角半角/空白/記号/丁目番地のハイフン表記ゆれ等)は正規化で吸収した上で、完全一致のみを一致とみなす
 // (containment不可: 例「入谷駅」に対して「セブンイレブン入谷駅前店」はマッチさせない)
-// ただしaddress型クエリの場合、nameフィールド自体が住所の断片(Googleは短く/市区町村名すら省略、Mapboxはより完全)として
-// 返ってくることがあるため、treatAsAddress=true時は住所用の正規化+後方一致(短い方が長い方の末尾と一致)を許容する。
+// treatAsAddressの値に関わらず、まず記号ゆれに強いname用の厳密一致(normalizeNameForMatch)を必ず試す
+// (例:「セブン-イレブン」⇔「セブンイレブン」はどちらの型でも一致してほしいため)。
+// それでも一致しない場合に限り、address型クエリでは住所の断片(Googleは短く/市区町村名すら省略、
+// Mapboxはより完全)として返ってくることがあるため、住所用の正規化+後方一致(短い方が長い方の末尾と一致)を許容する。
 // (番地の数字列だけを見るフォールバックは廃止: 町名が違っても番地番号が偶然一致すると誤マッチするため)
 function namesMatch(a, b, treatAsAddress) {
-  if (treatAsAddress) {
-    const na = normalizeAddressForMatch(a), nb = normalizeAddressForMatch(b);
-    if (!na || !nb) return false;
-    return na === nb || na.endsWith(nb) || nb.endsWith(na);
-  }
   const na = normalizeNameForMatch(a), nb = normalizeNameForMatch(b);
-  if (!na || !nb) return false;
-  return na === nb;
+  if (na && nb && na === nb) return true;
+  if (!treatAsAddress) return false;
+  const aa = normalizeAddressForMatch(a), ab = normalizeAddressForMatch(b);
+  if (!aa || !ab) return false;
+  return aa === ab || aa.endsWith(ab) || ab.endsWith(aa);
 }
 
 // 2点間の実距離(haversine)がCOORD_MATCH_THRESHOLD_KM以内かどうかで「同じ場所」を判定する。
@@ -2071,23 +2756,42 @@ function coordinatesMatch(a, b) {
   return haversineDistanceKm(latA, lngA, latB, lngB) <= COORD_MATCH_THRESHOLD_KM;
 }
 
-// listA の各要素について、listB内のどれかとname/座標が一致するかを判定し 'none'|'name'|'address'|'both' を返す
-// ('address'は住所文字列ではなく緯度経度(小数点3桁)の近似一致を指す)
-// 'both'は同一候補がname・座標両方を満たした時だけ成立させる(別々の候補がそれぞれ片方だけ満たした場合を
+// listA の各要素について、listB内のどれかとname/位置が一致するかを判定し 'none'|'name'|'address'|'both' を返す
+// ('address'の判定は、まず住所文字列同士を正規化(normalizeAddressForMatch)して比較し、それで一致しなければ
+// 緯度経度(haversine距離、COORD_MATCH_THRESHOLD_KM以内)にフォールバックする。プロバイダ間で住所の詳細度が
+// 違う(号の有無等)ケースは正規化で吸収し、それでも吸収できない表記差は座標側で救済する二段構え)
+// 'both'は同一候補がname・位置両方を満たした時だけ成立させる(別々の候補がそれぞれ片方だけ満たした場合を
 // 合成して完全一致扱いにすると、無関係な候補同士の組み合わせで誤って「完全一致」になってしまうため)。
-function computeMatchCategories(listA, getNameA, getCoordA, listB, getNameB, getCoordB, treatNameAsAddress) {
+function addressOrCoordMatch(addressA, coordA, addressB, coordB) {
+  if (namesMatch(addressA, addressB, true)) return true; // 住所文字列の正規化+接尾一致を優先
+  return coordinatesMatch(coordA, coordB); // ダメなら座標の近似一致にフォールバック
+}
+function computeMatchCategories(listA, getNameA, getCoordA, getAddressA, listB, getNameB, getCoordB, getAddressB, treatNameAsAddress) {
   return listA.map(item => {
-    const nameA = getNameA(item), coordA = getCoordA(item);
+    const nameA = getNameA(item), coordA = getCoordA(item), addressA = getAddressA(item);
     let nameHit = false, addrHit = false, bothHit = false;
     for (const other of listB) {
       if (other === item) continue; // 万一listAとlistBが同一参照を含んでいても自己参照させない
       const nHit = namesMatch(nameA, getNameB(other), treatNameAsAddress);
-      const aHit = coordinatesMatch(coordA, getCoordB(other));
+      const aHit = addressOrCoordMatch(addressA, coordA, getAddressB(other), getCoordB(other));
       if (nHit && aHit) { bothHit = true; break; } // 同一候補が両方満たした時点で確定
       if (nHit) nameHit = true;
       if (aHit) addrHit = true;
     }
     return bothHit ? 'both' : nameHit ? 'name' : addrHit ? 'address' : 'none';
+  });
+}
+
+// AI診断専用: nameは一切見ず、addressOrCoordMatch(住所正規化 or 座標50m近似)だけで
+// listAの各要素が「listB内に位置的に近い候補があるか」を判定する。'address'(近い候補あり) | 'none'(なし)。
+// (name一致の判断はAI自身の意味理解に完全に委ねる方針のため、機械的なname一致は計算しない。
+//  AIには元々生のnameが渡っており、正規化+完全一致しかできない機械的判定より
+//  AIの方が表記ゆれ・同音異字等を扱える=判定として優れているため、渡す意味が薄いという判断)
+function computeAddressMatchOnly(listA, getCoordA, getAddressA, listB, getCoordB, getAddressB) {
+  return listA.map(item => {
+    const addressA = getAddressA(item), coordA = getCoordA(item);
+    const hit = listB.some(other => other !== item && addressOrCoordMatch(addressA, coordA, getAddressB(other), getCoordB(other)));
+    return hit ? 'address' : 'none';
   });
 }
 
@@ -2131,25 +2835,27 @@ function syncNameStripHeights() {
 }
 
 // nameフィールドを住所として扱う(住所用の正規化+後方一致を許可する)かどうか。
-// CSVバッチ実行中でquery_type列がある場合は、その行がAI/手動分類で「address」とされている時だけtrueにする
-// (検索ボックス単体利用やquery_type列が無い場合は制限しない)
+// CSVバッチ実行中でquery_type列がある場合は、その行がAI/手動分類で「address」とされている時だけtrueにする。
+// 検索ボックス単体利用やquery_type列が無い場合は、POI名クエリの方が多いと想定してfalse(name型)をデフォルトにする
+// (以前はtrueがデフォルトだったが、それだとnamesMatch()が常に住所用の緩い正規化に流れてしまい、
+//  記号違い程度の表記ゆれ(例:「セブン-イレブン」⇔「セブンイレブン」)がname用の厳密正規化で拾えなくなるバグがあった)
 function isCurrentQueryAddressType() {
   if (currentCsvFileId && csvHasQueryType && csvIndex >= 0 && csvRawRows[csvIndex]) {
     const val = String(csvRawRows[csvIndex][csvQueryTypeColumn] ?? '').trim().toLowerCase();
     return val === 'address';
   }
-  return true;
+  return false;
 }
 
 function updateNameStrips() {
   const gList = Array.isArray(googleRawResults) ? googleRawResults : [];
   const mList = Array.isArray(mapboxRawResults) ? mapboxRawResults : [];
-  const gName = r => r.name, gCoord = r => ({ lat: r.geometry?.location?.lat, lng: r.geometry?.location?.lng });
-  const mName = r => r.name, mCoord = r => ({ lat: r.coordinates?.latitude, lng: r.coordinates?.longitude });
+  const gName = r => r.name, gCoord = r => ({ lat: r.geometry?.location?.lat, lng: r.geometry?.location?.lng }), gAddr = r => r.formatted_address;
+  const mName = r => r.name, mCoord = r => ({ lat: r.coordinates?.latitude, lng: r.coordinates?.longitude }), mAddr = r => r.full_address;
   const treatNameAsAddress = isCurrentQueryAddressType();
 
-  const gCats = computeMatchCategories(gList, gName, gCoord, mList, mName, mCoord, treatNameAsAddress);
-  const mCats = computeMatchCategories(mList, mName, mCoord, gList, gName, gCoord, treatNameAsAddress);
+  const gCats = computeMatchCategories(gList, gName, gCoord, gAddr, mList, mName, mCoord, mAddr, treatNameAsAddress);
+  const mCats = computeMatchCategories(mList, mName, mCoord, mAddr, gList, gName, gCoord, gAddr, treatNameAsAddress);
 
   const gCenter = state.googleParams.location;
   const mCenter = state.mapboxParams.proximity;
@@ -2203,9 +2909,15 @@ function buildMapboxQueryDisplay(query) {
 // ============================================================
 // SEARCH
 // ============================================================
+// CSV行ジャンプ等でdoSearch()が完了を待たずに連続実行された場合、ネットワーク応答の到着順は保証されないため、
+// 古い呼び出しの結果が新しい呼び出しの結果を後から上書きしてしまうことがある(表示中の行と実際の結果/feedbackContextが
+// ズレるレースコンディション)。呼び出しごとに世代番号を発行し、await後に「自分が最新の呼び出しか」を確認してから
+// 画面反映することで、古い結果は無視して破棄する
+let searchGeneration = 0;
 async function doSearch() {
   const query = document.getElementById('query-input').value.trim();
   if (!query) return;
+  const searchGen = ++searchGeneration;
   state.query = query;
   pushQueryHistory(query);
   queryHistoryPos = -1;
@@ -2234,6 +2946,9 @@ async function doSearch() {
   setLoading('google'); setLoading('mapbox');
 
   const [gRes, mRes] = await Promise.allSettled([searchGoogle(query), searchMapbox(query)]);
+
+  // 待っている間に、より新しいdoSearch()呼び出しが発行されていたら、この結果は古いので画面には一切反映しない
+  if (searchGen !== searchGeneration) return;
 
   if (gRes.status === 'fulfilled') {
     googleRawResults = gRes.value.error ? [] : gRes.value;
@@ -2333,10 +3048,9 @@ function getFilteredCsvIndices() {
   const needle = csvFilterText.trim().toLowerCase();
   const indices = csvRawRows.map((_, i) => i).filter(i => {
     const fb = getRowFeedback(i);
-    if (csvFilterResult === 'good'         && (!fb || fb.result !== 'good'))         return false;
-    if (csvFilterResult === 'bad'          && (!fb || fb.result !== 'bad'))          return false;
-    if (csvFilterResult === 'not_hit_both' && (!fb || fb.result !== NOT_HIT_BOTH))   return false;
-    if (csvFilterResult === 'unknown_query' && (!fb || fb.result !== UNKNOWN_QUERY)) return false;
+    if (csvFilterResult === 'good'    && (!fb || fb.result !== 'good'))    return false;
+    if (csvFilterResult === 'bad'     && (!fb || fb.result !== 'bad'))     return false;
+    if (csvFilterResult === 'unclear' && (!fb || fb.result !== 'unclear')) return false;
     if (csvFilterResult === 'untested' && fb) return false;
     if (csvFilterReason !== 'all' && (!fb || fb.reason !== csvFilterReason)) return false;
     if (csvHasQueryType && csvQueryTypeSelected.size < csvQueryTypeValues.length) {
@@ -2367,9 +3081,10 @@ function populateCsvFilterReasonOptions() {
   const sel = document.getElementById('csv-filter-reason');
   const current = sel.value;
   const goodGroup = `<optgroup label="Good">${GOOD_REASONS.map(label => `<option value="${esc(label)}">${esc(label)}</option>`).join('')}</optgroup>`;
+  const unclearGroup = `<optgroup label="Unclear">${UNCLEAR_REASONS.map(label => `<option value="${esc(label)}">${esc(label)}</option>`).join('')}</optgroup>`;
   sel.innerHTML = '<option value="all">All</option>' + goodGroup + FEEDBACK_REASONS.map(g =>
     `<optgroup label="${esc(g.category)}">${g.items.map(label => `<option value="${esc(label)}">${esc(label)}</option>`).join('')}</optgroup>`
-  ).join('');
+  ).join('') + unclearGroup;
   sel.value = current || 'all';
 }
 
@@ -2622,7 +3337,8 @@ Googleロール候補: query, location, location(lat), location(lng), radius, ty
 
 async function analyzeCsvColumns(headers, sampleRows) {
   const userMsg = `列名: ${JSON.stringify(headers)}\nサンプル行:\n${sampleRows.map(r => JSON.stringify(r)).join('\n')}`;
-  const text = await callClaude(CSV_MAPPING_SYSTEM_PROMPT, [{ role: 'user', content: userMsg }], 800);
+  const modelId = AI_DIAG_MODEL_IDS[csvScanModel] || AI_DIAG_MODEL_IDS.haiku;
+  const text = await callClaude(CSV_MAPPING_SYSTEM_PROMPT, [{ role: 'user', content: userMsg }], 800, modelId);
   const match = text.match(/\[[\s\S]*\]/);
   return JSON.parse(match ? match[0] : text);
 }
@@ -2826,24 +3542,33 @@ function applyCsvRowToState(resolved) {
   } else {
     delete state.mapboxParams.bbox;
   }
-  state.mapboxParams.types = mb.types || [];
-  if (mb.poi_category) state.mapboxParams.poi_category = mb.poi_category; else delete state.mapboxParams.poi_category;
-  if (mb.poi_category_exclusion) state.mapboxParams.poi_category_exclusion = mb.poi_category_exclusion; else delete state.mapboxParams.poi_category_exclusion;
-  state.mapboxParams.limit = (mb.limit != null && !isNaN(mb.limit)) ? mb.limit : 10;
-  state.mapboxParams.language = mb.language || 'ja';
-  state.mapboxParams.country  = mb.country  || 'jp';
-  if (mb.near) state.mapboxParams.near = mb.near; else delete state.mapboxParams.near;
-  if (mb.navigation_profile) state.mapboxParams.navigation_profile = mb.navigation_profile; else delete state.mapboxParams.navigation_profile;
+  // 以下は手動編集済み(Form/JSONエディタ)のフィールドがあれば、CSV行の値による上書きをスキップして手動値を保持する
+  if (!manualMapboxFields.has('types')) state.mapboxParams.types = mb.types || [];
+  if (!manualMapboxFields.has('poi_category')) {
+    if (mb.poi_category) state.mapboxParams.poi_category = mb.poi_category; else delete state.mapboxParams.poi_category;
+  }
+  if (!manualMapboxFields.has('poi_category_exclusion')) {
+    if (mb.poi_category_exclusion) state.mapboxParams.poi_category_exclusion = mb.poi_category_exclusion; else delete state.mapboxParams.poi_category_exclusion;
+  }
+  if (!manualMapboxFields.has('limit')) state.mapboxParams.limit = (mb.limit != null && !isNaN(mb.limit)) ? mb.limit : 10;
+  if (!manualMapboxFields.has('language')) state.mapboxParams.language = mb.language || 'ja';
+  if (!manualMapboxFields.has('country'))  state.mapboxParams.country  = mb.country  || 'jp';
+  if (!manualMapboxFields.has('near')) {
+    if (mb.near) state.mapboxParams.near = mb.near; else delete state.mapboxParams.near;
+  }
+  if (!manualMapboxFields.has('navigation_profile')) {
+    if (mb.navigation_profile) state.mapboxParams.navigation_profile = mb.navigation_profile; else delete state.mapboxParams.navigation_profile;
+  }
 
   if (googleApiMode === 'legacy') {
-    state.googleParams.radius = (gg.radius != null && !isNaN(gg.radius)) ? gg.radius : DEFAULT_RADIUS;
-    state.googleParams.types  = gg.type ? [gg.type] : [];
-    state.googleParams.language = gg.language || 'ja';
-    state.googleParams.region   = gg.region   || 'jp';
+    if (!manualGoogleFields.has('radius'))   state.googleParams.radius   = (gg.radius != null && !isNaN(gg.radius)) ? gg.radius : DEFAULT_RADIUS;
+    if (!manualGoogleFields.has('types'))    state.googleParams.types    = gg.type ? [gg.type] : [];
+    if (!manualGoogleFields.has('language')) state.googleParams.language = gg.language || 'ja';
+    if (!manualGoogleFields.has('region'))   state.googleParams.region   = gg.region   || 'jp';
   } else {
-    state.googleParams.includedType = gg.type || '';
-    state.googleParams.languageCode = gg.language || 'ja';
-    state.googleParams.regionCode   = gg.region   || 'jp';
+    if (!manualGoogleFields.has('includedType')) state.googleParams.includedType = gg.type || '';
+    if (!manualGoogleFields.has('languageCode')) state.googleParams.languageCode = gg.language || 'ja';
+    if (!manualGoogleFields.has('regionCode'))   state.googleParams.regionCode   = gg.region   || 'jp';
   }
 
   writeToURL();
@@ -2936,6 +3661,17 @@ function initCSV() {
   jumpBtn.addEventListener('click', doJump);
   jumpInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJump(); });
 
+  // CSV読み込み中のクエリのみ、実際の検索からbbox/navigation_profileを常に除外するオーバーライド。
+  // トグル時、CSV行を表示中ならその場で再検索して結果に反映する
+  document.getElementById('csv-ignore-bbox-checkbox').addEventListener('change', (e) => {
+    csvIgnoreBbox = e.target.checked;
+    if (currentCsvFileId && csvIndex >= 0) doSearch();
+  });
+  document.getElementById('csv-ignore-navprofile-checkbox').addEventListener('change', (e) => {
+    csvIgnoreNavProfile = e.target.checked;
+    if (currentCsvFileId && csvIndex >= 0) doSearch();
+  });
+
   populateCsvFilterReasonOptions();
   // フィルタ変更時はスクロール位置を先頭に戻す(古い位置のままだと絞り込み後の内容が画面外にずれて見えるため)
   const resetCsvScroll = () => { document.getElementById('csv-body').scrollTop = 0; };
@@ -2955,6 +3691,22 @@ let googleParamJsonEditor = null, mapboxParamJsonEditor = null, queryEditor = nu
 let queryMapboxEditor = null, googleResultEditor = null, mapboxResultEditor = null;
 let editorsInited = false, pendingGoogleUrl = '', pendingMapboxUrl = '';
 
+// QUERYダイアログを開いている間だけ非nullになる編集用ドラフト。Form/JSONエディタでの編集は全てこのドラフトに対して行い、
+// 「Apply」を押すまでstate.mapboxParams/googleParamsには一切反映しない(GUIチェックボックス等の細かい編集イベントの
+// 取り漏れ・タイミング問題を気にせず、Applyを押した瞬間に確実に一括反映する設計にするため)。
+// Cancel/✕/Escape/背景クリックのいずれで閉じてもdraftは破棄されるだけで、stateは無傷のまま
+let queryDialogDraft = { mapbox: null, google: null };
+// 今回のダイアログ編集セッション中に実際に触れたフィールドパス(Apply時に「本当に編集したものだけ」manualFields化するため。
+// JSONエディタ編集時は差分が取りにくいので、その時点の全キーをまとめて追加する)
+let queryDialogTouched = { mapbox: new Set(), google: new Set() };
+// syncEngineJsonFromStateが自前でeditor.setValue()する間、それをonDidChangeModelContentが
+// 「ユーザーがJSONを手で編集した」と誤認しないようにするためのフラグ
+let suppressJsonSync = { mapbox: false, google: false };
+function engineParamsForEdit(engine) {
+  const draft = engine === 'google' ? queryDialogDraft.google : queryDialogDraft.mapbox;
+  return draft || (engine === 'google' ? state.googleParams : state.mapboxParams);
+}
+
 require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
 
 function initEditors(cb) {
@@ -2971,11 +3723,45 @@ function initEditors(cb) {
 
     const gpWrap = document.getElementById('google-param-json-wrap'); gpWrap.style.height = '280px';
     googleParamJsonEditor = monaco.editor.create(gpWrap, { ...common, value: JSON.stringify(state.googleParams, null, 2) });
-    googleParamJsonEditor.onDidChangeModelContent(() => { try { state.googleParams = JSON.parse(googleParamJsonEditor.getValue()); writeToURL(); } catch {} });
+    googleParamJsonEditor.onDidChangeModelContent(() => {
+      // syncEngineJsonFromStateが自分でeditor.setValue()した時もこのイベントは発火してしまうため、
+      // そのプログラム的な更新中はsuppressJsonSyncで無視する(でないとForm編集のたびにここが誤発火し、
+      // ドラフトオブジェクトが新しい参照に差し替わってFormのクロージャと食い違ってしまう=編集消失バグの原因だった)
+      if (suppressJsonSync.google) return;
+      // ダイアログを開いている間はドラフトに書き込むだけ(Applyを押すまでstateには反映しない)
+      try {
+        const parsed = JSON.parse(googleParamJsonEditor.getValue());
+        if (queryDialogDraft.google) {
+          queryDialogDraft.google = parsed;
+          Object.keys(parsed).forEach(k => queryDialogTouched.google.add(k));
+        } else {
+          state.googleParams = parsed;
+          Object.keys(state.googleParams).forEach(k => markFieldManual('google', k));
+          writeToURL();
+        }
+      } catch {}
+    });
 
     const mpWrap = document.getElementById('mapbox-param-json-wrap'); mpWrap.style.height = '280px';
     mapboxParamJsonEditor = monaco.editor.create(mpWrap, { ...common, value: JSON.stringify(state.mapboxParams, null, 2) });
-    mapboxParamJsonEditor.onDidChangeModelContent(() => { try { state.mapboxParams = JSON.parse(mapboxParamJsonEditor.getValue()); writeToURL(); } catch {} });
+    mapboxParamJsonEditor.onDidChangeModelContent(() => {
+      // 上と同じ理由でプログラム的な更新中は無視する
+      if (suppressJsonSync.mapbox) return;
+      // ダイアログを開いている間はドラフトに書き込むだけ(Applyを押すまでstateには反映しない)
+      try {
+        const parsed = JSON.parse(mapboxParamJsonEditor.getValue());
+        if (queryDialogDraft.mapbox) {
+          queryDialogDraft.mapbox = parsed;
+          Object.keys(parsed).forEach(k => queryDialogTouched.mapbox.add(k));
+        } else {
+          state.mapboxParams = parsed;
+          mapboxProximityManual = true;
+          mapboxBboxManual = true;
+          Object.keys(state.mapboxParams).forEach(k => markFieldManual('mapbox', k));
+          writeToURL();
+        }
+      } catch {}
+    });
 
     const grWrap = document.getElementById('google-result-editor-wrap'); grWrap.style.height = '400px';
     googleResultEditor = monaco.editor.create(grWrap, { ...common, value: JSON.stringify(googleRawResults, null, 2), readOnly: true });
@@ -2990,42 +3776,57 @@ function initEditors(cb) {
 // ============================================================
 // PARAM UI (Form ⇄ JSON)
 // ============================================================
+// QUERYダイアログを開いている間は、Form/JSON双方の表示・編集をqueryDialogDraft(まだApplyされていない編集中の値)に対して行う。
+// ダイアログを開いていない時に呼ばれた場合(CSV行移動時の裏更新等)は、そのままstateを対象にする
 function refreshParamUI(engine) {
-  const stateObj = engine === 'google' ? state.googleParams : state.mapboxParams;
+  const stateObj = engineParamsForEdit(engine);
   const fields = getEngineFields(engine);
   const formEl = document.getElementById(`${engine}-param-form`);
-  if (formEl) renderParamForm(formEl, fields, stateObj, () => { writeToURL(); syncEngineJsonFromState(engine); });
+  if (formEl) renderParamForm(formEl, fields, stateObj, (path) => { queryDialogTouched[engine].add(path); syncEngineJsonFromState(engine); });
   syncEngineJsonFromState(engine);
 }
 
 function syncEngineJsonFromState(engine) {
   const editor = engine === 'google' ? googleParamJsonEditor : mapboxParamJsonEditor;
-  const stateObj = engine === 'google' ? state.googleParams : state.mapboxParams;
-  if (editor && editor.getValue() !== JSON.stringify(stateObj, null, 2)) editor.setValue(JSON.stringify(stateObj, null, 2));
+  const stateObj = engineParamsForEdit(engine);
+  const json = JSON.stringify(stateObj, null, 2);
+  if (editor && editor.getValue() !== json) {
+    // このsetValue()自体がonDidChangeModelContentを発火させてしまうため、その間は「ユーザー編集」判定を止める
+    suppressJsonSync[engine] = true;
+    editor.setValue(json);
+    suppressJsonSync[engine] = false;
+  }
 }
 
+// Resetは(ダイアログを開いている間は)ドラフトだけを初期値に戻す。実際のstateへの反映はApplyを押した時点
 function resetEngineParams(engine) {
   const { lat, lng } = getCurrentLocation(), radius = getCurrentRadius();
+  let fresh;
   if (engine === 'google') {
     if (googleApiMode === 'new') {
-      state.googleParams = structuredClone(DEFAULT_GOOGLE_PARAMS_NEW);
-      state.googleParams.locationRestriction = { rectangle: { low: { latitude: lat - radius/111000, longitude: lng - radius/111000 }, high: { latitude: lat + radius/111000, longitude: lng + radius/111000 } } };
+      fresh = structuredClone(DEFAULT_GOOGLE_PARAMS_NEW);
+      fresh.locationRestriction = { rectangle: { low: { latitude: lat - radius/111000, longitude: lng - radius/111000 }, high: { latitude: lat + radius/111000, longitude: lng + radius/111000 } } };
     } else {
-      state.googleParams = structuredClone(DEFAULT_GOOGLE_PARAMS_LEGACY);
-      state.googleParams.location = { lat, lng }; state.googleParams.radius = radius;
+      fresh = structuredClone(DEFAULT_GOOGLE_PARAMS_LEGACY);
+      fresh.location = { lat, lng }; fresh.radius = radius;
     }
+    manualGoogleFields.clear();
+    if (queryDialogDraft.google) queryDialogDraft.google = fresh; else { state.googleParams = fresh; writeToURL(); }
   } else {
-    state.mapboxParams = structuredClone(DEFAULT_MAPBOX_PARAMS);
-    state.mapboxParams.proximity = { lng, lat };
-    // Resetでデフォルトに戻すので、Form手動編集フラグも解除して自動追従を復活させる
+    fresh = structuredClone(DEFAULT_MAPBOX_PARAMS);
+    fresh.proximity = { lng, lat };
+    // Resetでデフォルトに戻すので、Form/JSONエディタの手動編集フラグも解除して自動追従を復活させる
     mapboxProximityManual = false;
     mapboxBboxManual = false;
+    manualMapboxFields.clear();
+    if (queryDialogDraft.mapbox) queryDialogDraft.mapbox = fresh; else { state.mapboxParams = fresh; writeToURL(); }
   }
-  writeToURL(); refreshParamUI(engine); drawRangeOverlays(); updateBboxBtn();
+  refreshParamUI(engine); drawRangeOverlays(); updateBboxBtn();
 }
 
+// ダイアログ編集中はドラフト(現在表示中の値)をコピーする
 function copyEngineParams(engine, btn, label) {
-  const obj = engine === 'google' ? state.googleParams : state.mapboxParams;
+  const obj = engineParamsForEdit(engine);
   navigator.clipboard.writeText(JSON.stringify(obj, null, 2));
   btn.textContent = '✅'; setTimeout(() => btn.textContent = label, 1500);
 }
@@ -3051,7 +3852,12 @@ function initParamUIControls() {
 // DIALOGS
 // ============================================================
 function openDialog(id) { initEditors(() => document.getElementById(id).classList.add('open')); }
-function closeDialog(id) { document.getElementById(id).classList.remove('open'); }
+function closeDialog(id) {
+  document.getElementById(id).classList.remove('open');
+  // QUERYダイアログはApplyを押さない限りstateに一切反映されないので、閉じ方(✕/Escape/背景クリック/Cancel)を問わず
+  // ドラフトを破棄するだけでよい
+  if (id === 'query-dialog') { queryDialogDraft.mapbox = null; queryDialogDraft.google = null; }
+}
 
 document.querySelectorAll('.dialog-overlay').forEach(overlay => {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeDialog(overlay.id); });
@@ -3363,10 +4169,34 @@ document.getElementById('copy-url-btn').addEventListener('click', () => {
   const btn = document.getElementById('copy-url-btn'); btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = '🔗 Copy URL', 2000);
 });
 document.getElementById('open-query-btn').addEventListener('click', () => {
+  // 開くたびに現在のstateからドラフトを作り直す(前回Cancelで捨てた分は引き継がない)
+  queryDialogDraft.google = structuredClone(state.googleParams);
+  queryDialogDraft.mapbox = structuredClone(state.mapboxParams);
+  queryDialogTouched.google = new Set();
+  queryDialogTouched.mapbox = new Set();
   initEditors(() => {
     document.getElementById('query-dialog').classList.add('open');
     refreshParamUI('google'); refreshParamUI('mapbox');
   });
+});
+document.getElementById('query-dialog-cancel-btn').addEventListener('click', () => closeDialog('query-dialog'));
+document.getElementById('query-dialog-apply-btn').addEventListener('click', () => {
+  // 実際にこの編集セッション中に触れたフィールドだけをmanual化する(触れていないproximity/bbox等の
+  // 自動追従を意図せずロックしてしまわないため)
+  if (queryDialogDraft.google) {
+    state.googleParams = queryDialogDraft.google;
+    queryDialogTouched.google.forEach(k => markFieldManual('google', k));
+  }
+  if (queryDialogDraft.mapbox) {
+    state.mapboxParams = queryDialogDraft.mapbox;
+    // Formでの編集は'proximity.lat'等のドット区切りパス、JSONエディタでの編集は'proximity'という
+    // トップレベルキーで記録されている(JSON側はキー単位でしか差分を取れないため)。両方見る
+    if (queryDialogTouched.mapbox.has('proximity') || queryDialogTouched.mapbox.has('proximity.lat') || queryDialogTouched.mapbox.has('proximity.lng')) mapboxProximityManual = true;
+    if (queryDialogTouched.mapbox.has('bbox') || [...queryDialogTouched.mapbox].some(p => /^bbox\.\d$/.test(p))) mapboxBboxManual = true;
+    queryDialogTouched.mapbox.forEach(k => markFieldManual('mapbox', k));
+  }
+  writeToURL(); drawRangeOverlays(); updateBboxBtn();
+  closeDialog('query-dialog');
 });
 document.getElementById('open-results-btn').addEventListener('click', () => openDialog('results-dialog'));
 document.getElementById('open-history-btn').addEventListener('click', () => { renderHistoryTable(); document.getElementById('history-dialog').classList.add('open'); });
@@ -3387,15 +4217,16 @@ function renderHistoryTable() {
       <td title="${esc(e.query)}">${esc(e.query)}</td>
       <td>${resultIconOf(e.result)}</td>
       <td title="${esc(e.reason || '')}">${esc(e.reason || '')}</td>
+      <td>${esc(e.googleOk || '-')}</td>
     </tr>`).join('');
 }
 
 function historyToCSV() {
-  const header = ['timestamp', 'fileName', 'rowIndex', 'query', 'result', 'reason'];
+  const header = ['timestamp', 'fileName', 'rowIndex', 'query', 'result', 'reason', 'googleOk'];
   const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = [header.join(',')];
   feedbackLog.forEach(e => {
-    lines.push([e.timestamp, e.fileName || '', e.rowIndex != null ? e.rowIndex + 1 : '', e.query, e.result, e.reason || '']
+    lines.push([e.timestamp, e.fileName || '', e.rowIndex != null ? e.rowIndex + 1 : '', e.query, e.result, e.reason || '', e.googleOk || '']
       .map(csvEscape).join(','));
   });
   return lines.join('\n');
