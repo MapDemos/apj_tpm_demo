@@ -1,2 +1,8 @@
 __pycache__/
 .venv/
+
+# GUIビルド生成物（build_gui.sh実行で作られる。配布用.appは都度ビルドする）
+.build_venv/
+build/
+dist/
+*.spec

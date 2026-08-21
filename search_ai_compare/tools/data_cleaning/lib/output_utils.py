@@ -12,9 +12,16 @@ data_cleaning/ 配下の各スクリプトが共有する、出力ファイル�
 """
 
 import os
+import sys
 from datetime import datetime
 
-_DATA_CLEANING_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if getattr(sys, "frozen", False):
+    # PyInstallerでバンドルされたGUIアプリの場合、__file__はアプリ内部の
+    # 一時展開パス（onefileなら_MEIPASS、onedirでもContents/Resources配下）を指し、
+    # 書き込み不可 or アプリ更新/再起動で消える。ユーザーのホーム配下に固定する。
+    _DATA_CLEANING_DIR = os.path.expanduser("~/Documents/AthenaCSVTool")
+else:
+    _DATA_CLEANING_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(_DATA_CLEANING_DIR, "local_output")
 
 

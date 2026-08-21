@@ -234,3 +234,36 @@ analyze-ai  [suffix: trend_daily_volume_result / trend_hourly_volume_result / tr
 4. othersが多ければ python3 main.py ai-retry <ai-classifyの出力>.csv で再分類
    （必要なら lib/classification_common.py のプロンプトを見直してから）
 5. python3 main.py analyze <最終的な分類済みCSV>.csv        でクエリ傾向を分析（HTMLレポート込み）
+
+
+--------------------------------------------------------------
+GUI版（同僚への配布用 .app）
+--------------------------------------------------------------
+概要:
+  gui_app.py は上記の全サブコマンド（dedup 〜 analyze-ai）をTkinterのGUIから
+  実行できるようにしたラッパー。ロジックはmain.pyのcmd_*関数をそのまま呼ぶだけで、
+  分類ロジック・出力ファイル名などCLI版と完全に同じ。
+
+  出力先はCLI版と異なり、常に ~/Documents/AthenaCSVTool/local_output/
+  （.appとしてビルド＝frozen判定された場合のみ切り替わる。python3 gui_app.py で
+  直接実行した場合はCLI版と同じ data_cleaning/local_output/ に出る。
+  判定ロジックは lib/output_utils.py 参照）。
+
+  ai-classify/ai-retryの --batch-api は、GUIでは「Batches API使用」チェックボックス
+  ＋APIキー入力欄で有効化する。要colleague自身のANTHROPIC_API_KEY・課金は各自持ち。
+  通常のプロキシ経由（デフォルト）はAPIキー不要。
+
+ビルド方法（配布する側が実行）:
+  ./build_gui.sh
+  → .build_venv/ を自動作成してpyinstaller・anthropicパッケージをインストールし、
+    dist/Athena CSV Tool.app を生成する。
+  → colleagueには dist/Athena CSV Tool.app をzip等でそのまま渡せばよい
+    （colleague側にPython/pipのインストールは不要）。
+
+配布時の注意:
+  - 未署名ビルドのため、colleagueが初回起動する際にGatekeeperの警告
+    （"開発元を確認できないため開けません"）が出る。Finderで.appを右クリック→
+    「開く」を選ぶと起動できる。正式に警告を消すにはApple Developer ID証明書での
+    コード署名＋notarizationが別途必要（今回は未対応）。
+  - build/・dist/・.build_venv/・*.spec はビルドごとに生成される一時物なので
+    .gitignore済み（コミット不要）。配布時はdist/配下の.appだけを渡す。

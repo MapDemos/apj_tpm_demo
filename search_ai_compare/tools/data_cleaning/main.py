@@ -484,6 +484,12 @@ def ensure_batch_api_venv_and_reexec() -> None:
     except ImportError:
         pass
 
+    if getattr(sys, "frozen", False):
+        # GUIアプリ(PyInstallerバンドル)ではビルド時にanthropicパッケージを
+        # 同梱済みの前提。ここに来るのはビルド漏れなので、venv作成やos.execveは
+        # 実行できない（同梱pythonはpipもフルインタプリタも持たない）ため何もしない。
+        return
+
     if os.environ.get("_DATA_CLEANING_VENV_ACTIVE") == "1":
         # 既にこのvenv上で動いているのにまだ無い＝install失敗。無限re-execを避けて
         # ここでは何もせず、呼び出し元（cmd_ai_classify/cmd_ai_retry）の
