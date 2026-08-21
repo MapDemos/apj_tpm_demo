@@ -3587,6 +3587,7 @@ document.addEventListener('keydown', (e) => {
 });
 // AI Hintボタンは検索結果と違って再レンダリングされない静的要素なので、トップレベルで一度だけ配線する
 document.getElementById('ai-hint-btn').addEventListener('click', () => { if (feedbackContext) openAiHintDialog(); });
+initResultSearchBoxes();
 
 // ============================================================
 // CENTER MAPS
@@ -3830,6 +3831,58 @@ let googleRawResults = [], mapboxRawResults = [];
 function updateResultEditors() {
   googleResultEditor?.setValue(JSON.stringify(googleRawResults, null, 2));
   mapboxResultEditor?.setValue(JSON.stringify(mapboxRawResults, null, 2));
+  // 内容が変わったので、古い検索結果(matches)が新しい内容とズレたまま残らないよう検索ボックスもリセットする
+  ['google', 'mapbox'].forEach(side => {
+    const input = document.getElementById(`${side}-result-search`);
+    if (input) { input.value = ''; input.classList.remove('no-match'); }
+    resultSearchState[side] = { matches: [], index: -1 };
+  });
+}
+
+// RESULTSダイアログの検索ボックス。Monaco Editor内蔵のFind機能(Ctrl+F)はショートカット頼りで
+// 気付かれにくいため、常に見えるテキストボックスを別途用意する。入力するたびに最初のマッチへジャンプし、
+// Enter/Shift+Enterで次/前のマッチへ巡回する(入力欄のフォーカスは奪わない。editor.focus()を呼ぶと
+// 1文字打つごとに入力欄からフォーカスが逃げてしまうため)
+const resultSearchState = { google: { matches: [], index: -1 }, mapbox: { matches: [], index: -1 } };
+
+function jumpToResultMatch(side, term, direction) {
+  const editor = side === 'google' ? googleResultEditor : mapboxResultEditor;
+  const input = document.getElementById(`${side}-result-search`);
+  if (!editor || !input) return;
+  const state = resultSearchState[side];
+
+  if (!term) {
+    state.matches = []; state.index = -1;
+    input.classList.remove('no-match');
+    return;
+  }
+  if (direction === 0) {
+    // 入力内容が変わったので検索し直し、最初のマッチへジャンプする
+    state.matches = editor.getModel().findMatches(term, false, false, false, null, false);
+    state.index = state.matches.length ? 0 : -1;
+  } else if (state.matches.length) {
+    // Enter/Shift+Enter: 検索し直さず、既に見つかっているマッチの中を巡回する(先頭/末尾で折り返す)
+    state.index = (state.index + direction + state.matches.length) % state.matches.length;
+  }
+
+  input.classList.toggle('no-match', state.matches.length === 0);
+  if (state.index === -1) return;
+  const range = state.matches[state.index].range;
+  editor.revealRangeInCenter(range);
+  editor.setSelection(range);
+}
+
+function initResultSearchBoxes() {
+  ['google', 'mapbox'].forEach(side => {
+    const input = document.getElementById(`${side}-result-search`);
+    if (!input) return;
+    input.addEventListener('input', () => jumpToResultMatch(side, input.value.trim(), 0));
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      jumpToResultMatch(side, input.value.trim(), e.shiftKey ? -1 : 1);
+    });
+  });
 }
 
 // ============================================================

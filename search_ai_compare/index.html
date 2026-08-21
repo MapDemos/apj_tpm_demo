@@ -230,15 +230,17 @@
     <div class="dialog-body">
       <div class="editors-grid">
         <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
             <p class="editor-label" style="margin:0;">Google Results</p>
+            <input type="text" id="google-result-search" class="result-search-input" placeholder="Search results… (Enter: next, Shift+Enter: prev)" />
             <button class="btn btn-secondary" id="copy-google-results-btn" style="padding:3px 10px;font-size:11px;">Copy</button>
           </div>
           <div class="editor-wrap" id="google-result-editor-wrap"></div>
         </div>
         <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
             <p class="editor-label" style="margin:0;">Mapbox Results</p>
+            <input type="text" id="mapbox-result-search" class="result-search-input" placeholder="Search results… (Enter: next, Shift+Enter: prev)" />
             <button class="btn btn-secondary" id="copy-mapbox-results-btn" style="padding:3px 10px;font-size:11px;">Copy</button>
           </div>
           <div class="editor-wrap" id="mapbox-result-editor-wrap"></div>
