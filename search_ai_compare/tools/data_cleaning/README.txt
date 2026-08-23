@@ -7,11 +7,16 @@ tools/data_cleaning/ — CSVクレンジング・AI分類・傾向分析CLI
 "near","navigation_profile","datetime"
 
 全機能は main.py の1本のCLIにサブコマンドとしてまとまっている。
-サブコマンド一覧: dedup / add-query-count / count-queries / ai-classify /
-ai-retry / count-classifications / analyze / analyze-ai
+サブコマンド一覧: dedup / add-query-count / count-column / ai-classify /
+ai-retry / analyze
 
     python3 main.py <subcommand> input.csv [オプション]
     python3 main.py <subcommand> --help   # サブコマンドごとの詳細
+
+列を追加するサブコマンド（dedup / add-query-count の "same_query_count"、
+ai-classify の "ai_classification"）は、入力に既に同名の列がある場合
+（=一度実行済みのCSVを誤って再度渡した場合）、上書きせず "same_query_count_2"
+のように連番を振って追加する（lib/column_utils.py の unique_column_name）。
 
 出力ファイルについて
 --------------------------------------------------------------
@@ -62,14 +67,21 @@ add-query-count  [suffix: query_count_annotated]
 
 
 --------------------------------------------------------------
-count-queries  [suffix: count_analysis_result]
+count-column  [suffix: count_analysis_result / --column ai_classification 時は classification_count_analysis_result]
 --------------------------------------------------------------
 概要:
-  CSV内の "query" 列の出現回数を、行の近さに関係なく全体でカウントする。
-  出力CSV列: query, count（countの降順、同数なら初出順）
+  指定した列（--column、デフォルト "query"）の値が全体で何回出現するかを、
+  行の近さに関係なくカウントする（旧 count-queries / count-classifications を統合。
+  対象列が違うだけでロジックはほぼ同じだったため1コマンドにまとめた）。
+  出力CSV列: <列名>, count, ratio
+
+  --column ai_classification を指定した場合（ai-classify/ai-retryの出力を
+  対象にする想定）のみ、lib/classification_common.py のカテゴリ順（想定外の
+  ラベルは件数降順で末尾）に並べる。それ以外の列はcountの降順、同数なら初出順。
 
 実行例:
-  python3 main.py count-queries input.csv
+  python3 main.py count-column input.csv                          # queryを集計（デフォルト）
+  python3 main.py count-column classified.csv --column ai_classification
 
 
 --------------------------------------------------------------
@@ -145,24 +157,12 @@ ai-retry  [suffix: classified_retry_analysis_result]
 
 
 --------------------------------------------------------------
-count-classifications  [suffix: classification_count_analysis_result]
---------------------------------------------------------------
-概要:
-  ai-classify（または ai-retry）の出力CSVにある "ai_classification" 列を
-  件数集計する。
-  出力CSV列: ai_classification, count, ratio
-  （lib/classification_common.py のカテゴリ順で出力、想定外ラベルは件数降順で末尾に追加）
-
-実行例:
-  python3 main.py count-classifications classified.csv
-
-
---------------------------------------------------------------
-analyze  [suffix: trend_daily_volume_result / trend_hourly_volume_result / trend_proximity_prefecture_result / trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_long_tail_result / trend_report(html)]
+analyze  [suffix: trend_daily_volume_result / trend_hourly_volume_result / trend_proximity_prefecture_result / trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_long_tail_result / trend_report(html) または --with-ai-commentary指定時は trend_report_ai(html)]
 --------------------------------------------------------------
 概要:
   ai-classify（または ai-retry）の出力CSV（"ai_classification" 列付き）を
-  対象に、クエリ傾向を7観点で分析する。AIは呼ばない（分類済みCSVの集計のみ）。
+  対象に、クエリ傾向を7観点で分析する。デフォルトではAIは呼ばない
+  （分類済みCSVの集計のみ）。
 
   A. 日別クエリ量（全カテゴリ合計。折れ線グラフ）
   B. 時間帯別クエリ量（全日付をまとめて0〜23時の時間帯別に集計。棒グラフ。
@@ -193,18 +193,10 @@ analyze  [suffix: trend_daily_volume_result / trend_hourly_volume_result / trend
   （ブラウザでそのまま開けるスタンドアロンファイル、英語表記、ライト/ダークモード対応。
   query・カテゴリ名・都道府県名などデータ由来の値は元の言語のまま）。
 
-実行例:
-  python3 main.py analyze classified.csv
-  python3 main.py analyze classified.csv --top-n 30
-
-
---------------------------------------------------------------
-analyze-ai  [suffix: trend_daily_volume_result / trend_hourly_volume_result / trend_proximity_prefecture_result / trend_top_queries_result / trend_daily_category_result / trend_column_usage_result / trend_long_tail_result / trend_report_ai(html)]
---------------------------------------------------------------
-概要:
-  analyze と同じA〜G集計を行った上で、その集計結果をもとにLLM（Claude Sonnet 5、
-  プロキシ経由）にクエリ傾向のコメンタリーを書かせる版。CSV7種の内容・出力先は
-  analyzeと全く同じ（HTMLだけ suffix が trend_report_ai になる）。
+  --with-ai-commentary を付けると、上記の集計結果をもとにLLM（Claude Sonnet 5、
+  プロキシ経由）にクエリ傾向のコメンタリーを書かせ、レポートに追加する
+  （HTML以外のCSV7種の内容・出力先は付けない場合と全く同じ。HTMLのsuffixだけ
+  trend_report_ai になる）。
 
   AIコメンタリーは2種類:
   - レポート冒頭の全体サマリー（2〜3行の短い概況、overview）
@@ -221,8 +213,10 @@ analyze-ai  [suffix: trend_daily_volume_result / trend_hourly_volume_result / tr
   コメンタリー・AI Insightなしでレポートを出力する（処理全体は止まらない）。
 
 実行例:
-  python3 main.py analyze-ai classified.csv
-  python3 main.py analyze-ai classified.csv --top-n 30
+  python3 main.py analyze classified.csv
+  python3 main.py analyze classified.csv --top-n 30
+  python3 main.py analyze classified.csv --with-ai-commentary
+  python3 main.py analyze classified.csv --top-n 30 --with-ai-commentary
 
 
 --------------------------------------------------------------
@@ -230,7 +224,7 @@ analyze-ai  [suffix: trend_daily_volume_result / trend_hourly_volume_result / tr
 --------------------------------------------------------------
 1. python3 main.py dedup input.csv                        で重複除去（元フォーマット保持）
 2. python3 main.py ai-classify <dedupの出力>.csv           でAI分類（ai_classification列を追加）
-3. python3 main.py count-classifications <ai-classifyの出力>.csv  で分類結果の件数・割合を確認
+3. python3 main.py count-column <ai-classifyの出力>.csv --column ai_classification  で分類結果の件数・割合を確認
 4. othersが多ければ python3 main.py ai-retry <ai-classifyの出力>.csv で再分類
    （必要なら lib/classification_common.py のプロンプトを見直してから）
 5. python3 main.py analyze <最終的な分類済みCSV>.csv        でクエリ傾向を分析（HTMLレポート込み）
@@ -240,9 +234,10 @@ analyze-ai  [suffix: trend_daily_volume_result / trend_hourly_volume_result / tr
 GUI版（同僚への配布用 .app）
 --------------------------------------------------------------
 概要:
-  gui_app.py は上記の全サブコマンド（dedup 〜 analyze-ai）をTkinterのGUIから
+  gui_app.py は上記の全サブコマンド（dedup 〜 analyze）をTkinterのGUIから
   実行できるようにしたラッパー。ロジックはmain.pyのcmd_*関数をそのまま呼ぶだけで、
-  分類ロジック・出力ファイル名などCLI版と完全に同じ。
+  分類ロジック・出力ファイル名などCLI版と完全に同じ。タブ名は「🧹 クエリの
+  クレンジング」「📊 クエリの分析」。
 
   出力先はCLI版と異なり、常に ~/Documents/AthenaCSVTool/local_output/
   （.appとしてビルド＝frozen判定された場合のみ切り替わる。python3 gui_app.py で
@@ -253,11 +248,14 @@ GUI版（同僚への配布用 .app）
   ＋APIキー入力欄で有効化する。要colleague自身のANTHROPIC_API_KEY・課金は各自持ち。
   通常のプロキシ経由（デフォルト）はAPIキー不要。
 
+  analyzeの --with-ai-commentary は、GUIでは「AIコメンタリー」チェックボックスで
+  有効化する（デフォルトOFF）。
+
 ビルド方法（配布する側が実行）:
   ./build_gui.sh
   → .build_venv/ を自動作成してpyinstaller・anthropicパッケージをインストールし、
-    dist/Athena CSV Tool.app を生成する。
-  → colleagueには dist/Athena CSV Tool.app をzip等でそのまま渡せばよい
+    dist/Octopus.app を生成する。
+  → colleagueには dist/Octopus.app をzip等でそのまま渡せばよい
     （colleague側にPython/pipのインストールは不要）。
 
 配布時の注意:
