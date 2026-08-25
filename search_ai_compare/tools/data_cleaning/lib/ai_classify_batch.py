@@ -11,7 +11,7 @@ Anthropic Message Batches API を使って query 配列を分類する。
 
 事前準備:
     export ANTHROPIC_API_KEY=sk-ant-...   （プロキシ用キーではなく、本物のAPIキーが必要）
-    ※anthropicパッケージ自体はmain.pyのensure_batch_api_venv_and_reexec()が
+    ※anthropicパッケージ自体はmain.pyのensure_anthropic_venv_and_reexec()が
       .venv/ を自動作成してインストールするので手動インストール不要
 
 anthropicパッケージは本機能専用の依存なので、main.py側で遅延import
@@ -26,10 +26,15 @@ import anthropic
 from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
 from anthropic.types.messages.batch_create_params import Request
 
-from lib.classification_common import numbers_to_labels, parse_response_text
+from lib.classification_common import decode_triplets, parse_response_text
 
 MAX_REQUESTS_PER_JOB = 100_000
 POLL_INTERVAL_SECONDS = 30
+
+Record = tuple[str, str, str]  # (ai_classification, ai_classification_2, ai_classification_3)
+# ai_classification_3は複数リーフを持てる場合、classification_common.LEAF_DELIMITER
+# ("|") で連結した1文字列として入る（decode_triplet参照）。
+UNKNOWN_RECORD: Record = ("unknown", "", "")
 
 
 def build_requests(queries: list[str], batch_size: int, model: str, system_prompt: str) -> list[tuple[int, int, Request]]:
@@ -46,7 +51,11 @@ def build_requests(queries: list[str], batch_size: int, model: str, system_promp
         params: MessageCreateParamsNonStreaming = {
             "model": model,
             "max_tokens": 4096,
-            "system": system_prompt,
+            # system_promptはBRAND_KNOWLEDGE(1500件超のブランド辞書)を埋め込んでおり
+            # サイズが大きい。Batches API内の各リクエストは独立実行だが、同一ジョブ内で
+            # 同じsystem promptを使い回すためcache_controlを付けておく
+            # （Anthropic Messages APIのプロンプトキャッシュ機能）。
+            "system": [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
             "messages": [{"role": "user", "content": user_content}],
         }
         # temperatureはSonnet 5では非推奨パラメータで、指定すると invalid_request_error
@@ -95,9 +104,10 @@ def classify_unique(
     model: str,
     system_prompt: str,
     api_key: str | None = None,
-) -> tuple[dict[str, str], int, int, int]:
+) -> tuple[dict[str, Record], int, int, int]:
     """queriesからユニークな値だけを抽出し、Batches APIで分類する。
-    {query文字列: label} の辞書・input/outputトークン合計・失敗レンジ数を返す。
+    {query文字列: (ai_classification, ai_classification_2, ai_classification_3)} の辞書・
+    input/outputトークン合計・失敗レンジ数を返す。
     ai_classify.classify_unique（プロキシ版）と同様、重複クエリをまとめて
     送ることでコストと不整合を抑える。
 
@@ -107,7 +117,7 @@ def classify_unique(
 
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
 
-    labels: list[str] = ["others"] * len(unique_queries)
+    records: list[Record] = [UNKNOWN_RECORD] * len(unique_queries)
     total_in = 0
     total_out = 0
     failed_ranges = 0
@@ -125,7 +135,7 @@ def classify_unique(
             chunk_len = end - start
 
             if result is None:
-                print(f"  警告: {custom_id} の結果が見つかりません（othersで埋めます）", file=sys.stderr)
+                print(f"  警告: {custom_id} の結果が見つかりません（unknownで埋めます）", file=sys.stderr)
                 failed_ranges += 1
                 continue
 
@@ -133,7 +143,7 @@ def classify_unique(
                 detail = ""
                 if result.type == "errored":
                     detail = f": {result.error.error.type} - {result.error.error.message}"
-                print(f"  警告: {custom_id} は {result.type}{detail}（othersで埋めます）", file=sys.stderr)
+                print(f"  警告: {custom_id} は {result.type}{detail}（unknownで埋めます）", file=sys.stderr)
                 failed_ranges += 1
                 continue
 
@@ -143,21 +153,21 @@ def classify_unique(
             text = parse_response_text(text)
 
             try:
-                numbers = json.loads(text)
-                if not isinstance(numbers, list) or len(numbers) != chunk_len:
+                items = json.loads(text)
+                if not isinstance(items, list) or len(items) != chunk_len:
                     raise ValueError("要素数不一致")
-                chunk_labels = numbers_to_labels(numbers)
+                chunk_records = decode_triplets(items)
             except (json.JSONDecodeError, ValueError) as e:
-                print(f"  警告: {custom_id} のパースに失敗（othersで埋めます）: {e}", file=sys.stderr)
+                print(f"  警告: {custom_id} のパースに失敗（unknownで埋めます）: {e}", file=sys.stderr)
                 failed_ranges += 1
                 continue
 
-            for i, label in enumerate(chunk_labels):
-                labels[start + i] = label
+            for i, record in enumerate(chunk_records):
+                records[start + i] = record
 
             usage = message.usage
             total_in += usage.input_tokens or 0
             total_out += usage.output_tokens or 0
 
-    mapping = dict(zip(unique_queries, labels))
+    mapping = dict(zip(unique_queries, records))
     return mapping, total_in, total_out, failed_ranges

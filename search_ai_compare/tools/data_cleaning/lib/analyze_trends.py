@@ -15,6 +15,13 @@ main.py analyze サブコマンドが使うクエリ傾向分析ロジック（�
      分けず、全体を通した単純な利用率）
   G. ロングテール分布（queryごとの総出現回数をバケット分けし、各バケットが
      総検索ボリュームの何%を占めるかを円グラフで示す。全体＋カテゴリ別）
+  H. Classification Breakdown（ai_classificationの内訳、件数とパーセント）
+  I. Brand POI Taxonomy Breakdown（brand_poiのai_classification_3内訳、件数とパーセント。
+     2026-08-26よりai_classification_3は1行に複数リーフを持てるため延べ数ベースの
+     集計＝合計が100%を超えうる）
+  J. Address Structure Breakdown（addressのai_classification_2内訳、件数とパーセント）
+     H/I/JはCSVにai_classification_2/_3列がある場合のみ表示する（無い入力でも
+     analyzeサブコマンド自体は動く。3階層分類スキーマ導入前のファイル用の後方互換）
 
 CSV出力・HTMLレポート生成の関数を提供する。ファイルパスの決定（output_utils）や
 CLI引数の処理は main.py 側が担当し、このモジュールは集計・整形ロジックに専念する。
@@ -213,6 +220,69 @@ def compute_column_usage(rows: list[dict]) -> dict:
             if (row.get(col) or "").strip():
                 counts[col] += 1
     return {"total": len(rows), "counts": counts}
+
+
+# --- H. ai_classification / _2 / _3 の内訳（2026-08-25追加） ---------------
+# 3階層分類スキーマ(ai_classification/_2/_3)の内訳を実数・パーセントで見せる。
+# ai_classification_2/_3列が無い入力（3階層スキーマ導入前のファイル）でも
+# analyzeサブコマンド自体は動かせるよう、これらの集計はNoneを返して
+# render_html_report側でセクション自体を出さないようにする（他の集計と同じ方式）。
+
+def compute_classification_breakdown(rows: list[dict], order: list[str]) -> dict:
+    """ai_classification（poi/address/semantic_query/unknown）の件数・全体に対する
+    割合を、order（category_order()の並び）順で返す。"""
+    counts = Counter(row.get("ai_classification", "") for row in rows)
+    total = len(rows)
+    items = [
+        {"label": c, "count": counts.get(c, 0), "pct": (counts.get(c, 0) / total * 100) if total else 0.0}
+        for c in order
+    ]
+    return {"total": total, "items": items}
+
+
+def compute_brand_poi_taxonomy_breakdown(rows: list[dict]) -> dict | None:
+    """ai_classification_2 == "brand_poi" の行を対象に、ai_classification_3
+    （category-taxonomy.jsのリーフ、"|"区切りで複数格納されうる）別の件数・
+    brand_poi総数に対する割合を返す。1行が複数リーフを持つ場合はそれぞれの
+    リーフに1件ずつ加算する延べ数ベースの集計のため、件数・割合の合計は
+    brand_poi総数（100%）を超えることがある。
+    ai_classification_2列が入力に無い場合はNone（セクション非表示の合図）。"""
+    if not rows or "ai_classification_2" not in rows[0]:
+        return None
+    brand_rows = [r for r in rows if r.get("ai_classification_2") == "brand_poi"]
+    total = len(brand_rows)
+    counts: Counter = Counter()
+    for r in brand_rows:
+        raw = r.get("ai_classification_3", "") or ""
+        leaves = [leaf for leaf in raw.split("|") if leaf] or ["(未分類)"]
+        counts.update(leaves)
+    items = sorted(
+        (
+            {"label": leaf, "count": count, "pct": (count / total * 100) if total else 0.0}
+            for leaf, count in counts.items()
+        ),
+        key=lambda item: -item["count"],
+    )
+    return {"total": total, "items": items}
+
+
+def compute_address_structure_breakdown(rows: list[dict]) -> dict | None:
+    """ai_classification == "address" の行を対象に、ai_classification_2
+    （region/place/locality/neighborhood/address）別の件数・address総数に対する
+    割合を、その定義順で返す。ai_classification_2列が入力に無い場合はNone。"""
+    if not rows or "ai_classification_2" not in rows[0]:
+        return None
+    from lib.classification_common import ADDRESS_SUBTYPES
+
+    address_rows = [r for r in rows if r.get("ai_classification") == "address"]
+    total = len(address_rows)
+    counts = Counter(r.get("ai_classification_2", "") for r in address_rows)
+    order = list(ADDRESS_SUBTYPES.values())
+    items = [
+        {"label": s, "count": counts.get(s, 0), "pct": (counts.get(s, 0) / total * 100) if total else 0.0}
+        for s in order
+    ]
+    return {"total": total, "items": items}
 
 
 def category_order(seen_categories: set) -> list[str]:
@@ -675,6 +745,45 @@ def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[
     </section>"""
 
 
+def _render_breakdown_section(section_id: str, title: str, subtitle: str, breakdown: dict) -> str:
+    """compute_classification_breakdown/compute_brand_poi_taxonomy_breakdown/
+    compute_address_structure_breakdownの共通レンダラー。件数とパーセントを
+    横棒グラフ＋データテーブルで見せる（render_column_usage_sectionと同じ見た目）。"""
+    total = breakdown["total"]
+    items = breakdown["items"]
+
+    rows_html = "".join(
+        f"""<div class="hbar-row">
+              <div class="hbar-label">{esc(item["label"])}</div>
+              <div class="hbar-track"><div class="hbar-fill" style="width:{item["pct"]:.1f}%"></div></div>
+              <div class="hbar-value">{item["count"]}件 ({item["pct"]:.1f}%)</div>
+            </div>"""
+        for item in items
+    )
+
+    table_rows = "".join(
+        f"<tr><td>{esc(item['label'])}</td><td class='num'>{item['count']}</td>"
+        f"<td class='num'>{total}</td><td class='num'>{item['pct']:.1f}%</td></tr>"
+        for item in items
+    )
+
+    return f"""
+    <section id="{section_id}">
+      <h2>{esc(title)}</h2>
+      <p class="muted">{esc(subtitle)}</p>
+      <div class="hbar-chart">
+        {rows_html if items else '<p class="muted">対象データがありません。</p>'}
+      </div>
+      <details class="card">
+        <summary>Show data table</summary>
+        <table class="data-table">
+          <thead><tr><th>label</th><th class="num">count</th><th class="num">total</th><th class="num">pct</th></tr></thead>
+          <tbody>{table_rows}</tbody>
+        </table>
+      </details>
+    </section>"""
+
+
 def render_column_usage_section(usage: dict, insight: str | None = None) -> str:
     total = usage["total"]
     counts = usage["counts"]
@@ -831,6 +940,9 @@ def render_html_report(
     proximity_data: dict | None = None,
     long_tail: dict[str, dict] | None = None,
     ai_commentary: dict | None = None,
+    classification_breakdown: dict | None = None,
+    brand_poi_taxonomy_breakdown: dict | None = None,
+    address_structure_breakdown: dict | None = None,
 ) -> str:
     insights = ai_commentary.get("insights") if ai_commentary else None
 
@@ -1003,6 +1115,25 @@ def render_html_report(
   {render_daily_category_section(daily, order, insight=insights.get("daily_trend") if insights else None)}
   {render_column_usage_section(usage, insight=insights.get("column_usage") if insights else None)}
   {render_long_tail_section(long_tail, order, insight=insights.get("long_tail") if insights else None) if long_tail else ""}
+  {_render_breakdown_section(
+      "classification-breakdown", "H. Classification Breakdown",
+      "ai_classification（poi/address/semantic_query/unknown）別の件数と全体に対する割合。",
+      classification_breakdown,
+  ) if classification_breakdown else ""}
+  {_render_breakdown_section(
+      "brand-poi-taxonomy-breakdown", "I. Brand POI Taxonomy Breakdown",
+      "brand_poi（チェーン店・ブランド）と判定された行のみを対象に、ai_classification_3"
+      "（category-taxonomyのカテゴリ）別の件数とbrand_poi全体に対する割合。"
+      "1行が複数カテゴリに紐づく場合は各カテゴリに1件ずつ加算する延べ数ベースの集計のため、"
+      "件数・割合の合計はbrand_poi全体（100%）を超えることがあります。",
+      brand_poi_taxonomy_breakdown,
+  ) if brand_poi_taxonomy_breakdown else ""}
+  {_render_breakdown_section(
+      "address-structure-breakdown", "J. Address Structure Breakdown",
+      "ai_classification=addressと判定された行のみを対象に、住所の粒度"
+      "（region/place/locality/neighborhood/address）別の件数とaddress全体に対する割合。",
+      address_structure_breakdown,
+  ) if address_structure_breakdown else ""}
 </main>
 </body>
 </html>
