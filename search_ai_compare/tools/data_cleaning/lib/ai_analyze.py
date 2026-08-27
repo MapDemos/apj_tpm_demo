@@ -1,5 +1,6 @@
 """
-main.py analyze-ai サブコマンドが使う、クエリ傾向のAIコメンタリー生成ロジック。
+main.py analyze サブコマンド（--with-ai-commentary）が使う、クエリ傾向のAIコメンタリー
+生成ロジック。
 
 鉄則: AIへの入力は必ず、analyze相当の集計結果（カテゴリ別頻出クエリ・
 日別カテゴリ推移・列指定率クロス集計・ロングテール分布の要約）のみ。入力CSVの
@@ -7,7 +8,11 @@ main.py analyze-ai サブコマンドが使う、クエリ傾向のAIコメン�
 lib/analyze_trends.pyの既存関数（compute_top_queries等）をそのまま使う
 （この集計はPython側のETLであり、AI呼び出しではない）。
 
-モデルはClaude Sonnet 5（プロキシ経由）。
+モデルは--modelで選択可能（classification_common.MODEL_CHOICES、デフォルトsonnet）。
+2026-08-25、プロキシ経由の呼び出しを廃止し、本物のAnthropic API（要ANTHROPIC_API_KEY
+または--token）を直接叩く方式に変更（ai-classify --batch-api等と同じくanthropicパッケージ
+を使用。main.pyのensure_batch_api_venv_and_reexec()が--with-ai-commentary指定時にも
+venvへの自動インストールを行う）。
 
 出力は2種類:
   - overview: レポート冒頭に載せる2〜3行の全体サマリー
@@ -20,13 +25,10 @@ lib/analyze_trends.pyの既存関数（compute_top_queries等）をそのまま�
 """
 
 import json
-import urllib.error
-import urllib.request
 
-from lib.classification_common import parse_response_text
+from lib.classification_common import MODEL_CHOICES, parse_response_text
 
-MODEL = "claude-sonnet-5"
-PROXY_URL = "https://okqfpyxf4oe6htegrlcgrwdssa0yoxcr.lambda-url.us-east-1.on.aws/"
+MODEL = MODEL_CHOICES["sonnet"]
 
 SYSTEM_PROMPT = """You are a data analyst reviewing aggregated search query log statistics.
 You will receive a JSON summary with four parts:
@@ -40,6 +42,12 @@ You will receive a JSON summary with four parts:
 
 Write short, concrete observations grounded only in the numbers given. Use plain,
 simple, concise English — short sentences, no jargon, no filler words.
+
+Write everything in English, with no exceptions. The input data (query strings,
+category names) is in Japanese because the underlying dataset is Japanese search
+queries — you may quote a Japanese query string verbatim if needed, but every
+sentence you write, and every key/value you generate other than direct quotes of
+the data, must be in English.
 
 Respond with a JSON object with exactly these keys:
   "overview": 2-3 short sentences summarizing the overall picture across everything.
@@ -104,36 +112,38 @@ def build_summary_payload(
     }
 
 
-def generate_commentary(summary_payload: dict) -> dict:
-    """要約データをLLMに送り、{"overview": str, "insights": {...}} を返す。"""
-    body = {
-        "model": MODEL,
-        "max_tokens": 2048,
-        # temperatureはこのモデル(Sonnet 5)では非推奨のパラメータで、指定すると
-        # 400 invalid_request_errorになる（Haiku用のai_classify.pyでは許容されるが
-        # 揃えて渡さない。詳細はモデルごとの対応状況次第）
-        "system": SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": json.dumps(summary_payload, ensure_ascii=False)}],
-    }
+def generate_commentary(summary_payload: dict, model: str = MODEL, api_key: str | None = None) -> dict:
+    """要約データをLLMに送り、{"overview": str, "insights": {...}} を返す。
 
-    req = urllib.request.Request(
-        PROXY_URL,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    本物のAnthropic API（anthropicパッケージ）を直接叩く。api_keyを渡すと
+    ANTHROPIC_API_KEY環境変数の代わりにそれを使う（ai_classify_batch.classify_unique
+    と同じ流儀）。anthropicパッケージが未インストールの環境ではImportErrorを送出する
+    （呼び出し元のmain.py cmd_analyzeが警告表示してコメンタリーなしにフォールバックする）。
+    """
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+
+    kwargs: dict = {}
+    # temperatureはSonnet 5では非推奨パラメータで、指定すると400 invalid_request_error
+    # になる（ai_classify.pyのcall_claudeと同じ理由）。haiku指定時のみ付与する。
+    if "haiku" in model:
+        kwargs["temperature"] = 0
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as res:
-            data = json.loads(res.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        # プロキシ/Anthropic側が返す実際のエラー本文（モデル拒否・クレジット不足等の
+        response = client.messages.create(
+            model=model,
+            max_tokens=2048,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": json.dumps(summary_payload, ensure_ascii=False)}],
+            **kwargs,
+        )
+    except anthropic.APIStatusError as e:
+        # Anthropic側が返す実際のエラー内容（モデル拒否・クレジット不足・認証エラー等の
         # 具体的な理由）を握りつぶさずに例外メッセージへ含める
-        error_body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"HTTP {e.code} {e.reason}: {error_body}") from e
+        raise RuntimeError(f"HTTP {e.status_code}: {e.message}") from e
 
-    content_blocks = data.get("content") or []
-    text = "".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
+    text = "".join(b.text for b in response.content if b.type == "text")
     text = parse_response_text(text)
 
     # strict=False: overview/insightsの文中に生の改行等の制御文字が

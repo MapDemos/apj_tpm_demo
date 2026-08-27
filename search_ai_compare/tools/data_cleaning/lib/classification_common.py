@@ -12,16 +12,19 @@ unsupported_query_location_intent/broken_query/othersの7分類から全面刷�
   - ai_classification_2 : ai_classificationがpoiならunique_poi/brand_poi/category、
                            addressならregion/place/locality/neighborhood/address
   - ai_classification_3 : ai_classification_2がunique_poi/brand_poi/categoryの時のみ、
-                           category-taxonomy.js（CATEGORY_TAXONOMY）の285リーフの
-                           うち当てはまるものを1つ以上（複数可、一字一句一致）。
-                           CSV上は"|"区切りで連結した文字列として1列に格納する。
-                           該当するリーフが本当に1つも無い場合のみ"unknown"
-                           （285リーフには存在しない、判定不能を表す唯一の許可値）。
+                           category-taxonomy.js（CATEGORY_TAXONOMY）に当てはまるものを
+                           1つ以上（一字一句一致）。CSV上は"|"区切りで連結した文字列
+                           として1列に格納する。該当するものが本当に1つも無い場合のみ
+                           "unknown"（taxonomyには存在しない、判定不能を表す唯一の
+                           許可値）。
                            （2026-08-26、brand_poi限定・単一選択だった旧仕様から
-                           unique_poi/categoryも対象＆複数選択可に変更）
+                           unique_poi/categoryも対象＆複数選択可に変更。2026-08-27、
+                           旧・階層的で285件と細かすぎたtaxonomyを45件のフラットな
+                           単一カテゴリに刷新し、通常は1要素で済む設計に戻した
+                           ―複数選択の仕組み自体はまだ残っているが例外的な扱い）
 
-brand_data.BRAND_CATEGORY_MAP（Wikipedia等を元にしたブランド→taxonomyリーフの
-辞書、search_ai_compare/local/category_and_brand/poi-blocklist.js）をプロンプトに
+brand_data.BRAND_CATEGORY_MAP（Wikipedia等を元にしたブランド→taxonomyカテゴリの
+辞書、data_cleaning/local/category_and_brand/poi-blocklist.js）をプロンプトに
 埋め込み、brand_poi判定とai_classification_3の精度向上のための参照情報としてLLMに渡す。
 """
 
@@ -39,6 +42,26 @@ MODEL_CHOICES: dict[str, str] = {
     "sonnet": "claude-sonnet-5",
 }
 
+# main.pyの --model 引数の選択肢（2026-08-26、2段階分離方式の導入に伴い追加）。
+# 値は (ai_classification/_2に使うモデル, ai_classification_3に使うモデル) のペア。
+# "haiku+sonnet"が既定の推奨構成（安いHaikuで済む部分と、taxonomy精度が必要な
+# ai_classification_3だけSonnetに分ける。project memory参照）。"haiku"/"sonnet"は
+# 両階層を同じモデルで統一したい場合の比較・検証用の選択肢。
+MODEL_PRESETS: dict[str, tuple[str, str]] = {
+    "haiku": (MODEL_CHOICES["haiku"], MODEL_CHOICES["haiku"]),
+    "sonnet": (MODEL_CHOICES["sonnet"], MODEL_CHOICES["sonnet"]),
+    "haiku+sonnet": (MODEL_CHOICES["haiku"], MODEL_CHOICES["sonnet"]),
+}
+
+
+def model_preset_label(preset: str) -> str:
+    """CLI/GUIの表示用に、プリセット名と実際のモデルIDを両方含む説明文を組み立てる
+    （「haikuを選んだつもりが実は内部でSonnetも動いている」という誤解を防ぐため）。"""
+    level12_model, level3_model = MODEL_PRESETS[preset]
+    if level12_model == level3_model:
+        return f"{preset}（{level12_model}）"
+    return f"{preset}（ai_classification/_2: {level12_model} + ai_classification_3: {level3_model}）"
+
 # ai_classification（トップレベル）の番号→カテゴリ名。ai-retryの--categoryの
 # 選択肢としても使う（main.py参照）。
 CATEGORIES: dict[int, str] = {
@@ -53,11 +76,14 @@ CATEGORY_DESCRIPTIONS: dict[int, str] = {
     "一般名詞のいずれでもよい）。例: \"東京タワー\", \"ローソン\", \"コンビニ\"",
     2: "住所表記。都道府県・市区町村・字・丁目・番地など、行政区分や地番を表す文字列。"
     "例: \"常盤32-10\", \"港区六本木\"",
-    3: "本体となる場所・ブランド名・カテゴリ語に、それを特定・絞り込むための補助的な"
-    "文脈（地名・業種語など）が付加されており、全体として単一の場所を特定できる"
-    "クエリ。例: \"清水寺 京都\"（一意の施設名+所在都道府県で確認補強）、"
-    "\"コメダ カフェ\"（ブランド名+業種語で確認補強）。単一の意図に絞れる限り、"
-    "文字列の見た目が複合的でもここに含める。",
+    3: "ブランド名+支店識別子（それ自体がPOIの正式名称の一部であるもの）を除き、"
+    "本体となるPOI名・ブランド名・カテゴリ語だけでは同名・同種の候補が複数あり得て"
+    "一意に特定できない場合に、それを絞り込む・特定するのに役立つ付随情報"
+    "（地名・業種語など）が付加されているクエリ。例: \"清水寺 京都\"（同名の寺が"
+    "全国に複数あるため所在都道府県で絞り込み）、\"コメダ カフェ\"（曖昧な名称を"
+    "業種語で絞り込み）。本体自体が単体で完結しており絞り込む余地がない場合や、"
+    "支店識別子がブランド名と一体化してPOIの正式名称を構成している場合はここに"
+    "含めない（詳細はSEMANTIC_QUERY_GUIDANCE参照）。",
     4: "表記が崩れている、異なる複数の候補が並記されていてどちらを探しているか"
     "特定できない、または上記いずれにも当てはまらず判定不能なもの。"
     "例: \"コメダ喫茶、スタバ\"（複数ブランドが並記され、どちらを探したいか不明）。",
@@ -138,6 +164,71 @@ BRAND_KNOWLEDGEに無いブランドでも、モデル自身の知識で複数�
 実行のたびに違う判定にならないよう、判断に迷ったときはBRAND_KNOWLEDGEの値を優先する。
 """
 
+# BOUNDARY_GUIDANCEからBRAND_KNOWLEDGE参照部分（下2段落）を除いたもの。
+# ai_classification_3を判定しない軽量プロンプト（build_system_prompt_level12、
+# 2026-08-26のHaiku/Sonnet 2段階分離で新設）専用。BRAND_KNOWLEDGE(1500件超の辞書)を
+# 埋め込まないため、それを参照する指示文だけ残すと意味不明になるので削っている。
+BOUNDARY_GUIDANCE_LEVEL12 = BOUNDARY_GUIDANCE.rsplit("\n\nbrand_poi判定には、", 1)[0] + "\n"
+
+# brand_match.find_candidates()による機械的な文字列部分一致（表記体系をまたぐ
+# カタカナ/ひらがな/ローマ字変換込み。lib/kana_match.py参照）で検出したブランド名
+# 候補を、呼び出し元(classify_unique)が一部のクエリにだけ付随させて渡す場合の
+# 取り扱いを指示する（2026-08-27新設）。BRAND_KNOWLEDGE本体（1500件超）は
+# レベル1/2の軽量プロンプトには埋め込まないが、機械的に絞り込んだ少数の候補
+# だけなら軽量に渡せる。「候補があるのに見ずに自分の知識だけで判断してしまう」
+# ことを防ぐため、出力形式側（この下）で候補ありの要素だけ3要素配列を必須にし、
+# 構造的に候補への言及を強制する（3番目の要素を省略した応答はパース失敗として
+# 既存のリトライ処理に乗る）。
+BRAND_CANDIDATE_GUIDANCE = """
+一部のクエリには、機械的な文字列部分一致（表記ゆれ・カタカナ/ひらがな/ローマ字の
+変換込み）で検出した既知ブランド名の候補が付随している場合がある。その場合、入力
+配列のその要素は文字列単体ではなく[クエリ文字列, [候補1, 候補2, ...]]という2要素
+配列になっている（候補が無い要素は通常通りクエリ文字列単体のまま）。
+
+候補は機械的な文字列一致に過ぎず、必ずしも正しいとは限らない（無関係な言葉が
+偶然一部一致しただけの場合もある）ので鵜呑みにしないこと。しかし候補が付随して
+いる場合は、必ずそのリストを確認してから判断すること（候補の存在を無視して
+自分の知識だけで独自に判断することは禁止する）。確認した結果、候補の中に
+このクエリの実体と合致するものがあれば、それをbrand_poiとして採用すること。
+候補の中のどれにも当てはまらないとしても、それは確認した結果としての判断で
+あるべきで、無視した結果ではあってはならない。
+"""
+
+# BOUNDARY_GUIDANCEの末尾2段落（BRAND_KNOWLEDGE参照部分）を、taxonomyリーフ選定の
+# 文脈向けに言い換えたもの。build_system_prompt_level3専用
+# （brand_poiか否かの「判定」は既にlevel12側で確定済みなので、代わりに
+# 「どのリーフを選ぶか」の判断材料として使う指示にしている）。
+BRAND_KNOWLEDGE_GUIDANCE_LEVEL3 = """
+対象がbrand_poi（複数拠点展開するブランド）の場合、以下に埋め込んだBRAND_KNOWLEDGE
+（ブランド名→taxonomyリーフの参照データ）を積極的に使い、対応するリーフを選ぶこと。
+表記が完全一致する場合に限らず、支店名・「店」等が付加された形も含めてブランド名を
+認識して参照する。BRAND_KNOWLEDGEに無いブランドでも、モデル自身の知識で妥当な
+リーフを判断してよい。
+
+同じブランドが複数の異なるクエリ文字列（支店名付き・省略形など）で登場する場合、
+実行のたびに違う判定にならないよう、判断に迷ったときはBRAND_KNOWLEDGEの値を優先する。
+"""
+
+SEMANTIC_QUERY_GUIDANCE = """
+3(semantic_query)の判定は以下の2段階で行うこと。
+
+段階1（除外）: ブランド名+支店名/地名+「店」「校」等の接尾辞が一体となって、
+その拠点固有の正式名称を構成している場合（例: "ローソン浜松高塚店",
+"文理学院甲府南校"）は、支店名が独立した絞り込み情報ではなくPOI名自体の一部
+なので、3(semantic_query)にはせず1(poi)のままとする。同様に、地名+施設種別語が
+分割不能な一つの固有名詞として定着している場合（例: "唐戸ターミナル"）も、
+「本体+絞り込み情報」の構造ではなく単一の名称なので1(poi)のままとする。
+
+段階2（絞り込み情報の有無）: 段階1で除外されなかったクエリについて、本体
+（POI名・ブランド名・カテゴリ語）だけでは同名・同種の候補が複数あり得て一意に
+特定できない場合に、それを絞り込む・特定するのに役立つ付随情報（地名・業種語
+など）が付加されているクエリのみを3(semantic_query)とする。本体自体が単体で
+完結しており、それ以上絞り込む余地がない場合（例: "美容室"のような業種語
+そのもの、"ゆず庵"のような単体のブランド名、"上名久井"のような単体の地名、
+"ハーバーショップ"のような単体の固有名称）は、付随情報が付加されていないので
+3(semantic_query)にせず、1(poi)または2(address)として判定すること。
+"""
+
 ADDRESS_GUIDANCE = """
 address（poi以外の住所表記）のサブカテゴリは、番地・号まで含む最も細かい表記なら
 address、丁目までならneighborhood、字・町名レベルならlocality、市区町村レベルなら
@@ -149,29 +240,54 @@ CATEGORY_3_GUIDANCE = """
 ai_classification_3は、ai_classification_2がunique_poi・brand_poi・categoryの
 いずれかの場合に必ず設定する（address・semantic_query・unknownでは常に空配列[]）。
 「わからない」を理由に空配列で済ませてはならない。値は文字列の配列で返し、各要素は
-以下に列挙するCATEGORY_TAXONOMYのリーフ文字列のいずれか1つと一字一句完全に一致
-する値でなければならない（存在しない値・近似した値を作り出さない。ハルシネーション
-禁止）。該当するリーフがどうしても1つも見つからない場合のみ、配列に文字列
-"unknown"を1つだけ入れて返す（taxonomyには存在しないが、「判定不能」を表す
-唯一の許可された値）。
+以下に列挙するCATEGORY_TAXONOMYの値のいずれか1つと一字一句完全に一致する値で
+なければならない（存在しない値・近似した値を作り出さない。ハルシネーション禁止）。
+該当するものがどうしても1つも見つからない場合のみ、配列に文字列"unknown"を1つだけ
+入れて返す（taxonomyには存在しないが、「判定不能」を表す唯一の許可された値）。
 
-複数選択可: 対象のPOI・ブランド・カテゴリ語が複数の商品・サービス領域にまたがる
-場合、当てはまるリーフを複数選んでよい（例: ユニクロはメンズ・レディース・子供服の
-いずれも扱っているので、taxonomyに対応する3つのリーフ全部を選ぶ）。
+2026-08-27にtaxonomyを45件のフラットな単一カテゴリに刷新した（旧・階層的で
+細かすぎる285リーフ構成は、隣接カテゴリ同士の境界判断が難しく分類精度の低下
+要因になっていたため）。この刷新により、通常は1クエリにつき当てはまるカテゴリは
+1つだけのはずである。配列で返す形式自体は残しているが、複数選択はよほど明確に
+複数領域にまたがる場合（例: ショッピングセンターのように単独では複数の専門店を
+含む複合施設）に限る例外的な扱いとし、基本は1要素の配列を返すこと。
 
-ただし複数選択を安易な拡大解釈の免罪符にしないこと。1つのリーフを採用するには
-以下の両方向の連想が成立する必要がある（片方向だけでは不十分）:
-  (a) 順方向: そのPOI・ブランドを知っている人が自然に思い浮かべる商品・サービスに、
-      そのリーフが含まれる。
-  (b) 逆方向: そのリーフで検索する人が、このPOI・ブランドが結果に出てきたら妥当だと
-      感じる（無関係・的外れではない）。
-両方が成立する具体的なリーフが1つ以上存在するなら、そちらを優先して選び、"ショップ"
-のような抽象度の高い最上位カテゴリだけで済ませない（最上位カテゴリは、具体的なリーフ
-が本当に1つも当てはまらない場合の最終手段としてのみ使う）。
+判断に迷う境界例（優先してこちらを採用する）:
+- 「〜クリニック」「〜医院」は原則「診療所」（「病院」は入院設備を持つ大規模な
+  医療機関のみ）。
+- タワー・超高層ビルなど、待ち合わせ場所の目印として使われる大規模建造物
+  （東京タワー、東京スカイツリー、横浜ランドマークタワー等）は「ランドマーク」。
+  それ以外の観光目的の名所・史跡（城、神社仏閣、庭園等）は「観光名所」。
+- 銭湯・サウナ・日帰り温泉施設など入浴が主目的の施設は「入浴施設」。宿泊が主目的の
+  温泉旅館・ホテルは「宿泊施設」。
+- 弁護士・税理士・保険・金融・翻訳・人材派遣など、専用カテゴリの無い生活関連の
+  専門サービス業は「生活サービス」に含める。
+- 映画館・水族館・動物園・美術館・遊園地・競技場等、細かい種別のレジャー施設は
+  「その他レジャー」にまとめる（フィットネス・カラオケ・パチンコは別カテゴリ）。
+
+名前の語尾・構成要素から診療科目・施設種別を推測できる場合、実測でHaikuが見落とし
+やすかった以下のパターンは特に注意して適用すること（該当する語が名前に含まれて
+いれば、それだけで機械的に判定してよい。歯科医院は既存の「歯科」を優先）:
+- 「〜眼科」「〜内科」「〜外科」「〜皮膚科」「〜耳鼻咽喉科」「〜整形外科」等、
+  「科」で終わる医療機関名は「診療所」（歯科を除く）。
+- 「〜接骨院」「〜整骨院」は「美容サービス」。
+- 「〜斎場」「〜葬儀場」「〜霊園」は、霊園自体は「宗教施設」、葬儀を執り行う施設は
+  「生活サービス」。
+- 「〜銀行」で終わる名称は、日本銀行のような中央銀行・特殊な扱いに見える名称でも
+  機械的に「銀行・ATM」でよい（実在する支店・拠点である以上、業態としては銀行）。
+- 「〜工場」「〜製作所」「〜製鋼」「〜化学」「〜鋼材」等、製造業を示す社名・語尾は
+  「工場」。「〜支店」「〜営業所」「〜本社」等、拠点であることを示す社名・語尾で
+  かつ製造業を示す語が無い場合は「オフィスビル」。
 """
 
 
-def build_system_prompt() -> str:
+def build_system_prompt_level12() -> str:
+    """ai_classification/_2のみを判定する軽量版プロンプト（2026-08-26新設）。
+    taxonomy(285リーフ)・BRAND_KNOWLEDGE(1500件超)を含まないため、
+    build_system_prompt_level3()の重量級プロンプト比で1/10程度のサイズに収まる。
+    ai_classification_3はbuild_system_prompt_level3()で別途判定する
+    （project memory参照: Haikuだとai_classification_3のunknown率が
+    unique_poi/categoryで5割超に達する実測結果を受けての2段階分離）。"""
     cat1_lines = "\n".join(
         f"- {n}: {CATEGORIES[n]} — {CATEGORY_DESCRIPTIONS[n]}" for n in sorted(CATEGORIES)
     )
@@ -182,10 +298,9 @@ def build_system_prompt() -> str:
         f"  - {n}: {ADDRESS_SUBTYPES[n]} — {ADDRESS_SUBTYPE_DESCRIPTIONS[n]}"
         for n in sorted(ADDRESS_SUBTYPES)
     )
-    taxonomy_json = json.dumps(brand_data.CATEGORY_TAXONOMY, ensure_ascii=False)
-    brand_json = json.dumps(brand_data.BRAND_CATEGORY_MAP, ensure_ascii=False, separators=(",", ":"))
 
-    return f"""あなたは検索クエリの分類器です。与えられた検索クエリの配列を、以下の3階層で分類してください。
+    return f"""あなたは検索クエリの分類器です。与えられた検索クエリの配列を、以下の2階層で分類してください。
+（3階層目のtaxonomyカテゴリ判定は別ステップで行うので、ここでは考えなくてよい）
 
 このクエリログは、タクシー配車事業者のオペレーターが電話で乗客から聞いた場所の
 説明を検索APIにクエリ化したものです。乗客本人の入力ではなく、オペレーターが
@@ -195,6 +310,8 @@ def build_system_prompt() -> str:
 ## 第1階層（ai_classification、必須・4カテゴリ）
 {cat1_lines}
 
+{SEMANTIC_QUERY_GUIDANCE}
+
 ## 第2階層（ai_classification_2）
 - ai_classificationが1(poi)の場合、以下から1つ:
 {poi_lines}
@@ -202,33 +319,64 @@ def build_system_prompt() -> str:
 {address_lines}
 - ai_classificationが3(semantic_query)または4(unknown)の場合: 該当なし（0を返す）
 
-## 第3階層（ai_classification_3）
+{BOUNDARY_GUIDANCE_LEVEL12}
+{ADDRESS_GUIDANCE}
+{BRAND_CANDIDATE_GUIDANCE}
+
+## 出力形式
+入力配列と同じ順序・同じ要素数のJSON配列のみを返してください。各要素は
+[ai_classification番号, ai_classification_2番号(該当なしは0)]という2要素配列です。
+ただし、入力の要素が[クエリ文字列, 候補配列]という2要素配列だった場合（前述の
+「ブランド候補」参照）、出力側のその要素は[ai_classification番号,
+ai_classification_2番号(該当なしは0), 一致した候補の番号(1始まり。どの候補にも
+当てはまらない場合は0)]という3要素配列で返してください（3番目の要素の省略は不可）。
+説明文やコードフェンスは一切含めず、JSON配列のみを出力してください。
+例: [[1,2], [1,1], [2,5], [4,0], [1,2,1], [1,1,0]]
+"""
+
+
+def build_system_prompt_level3() -> str:
+    """ai_classification_3（taxonomyカテゴリ）のみを判定するプロンプト（2026-08-26新設、
+    2026-08-27にtaxonomyを285リーフの階層構造から45件のフラットカテゴリに刷新）。
+    ai_classification_2がunique_poi/brand_poi/categoryと確定済みの
+    (query, サブタイプ)の組だけを入力として受け取る想定（呼び出し元でフィルタ済み）。
+    常にSonnetで呼ぶ（build_system_prompt_level12のdocstring参照）。"""
+    taxonomy_json = json.dumps(brand_data.CATEGORY_TAXONOMY, ensure_ascii=False)
+    brand_json = json.dumps(brand_data.BRAND_CATEGORY_MAP, ensure_ascii=False, separators=(",", ":"))
+
+    return f"""あなたは検索クエリのtaxonomy分類器です。与えられた(query文字列, サブタイプ)の
+組の配列について、それぞれに当てはまるCATEGORY_TAXONOMYのカテゴリを判定してください。
+サブタイプはunique_poi（一意の固有施設）・brand_poi（複数拠点展開するブランド）・
+category（業種を表す一般名詞）のいずれかで既に確定済みなので、変更せずそのまま
+カテゴリ選定の参考情報として使うこと。
+
+このクエリログは、タクシー配車事業者のオペレーターが電話で乗客から聞いた場所の
+説明を検索APIにクエリ化したものです。
+
 {CATEGORY_3_GUIDANCE}
 CATEGORY_TAXONOMY（この配列の文字列以外は使用禁止）:
 {taxonomy_json}
 
-{BOUNDARY_GUIDANCE}
-{ADDRESS_GUIDANCE}
+{BRAND_KNOWLEDGE_GUIDANCE_LEVEL3}
 
-## BRAND_KNOWLEDGE（ブランド名→taxonomyリーフの参照データ。出典はWikipedia等の一般情報。
+## BRAND_KNOWLEDGE（ブランド名→taxonomyカテゴリの参照データ。出典はWikipedia等の一般情報。
 空配列は「ブランドとして認識してよいが対応するtaxonomyカテゴリが無い」ことを意味する）
 {brand_json}
 
 ## 出力形式
-入力配列と同じ順序・同じ要素数のJSON配列のみを返してください。各要素は
-[ai_classification番号, ai_classification_2番号(該当なしは0), ai_classification_3の配列
-(該当なしは空配列[]、該当するリーフが1つも無い場合は["unknown"])]
-という3要素の配列です。ai_classification_3は必ず配列で返すこと（1件でも複数でも
-配列。文字列を直接入れない）。説明文やコードフェンスは一切含めず、JSON配列のみを
+入力配列と同じ順序・同じ要素数のJSON配列のみを返してください。各要素はカテゴリ文字列の
+配列です（通常は1要素、複数領域にまたがる場合のみ複数可。文字列を直接入れない。該当する
+カテゴリが1つも無い場合は["unknown"]）。説明文やコードフェンスは一切含めず、JSON配列のみを
 出力してください。
-例: [[1,2,["ショップ>コンビニ"]], [1,2,["ショップ>ファッション(女性)","ショップ>ファッション(男性)","ショップ>子ども服"]], [2,5,[]], [4,0,[]]]
+例: [["コンビニ"], ["専門店（アパレル・服飾雑貨）"], ["unknown"]]
 """
 
 
-SYSTEM_PROMPT = build_system_prompt()
+SYSTEM_PROMPT_LEVEL12 = build_system_prompt_level12()
+SYSTEM_PROMPT_LEVEL3 = build_system_prompt_level3()
 
 
-# ai_classification_3をCSVの1セルに複数値で格納する際の区切り文字。
+# ai_classification_3をCSVの1セルに格納する際の区切り文字。
 # category-taxonomy.jsの285リーフに"|"を含む値は存在しないため衝突しない。
 LEAF_DELIMITER = "|"
 
@@ -237,21 +385,47 @@ LEAF_DELIMITER = "|"
 UNKNOWN_LEAF = "unknown"
 
 
-def decode_triplet(item) -> tuple[str, str, str]:
-    """LLMが返した1件分の [c1, c2, c3] を (ai_classification, ai_classification_2,
-    ai_classification_3) の文字列3つ組に変換する。c3はリーフ文字列の配列
-    （複数可、該当なしは[]、判定不能は["unknown"]）で受け取り、taxonomyに存在する
-    値のみを残して重複を除いた上で LEAF_DELIMITER 区切りの1文字列に連結する
-    （CSVの1セルに収めるため）。形式が不正・値が範囲外の場合はunknown側に
-    フォールバックし、フィルタ後に何も残らなければUNKNOWN_LEAFにフォールバックする。"""
+POI_SUBTYPE_VALUES = ("unique_poi", "brand_poi", "category")
+
+
+def encode_leaves(raw_leaves) -> str:
+    """LLMが返したリーフ配列（複数可、該当なしは[]、判定不能は["unknown"]）を、
+    taxonomyに存在する値のみ残して重複を除いた上で LEAF_DELIMITER 区切りの1文字列に
+    連結する（CSVの1セルに収めるため）。形式が不正・値が範囲外の場合は捨て、
+    フィルタ後に何も残らなければUNKNOWN_LEAFにフォールバックする。
+    decode_leaf_response（3階層目だけを判定する形式）から使う共通ロジック。"""
+    # 旧形式（単一文字列）が来ても壊れないようにフォールバックしておく。
+    if isinstance(raw_leaves, str):
+        raw_leaves = [raw_leaves]
+    elif not isinstance(raw_leaves, list):
+        raw_leaves = []
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for leaf in raw_leaves:
+        if not isinstance(leaf, str):
+            continue
+        if leaf != UNKNOWN_LEAF and leaf not in brand_data.CATEGORY_TAXONOMY_SET:
+            continue  # ハルシネーション（taxonomyに存在しない値）は捨てる
+        if leaf not in seen:
+            seen.add(leaf)
+            deduped.append(leaf)
+
+    return LEAF_DELIMITER.join(deduped) if deduped else UNKNOWN_LEAF
+
+
+def decode_pair(item) -> tuple[str, str]:
+    """build_system_prompt_level12が返す1件分の[c1, c2]を(ai_classification,
+    ai_classification_2)の文字列2つ組に変換する（2026-08-26新設の2段階分離方式で、
+    ai_classification_3を含まない軽量版レスポンス用）。"""
     try:
-        c1, c2, c3 = item
+        c1, c2 = item
     except (ValueError, TypeError):
-        return "unknown", "", ""
+        return "unknown", ""
 
     classification = CATEGORIES.get(c1)
     if classification is None:
-        return "unknown", "", ""
+        return "unknown", ""
 
     if classification == "poi":
         sub = POI_SUBTYPES.get(c2, "")
@@ -260,35 +434,86 @@ def decode_triplet(item) -> tuple[str, str, str]:
     else:
         sub = ""
 
-    if sub in ("unique_poi", "brand_poi", "category"):
-        # 旧形式（単一文字列）が来ても壊れないようにフォールバックしておく。
-        if isinstance(c3, str):
-            raw_leaves = [c3]
-        elif isinstance(c3, list):
-            raw_leaves = c3
-        else:
-            raw_leaves = []
-
-        deduped: list[str] = []
-        seen: set[str] = set()
-        for leaf in raw_leaves:
-            if not isinstance(leaf, str):
-                continue
-            if leaf != UNKNOWN_LEAF and leaf not in brand_data.CATEGORY_TAXONOMY_SET:
-                continue  # ハルシネーション（taxonomyに存在しない値）は捨てる
-            if leaf not in seen:
-                seen.add(leaf)
-                deduped.append(leaf)
-
-        leaf_str = LEAF_DELIMITER.join(deduped) if deduped else UNKNOWN_LEAF
-    else:
-        leaf_str = ""
-
-    return classification, sub, leaf_str
+    return classification, sub
 
 
-def decode_triplets(items: list) -> list[tuple[str, str, str]]:
-    return [decode_triplet(item) for item in items]
+def decode_pairs(items: list) -> list[tuple[str, str]]:
+    return [decode_pair(item) for item in items]
+
+
+# ai_classification/_2 に加えて、機械的に検出したブランド候補のうちどれが
+# 一致したか（BRAND_CANDIDATE_GUIDANCE参照）まで含めた1件分のレコード。
+# matched_brandは候補の中からLLMが選んだブランド名（BRAND_CATEGORY_MAPのキー）、
+# 該当なし/候補自体が無かった場合はNone。
+CandidateRecord = tuple[str, str, str | None]
+
+
+def build_level12_user_content(queries: list[str], candidates: list[list[str] | None]) -> str:
+    """レベル1/2フェーズの入力JSONを組み立てる。candidatesはqueriesと同じ順序・
+    同じ長さで、各クエリに機械的に検出したブランド候補のリスト（無ければNone）を
+    渡す。候補が無いクエリはそのまま文字列単体、候補があるクエリだけ
+    [クエリ文字列, 候補配列]という2要素配列にする（BRAND_CANDIDATE_GUIDANCE参照）。"""
+    if len(queries) != len(candidates):
+        raise ValueError(f"queriesとcandidatesの長さが不一致です（{len(queries)} vs {len(candidates)}）")
+    payload = [
+        [q, c] if c else q
+        for q, c in zip(queries, candidates)
+    ]
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def decode_pair_with_candidate(item, candidates: list[str] | None) -> CandidateRecord:
+    """decode_pairの候補対応版。candidatesがNone（このクエリには候補を渡さな
+    かった）場合は通常の2要素[c1, c2]を期待し、matched_brandは常にNone。
+    candidatesがある場合は3要素[c1, c2, idx]を必須とする（BRAND_CANDIDATE_GUIDANCE
+    で指示した通り、省略はLLM側が候補を確認しなかった合図とみなし、ここでは
+    ValueErrorにして呼び出し元のバッチ失敗→個別リトライのフローに委ねる。
+    idxが範囲外の値の場合も同様に扱う）。"""
+    if candidates is None:
+        c1, c2 = decode_pair(item)
+        return c1, c2, None
+
+    if not isinstance(item, list) or len(item) != 3:
+        raise ValueError(f"候補ありのクエリなのに3要素配列で返っていません: {item!r}")
+    c1_num, c2_num, idx = item
+    c1, c2 = decode_pair([c1_num, c2_num])
+    if not isinstance(idx, int) or idx < 0 or idx > len(candidates):
+        raise ValueError(f"候補番号が不正です: {idx!r}（候補{len(candidates)}件）")
+    matched_brand = candidates[idx - 1] if idx > 0 else None
+    return c1, c2, matched_brand
+
+
+def decode_pairs_with_candidates(items: list, candidates_list: list[list[str] | None]) -> list[CandidateRecord]:
+    if len(items) != len(candidates_list):
+        raise ValueError(f"itemsとcandidates_listの長さが不一致です（{len(items)} vs {len(candidates_list)}）")
+    return [decode_pair_with_candidate(item, c) for item, c in zip(items, candidates_list)]
+
+
+def leaves_for_matched_brand(matched_brand: str | None, ai_classification_2: str) -> str | None:
+    """decode_pair_with_candidateが返したmatched_brandが、レベル3(taxonomy)の
+    LLM呼び出しを省略してBRAND_CATEGORY_MAPから直接引ける対象かどうかを判定する。
+    対象ならencode_leaves済みの文字列（辞書にリーフが無いブランドはUNKNOWN_LEAF）
+    を返し、対象外（候補が無かった/LLMがどの候補にも当てはまらないと判断した/
+    ai_classification_2がbrand_poiと整合しない）ならNoneを返す（呼び出し元は
+    Noneの場合レベル3のLLM判定に回すこと）。
+
+    ai_classification_2がbrand_poiと整合しない場合にNoneを返すのは安全側の
+    フォールバック: LLMがcandidate番号とai_classification_2の間で矛盾した応答
+    （例: 候補に一致したのにunique_poiと判定）を返した場合、辞書を鵜呑みにせず
+    LLMのtaxonomy判定に委ねる。"""
+    if matched_brand is None or ai_classification_2 != "brand_poi":
+        return None
+    return encode_leaves(brand_data.BRAND_CATEGORY_MAP.get(matched_brand, []))
+
+
+def decode_leaf_response(item) -> str:
+    """build_system_prompt_level3が返す1件分のリーフ配列を、CSVの1セルに入れる
+    LEAF_DELIMITER区切りの文字列に変換する（2026-08-26新設）。"""
+    return encode_leaves(item)
+
+
+def decode_leaf_responses(items: list) -> list[str]:
+    return [decode_leaf_response(item) for item in items]
 
 
 def parse_response_text(text: str) -> str:

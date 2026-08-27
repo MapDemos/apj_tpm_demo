@@ -193,10 +193,14 @@ analyze  [suffix: trend_daily_volume_result / trend_hourly_volume_result / trend
   （ブラウザでそのまま開けるスタンドアロンファイル、英語表記、ライト/ダークモード対応。
   query・カテゴリ名・都道府県名などデータ由来の値は元の言語のまま）。
 
-  --with-ai-commentary を付けると、上記の集計結果をもとにLLM（Claude Sonnet 5、
-  プロキシ経由）にクエリ傾向のコメンタリーを書かせ、レポートに追加する
-  （HTML以外のCSV7種の内容・出力先は付けない場合と全く同じ。HTMLのsuffixだけ
-  trend_report_ai になる）。
+  --with-ai-commentary を付けると、上記の集計結果をもとにLLM（本物のAnthropic API、
+  --model haiku|sonnet でモデル選択可・デフォルト sonnet）にクエリ傾向の
+  コメンタリーを書かせ、レポートに追加する（HTML以外のCSV7種の内容・出力先は
+  付けない場合と全く同じ。HTMLのsuffixだけ trend_report_ai になる）。
+  2026-08-25、プロキシ経由の呼び出しを廃止し、本物の ANTHROPIC_API_KEY か
+  --token での上書きが必要な方式に変更した（ai-classify/ai-retryの --batch-api
+  と同様、anthropicパッケージが未インストールでも--with-ai-commentary指定時は
+  main.pyが自動でtools/data_cleaning/.venv/を作成しanthropicをインストールする）。
 
   AIコメンタリーは2種類:
   - レポート冒頭の全体サマリー（2〜3行の短い概況、overview）
@@ -212,11 +216,17 @@ analyze  [suffix: trend_daily_volume_result / trend_hourly_volume_result / trend
   lib/ai_analyze.py の build_summary_payload を参照。AI呼び出しに失敗した場合は
   コメンタリー・AI Insightなしでレポートを出力する（処理全体は止まらない）。
 
+事前準備（--with-ai-commentary使用時のみ）:
+  export ANTHROPIC_API_KEY=sk-ant-...   （または --token sk-ant-... で上書き）
+  ※anthropicパッケージ自体は初回実行時にmain.pyが自動でインストールするので不要
+
 実行例:
   python3 main.py analyze classified.csv
   python3 main.py analyze classified.csv --top-n 30
   python3 main.py analyze classified.csv --with-ai-commentary
   python3 main.py analyze classified.csv --top-n 30 --with-ai-commentary
+  python3 main.py analyze classified.csv --with-ai-commentary --model haiku
+  python3 main.py analyze classified.csv --with-ai-commentary --token sk-ant-...
 
 
 --------------------------------------------------------------
@@ -239,17 +249,38 @@ GUI版（同僚への配布用 .app）
   分類ロジック・出力ファイル名などCLI版と完全に同じ。タブ名は「🧹 クエリの
   クレンジング」「📊 クエリの分析」。
 
-  出力先はCLI版と異なり、常に ~/Documents/AthenaCSVTool/local_output/
-  （.appとしてビルド＝frozen判定された場合のみ切り替わる。python3 gui_app.py で
-  直接実行した場合はCLI版と同じ data_cleaning/local_output/ に出る。
-  判定ロジックは lib/output_utils.py 参照）。
+  ファイルを開くと、列名を大文字小文字問わず候補リスト（query, q, クエリ,
+  検索キーワード, キーワード, search keyword 等）と照合し、クエリ列らしき
+  候補を情報表示するだけの確認ダイアログを出す（自動リネーム等は行わない。
+  本ツールは列名「query」を前提に処理するため、表記ゆれのあるCSVを誤って
+  そのまま処理してしまう事故を防ぐための注意喚起）。
 
-  ai-classify/ai-retryの --batch-api は、GUIでは「Batches API使用」チェックボックス
-  ＋APIキー入力欄で有効化する。要colleague自身のANTHROPIC_API_KEY・課金は各自持ち。
-  通常のプロキシ経由（デフォルト）はAPIキー不要。
+  出力先は各タブ（クレンジング/分析）ごとに独立して選択可能（出力先パスの
+  右横にある「📂」アイコンボタンでフォルダ選択ダイアログを開く。開く/変更を
+  別ボタンにせず1つに統合しており、現在のフォルダから始まるダイアログで
+  そのまま選び直せば変更になる）。初期値はCLI版の既定と同じ
+  ~/Documents/AthenaCSVTool/local_output/（.appとしてビルド＝frozen判定された
+  場合のみ切り替わる。python3 gui_app.py で直接実行した場合はCLI版と同じ
+  data_cleaning/local_output/。判定ロジックは lib/output_utils.py 参照）。
+  実行直前にlib/output_utils.OUTPUT_DIRをそのタブの選択フォルダへ上書きしてから
+  main.pyのcmd_*関数を呼ぶことで、CLI側のロジックには一切手を入れずに
+  出力先を切り替えている。
 
-  analyzeの --with-ai-commentary は、GUIでは「AIコメンタリー」チェックボックスで
-  有効化する（デフォルトOFF）。
+  AIのANTHROPIC_API_KEYは、ヘッダー右端の「⚙ 設定」ボタンから開くダイアログに
+  一元化されている（ai-classify/ai-retryの--batch-api、analyzeの
+  --with-ai-commentaryのいずれも、実行時にこの1箇所のキーを参照する。
+  非persistent、ディスクには保存しない）。バッチサイズ・並行数・Batches API
+  使用の有無は、従来通り各ツールの実行設定欄で個別に設定する
+  （デフォルトはバッチサイズ30・並行数8・Batches API使用ON）。
+
+  ai-classify/ai-retryの実行ボタンの横には「📊 少量実行して見積」ボタンがある。
+  実際に1バッチだけAPIを実行し、そのin/outトークン数を全体のバッチ数分
+  単純に比例させてコストを見積もり、モデル・Batches API使用有無を考慮した
+  金額をログに出力する（Batches API使用時は実際に課金が発生する点に注意）。
+
+  analyzeの --with-ai-commentary は、GUIでは「AIコメンタリー」チェックボックス
+  （デフォルトOFF）＋モデル選択ドロップダウン（デフォルトsonnet）で有効化する。
+  APIキーは上記のヘッダー⚙設定を使用する。
 
 ビルド方法（配布する側が実行）:
   ./build_gui.sh

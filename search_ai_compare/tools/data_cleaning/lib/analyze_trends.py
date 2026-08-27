@@ -16,9 +16,11 @@ main.py analyze サブコマンドが使うクエリ傾向分析ロジック（�
   G. ロングテール分布（queryごとの総出現回数をバケット分けし、各バケットが
      総検索ボリュームの何%を占めるかを円グラフで示す。全体＋カテゴリ別）
   H. Classification Breakdown（ai_classificationの内訳、件数とパーセント）
-  I. Brand POI Taxonomy Breakdown（brand_poiのai_classification_3内訳、件数とパーセント。
+  I. POI Taxonomy Breakdown（ai_classification_2がunique_poi/brand_poi/categoryの
+     各サブタイプごとに、ai_classification_3内訳を件数とパーセントで表示。
      2026-08-26よりai_classification_3は1行に複数リーフを持てるため延べ数ベースの
-     集計＝合計が100%を超えうる）
+     集計＝合計が100%を超えうる。旧仕様ではbrand_poiのみが対象だったが、
+     unique_poi/categoryも同様に集計対象に拡大）
   J. Address Structure Breakdown（addressのai_classification_2内訳、件数とパーセント）
      H/I/JはCSVにai_classification_2/_3列がある場合のみ表示する（無い入力でも
      analyzeサブコマンド自体は動く。3階層分類スキーマ導入前のファイル用の後方互換）
@@ -240,30 +242,37 @@ def compute_classification_breakdown(rows: list[dict], order: list[str]) -> dict
     return {"total": total, "items": items}
 
 
-def compute_brand_poi_taxonomy_breakdown(rows: list[dict]) -> dict | None:
-    """ai_classification_2 == "brand_poi" の行を対象に、ai_classification_3
-    （category-taxonomy.jsのリーフ、"|"区切りで複数格納されうる）別の件数・
-    brand_poi総数に対する割合を返す。1行が複数リーフを持つ場合はそれぞれの
-    リーフに1件ずつ加算する延べ数ベースの集計のため、件数・割合の合計は
-    brand_poi総数（100%）を超えることがある。
+def compute_poi_taxonomy_breakdown(rows: list[dict]) -> dict[str, dict] | None:
+    """ai_classification_2がunique_poi/brand_poi/categoryのそれぞれについて、
+    ai_classification_3（category-taxonomy.jsのリーフ、"|"区切りで複数格納
+    されうる）別の件数・そのサブタイプ総数に対する割合を返す。1行が複数リーフを
+    持つ場合はそれぞれのリーフに1件ずつ加算する延べ数ベースの集計のため、件数・
+    割合の合計はサブタイプ総数（100%）を超えることがある。
+    戻り値は {subtype: {"total": int, "items": [...]}, ...} で、subtypeの
+    キー順はPOI_SUBTYPESの定義順（unique_poi/brand_poi/category）。
     ai_classification_2列が入力に無い場合はNone（セクション非表示の合図）。"""
     if not rows or "ai_classification_2" not in rows[0]:
         return None
-    brand_rows = [r for r in rows if r.get("ai_classification_2") == "brand_poi"]
-    total = len(brand_rows)
-    counts: Counter = Counter()
-    for r in brand_rows:
-        raw = r.get("ai_classification_3", "") or ""
-        leaves = [leaf for leaf in raw.split("|") if leaf] or ["(未分類)"]
-        counts.update(leaves)
-    items = sorted(
-        (
-            {"label": leaf, "count": count, "pct": (count / total * 100) if total else 0.0}
-            for leaf, count in counts.items()
-        ),
-        key=lambda item: -item["count"],
-    )
-    return {"total": total, "items": items}
+    from lib.classification_common import POI_SUBTYPES
+
+    result: dict[str, dict] = {}
+    for subtype in POI_SUBTYPES.values():
+        sub_rows = [r for r in rows if r.get("ai_classification_2") == subtype]
+        total = len(sub_rows)
+        counts: Counter = Counter()
+        for r in sub_rows:
+            raw = r.get("ai_classification_3", "") or ""
+            leaves = [leaf for leaf in raw.split("|") if leaf] or ["(unclassified)"]
+            counts.update(leaves)
+        items = sorted(
+            (
+                {"label": leaf, "count": count, "pct": (count / total * 100) if total else 0.0}
+                for leaf, count in counts.items()
+            ),
+            key=lambda item: -item["count"],
+        )
+        result[subtype] = {"total": total, "items": items}
+    return result
 
 
 def compute_address_structure_breakdown(rows: list[dict]) -> dict | None:
@@ -745,10 +754,14 @@ def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[
     </section>"""
 
 
-def _render_breakdown_section(section_id: str, title: str, subtitle: str, breakdown: dict) -> str:
-    """compute_classification_breakdown/compute_brand_poi_taxonomy_breakdown/
+def _render_breakdown_block(heading_html: str, subtitle: str, breakdown: dict) -> str:
+    """compute_classification_breakdown/compute_poi_taxonomy_breakdown/
     compute_address_structure_breakdownの共通レンダラー。件数とパーセントを
-    横棒グラフ＋データテーブルで見せる（render_column_usage_sectionと同じ見た目）。"""
+    横棒グラフ＋データテーブルで見せる（render_column_usage_sectionと同じ見た目）。
+    見出し（h2 or h3タグ込みのHTML片）と<section>タグの有無は呼び出し側の
+    責務とし、ここではブロック本体だけを組み立てる。単独で1セクション分
+    （H/Jのように<section>で包んで使う）にも、複数ブロックを1つの<section>に
+    まとめる（Iのようにサブタイプごとにh3見出しで並べる）にも流用できる。"""
     total = breakdown["total"]
     items = breakdown["items"]
 
@@ -756,7 +769,7 @@ def _render_breakdown_section(section_id: str, title: str, subtitle: str, breakd
         f"""<div class="hbar-row">
               <div class="hbar-label">{esc(item["label"])}</div>
               <div class="hbar-track"><div class="hbar-fill" style="width:{item["pct"]:.1f}%"></div></div>
-              <div class="hbar-value">{item["count"]}件 ({item["pct"]:.1f}%)</div>
+              <div class="hbar-value">{item["count"]} ({item["pct"]:.1f}%)</div>
             </div>"""
         for item in items
     )
@@ -768,11 +781,10 @@ def _render_breakdown_section(section_id: str, title: str, subtitle: str, breakd
     )
 
     return f"""
-    <section id="{section_id}">
-      <h2>{esc(title)}</h2>
+      {heading_html}
       <p class="muted">{esc(subtitle)}</p>
       <div class="hbar-chart">
-        {rows_html if items else '<p class="muted">対象データがありません。</p>'}
+        {rows_html if items else '<p class="muted">No data available.</p>'}
       </div>
       <details class="card">
         <summary>Show data table</summary>
@@ -780,7 +792,48 @@ def _render_breakdown_section(section_id: str, title: str, subtitle: str, breakd
           <thead><tr><th>label</th><th class="num">count</th><th class="num">total</th><th class="num">pct</th></tr></thead>
           <tbody>{table_rows}</tbody>
         </table>
-      </details>
+      </details>"""
+
+
+def _render_breakdown_section(section_id: str, title: str, subtitle: str, breakdown: dict) -> str:
+    """_render_breakdown_blockを<section>+h2見出しで包む、H/J向けの単一ブロック版。"""
+    return f"""
+    <section id="{section_id}">
+      {_render_breakdown_block(f"<h2>{esc(title)}</h2>", subtitle, breakdown)}
+    </section>"""
+
+
+def render_poi_taxonomy_section(poi_taxonomy_breakdown: dict[str, dict]) -> str:
+    """Iセクション。unique_poi/brand_poi/categoryの各サブタイプごとに、
+    ai_classification_3内訳をh3見出しのブロックとして1つの<section>にまとめる。"""
+    from lib.classification_common import POI_SUBTYPES
+
+    subtitle_by_subtype = {
+        "unique_poi": "Rows classified as unique_poi (a name unique to a single real-world "
+        "location) only, broken down by ai_classification_3 (category-taxonomy leaf) as a "
+        "count and share of the unique_poi total.",
+        "brand_poi": "Rows classified as brand_poi (a chain or brand name) only, broken down "
+        "by ai_classification_3 (category-taxonomy leaf) as a count and share of the "
+        "brand_poi total.",
+        "category": "Rows classified as category (a generic noun for a type of place) only, "
+        "broken down by ai_classification_3 (category-taxonomy leaf) as a count and share "
+        "of the category total.",
+    }
+
+    blocks = "".join(
+        _render_breakdown_block(
+            f"<h3>{esc(subtype)}</h3>", subtitle_by_subtype[subtype], poi_taxonomy_breakdown[subtype]
+        )
+        for subtype in POI_SUBTYPES.values()
+        if subtype in poi_taxonomy_breakdown
+    )
+
+    return f"""
+    <section id="poi-taxonomy-breakdown">
+      <h2>I. POI Taxonomy Breakdown</h2>
+      <p class="muted">When a row is tagged with multiple categories, each one gets a
+        count, so totals and percentages can exceed 100% of each subtype's total.</p>
+      {blocks}
     </section>"""
 
 
@@ -941,7 +994,7 @@ def render_html_report(
     long_tail: dict[str, dict] | None = None,
     ai_commentary: dict | None = None,
     classification_breakdown: dict | None = None,
-    brand_poi_taxonomy_breakdown: dict | None = None,
+    poi_taxonomy_breakdown: dict[str, dict] | None = None,
     address_structure_breakdown: dict | None = None,
 ) -> str:
     insights = ai_commentary.get("insights") if ai_commentary else None
@@ -1117,21 +1170,14 @@ def render_html_report(
   {render_long_tail_section(long_tail, order, insight=insights.get("long_tail") if insights else None) if long_tail else ""}
   {_render_breakdown_section(
       "classification-breakdown", "H. Classification Breakdown",
-      "ai_classification（poi/address/semantic_query/unknown）別の件数と全体に対する割合。",
+      "Count and share of total for each ai_classification value (poi/address/semantic_query/unknown).",
       classification_breakdown,
   ) if classification_breakdown else ""}
-  {_render_breakdown_section(
-      "brand-poi-taxonomy-breakdown", "I. Brand POI Taxonomy Breakdown",
-      "brand_poi（チェーン店・ブランド）と判定された行のみを対象に、ai_classification_3"
-      "（category-taxonomyのカテゴリ）別の件数とbrand_poi全体に対する割合。"
-      "1行が複数カテゴリに紐づく場合は各カテゴリに1件ずつ加算する延べ数ベースの集計のため、"
-      "件数・割合の合計はbrand_poi全体（100%）を超えることがあります。",
-      brand_poi_taxonomy_breakdown,
-  ) if brand_poi_taxonomy_breakdown else ""}
+  {render_poi_taxonomy_section(poi_taxonomy_breakdown) if poi_taxonomy_breakdown else ""}
   {_render_breakdown_section(
       "address-structure-breakdown", "J. Address Structure Breakdown",
-      "ai_classification=addressと判定された行のみを対象に、住所の粒度"
-      "（region/place/locality/neighborhood/address）別の件数とaddress全体に対する割合。",
+      "Rows classified as address only, broken down by granularity "
+      "(region/place/locality/neighborhood/address) as a count and share of the address total.",
       address_structure_breakdown,
   ) if address_structure_breakdown else ""}
 </main>

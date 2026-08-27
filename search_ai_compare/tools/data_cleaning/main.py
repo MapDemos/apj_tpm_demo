@@ -7,11 +7,16 @@ data_cleaning/ のCSVクレンジング・AI分類・傾向分析を1つにま�
                           same_query_count列を自動付与）
   add-query-count        same_query_count列だけを付与する（重複除去はしない、プログラム的カウントのみ、AI不使用）
   count-column           指定した列の出現回数を集計する（--columnでquery/ai_classification等を指定、デフォルトquery）
-  ai-classify             AI分類（プロキシ経由・並行処理。--batch-apiでBatches API版
-                          （要ANTHROPIC_API_KEYまたは--token）に切り替え可）
-  ai-retry                ai_classificationが指定カテゴリ（デフォルトothers）の行だけAIで再分類
-                          （--batch-apiでBatches API版に切り替え可）
-  analyze                クエリ傾向分析（HTMLレポート込み。--with-ai-commentaryでAI要約を追加）
+  ai-classify             AI分類（本物のAnthropic APIを直接叩く。要ANTHROPIC_API_KEY
+                          または--token。同期・並行処理がデフォルトで、--batch-apiで
+                          非同期のBatches API版（50%割引・ジョブ待ちあり）に切り替え可）。
+                          --filter-column/--filter-op/--filter-valueで対象行を
+                          任意の列×演算子×値で絞り込める（未指定なら全行対象）。
+                          既に分類済み(ai_classification列あり)のファイルに絞り込み
+                          指定で実行すると、マッチした行だけ既存の3列を上書きする
+                          （旧ai-retryサブコマンドはこの機能に統合し廃止）
+  analyze                クエリ傾向分析（HTMLレポート込み。--with-ai-commentaryで本物のAnthropic API
+                          （要ANTHROPIC_API_KEYまたは--token、--modelでモデル選択可）によるAI要約を追加）
 
 各サブコマンドの詳細は `python3 main.py <subcommand> --help` を参照。
 出力は全サブコマンド共通で local_output/ 配下に自動生成される
@@ -33,10 +38,17 @@ from lib import column_utils as column_utils_lib
 from lib import count_column as count_column_lib
 from lib import dedup as dedup_lib
 from lib import query_count_column as query_count_column_lib
+from lib import row_filter as row_filter_lib
 from lib.output_utils import current_timestamp, make_output_path
 
+# anthropicパッケージのバージョンpin。1.0.0でMessages.create()からtemperature
+# 引数が削除されるなど破壊的変更があり、無指定でpip installすると
+# ビルド/実行のたびに違うバージョンが入ってしまう（build_gui.shも同じ値を
+# 使うこと。2026-08-27発覚のtemperature TypeErrorバグを踏まえて追加）。
+ANTHROPIC_PIN = "anthropic>=0.122,<1"
 
-def cmd_dedup(args: argparse.Namespace) -> None:
+
+def cmd_dedup(args: argparse.Namespace) -> str:
     fieldnames, rows = dedup_lib.extract_rows(args.input_csv)
     before = len(rows)
     # same_query_count は重複除去前の全行に対して数える
@@ -68,6 +80,7 @@ def cmd_dedup(args: argparse.Namespace) -> None:
     if count_column != query_count_column_lib.COLUMN_NAME:
         print(f"注意: 入力に既に \"{query_count_column_lib.COLUMN_NAME}\" 列があったため \"{count_column}\" 列として追加しました")
     print(f"出力先: {output_path}")
+    return output_path
 
 
 def cmd_add_query_count(args: argparse.Namespace) -> None:
@@ -112,6 +125,17 @@ def cmd_count_column(args: argparse.Namespace) -> None:
 
 
 def cmd_ai_classify(args: argparse.Namespace) -> None:
+    """query列を分類する。--filter-column/--filter-op/--filter-valueで対象行を
+    任意の列×演算子×値で絞り込める（未指定なら全行が対象、旧来のai-classify相当）。
+
+    絞り込みを指定し、かつ入力に既にai_classification/_2/_3列が揃っている場合
+    （＝一度分類済みのファイルへの再実行）は、マッチした行だけその3列を上書きし、
+    他の行は保持する（旧ai-retryサブコマンド相当。対象列・演算子を汎用化して統合し、
+    ai-retryは廃止した）。
+    絞り込みを指定したが、その3列がまだ無い場合（＝初回実行で対象を絞りたい場合）は、
+    3列を新規作成し、マッチしなかった行は空文字のまま（未分類）にする。
+    絞り込み無しで実行し、かつ既に3列が揃っている場合は、旧来通り列名衝突を避けて
+    新規に_2,_3...列を作る（既存の分類結果を破壊しない）。"""
     output_path = make_output_path(args.input_csv, "classified_analysis_result")
 
     with open(args.input_csv, newline="", encoding="utf-8-sig") as f:
@@ -121,12 +145,40 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
             raise ValueError('入力CSVに "query" 列が見つかりません')
         rows = list(reader)
 
-    if args.max_batches is not None:
-        rows = rows[: args.max_batches * args.batch_size]
+    filter_column = args.filter_column or None
+    if filter_column and filter_column not in fieldnames:
+        raise ValueError(f'--filter-column で指定された列 "{filter_column}" が入力CSVに見つかりません')
+    if filter_column and (not args.filter_op or args.filter_value is None):
+        raise ValueError("--filter-column を指定する場合は --filter-op と --filter-value も指定してください")
 
-    queries = [row.get("query", "") for row in rows]
-    unique_count = len(set(queries))
-    model = classification_common_lib.MODEL_CHOICES[args.model]
+    target_indices = row_filter_lib.filter_row_indices(rows, filter_column, args.filter_op, args.filter_value)
+
+    if filter_column and not target_indices:
+        print(f'絞り込み条件（{filter_column} {args.filter_op} {args.filter_value!r}）に一致する行が見つかりませんでした。処理対象なし。')
+        with open(output_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"出力先: {output_path}（入力をそのままコピー）")
+        return
+
+    if args.max_batches is not None:
+        target_indices = target_indices[: args.max_batches * args.batch_size]
+
+    target_queries = [rows[i].get("query", "") for i in target_indices]
+    unique_count = len(set(target_queries))
+
+    level12_model, level3_model = classification_common_lib.MODEL_PRESETS[args.model]
+
+    if filter_column:
+        print(
+            f"絞り込み対象（{filter_column} {args.filter_op} {args.filter_value!r}）: "
+            f"{len(target_indices)}件（全{len(rows)}件中、うちユニークなquery: {unique_count}件をAIに送信）",
+            file=sys.stderr,
+        )
+
+    if args.resume_batch_job and not args.batch_api:
+        raise ValueError("--resume-batch-job は --batch-api 指定時のみ使えます")
 
     t0 = time.time()
     failed_ranges = None
@@ -139,113 +191,77 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
         except ImportError as e:
             print(f"エラー: anthropicパッケージが必要です（pip install anthropic）: {e}", file=sys.stderr)
             sys.exit(1)
-        from lib.classification_common import SYSTEM_PROMPT
 
-        mapping, total_in, total_out, failed_ranges = ai_classify_batch_lib.classify_unique(
-            queries, args.batch_size, model, SYSTEM_PROMPT, api_key=args.token,
+        mapping, total_in, total_out, failed_ranges, failed_queries = ai_classify_batch_lib.classify_unique(
+            target_queries, args.batch_size, level12_model, level3_model, api_key=args.token,
+            resume_state_path=args.resume_batch_job,
         )
     else:
-        mapping, total_in, total_out = ai_classify_lib.classify_unique(queries, args.batch_size, args.workers, model)
+        # 2026-08-27、プロキシ（Lambda URL）経由の呼び出しを廃止し、本物の
+        # Anthropic APIを直接叩く同期呼び出しに変更（詳細はai_classify.pyの
+        # モジュールdocstring参照）。--batch-apiと同じくANTHROPIC_API_KEYが必要。
+        try:
+            mapping, total_in, total_out, failed_queries = ai_classify_lib.classify_unique(
+                target_queries, args.batch_size, args.workers, level12_model, level3_model, api_key=args.token,
+            )
+        except ImportError as e:
+            print(f"エラー: anthropicパッケージが必要です（pip install anthropic）: {e}", file=sys.stderr)
+            sys.exit(1)
     elapsed = time.time() - t0
 
-    # 既にai_classification列が付いた入力（=一度分類済みのCSVを誤って再度渡した場合）
-    # を上書きしないよう、衝突すれば_2,_3...にする。
-    classification_column = column_utils_lib.unique_column_name(fieldnames, "ai_classification")
-    out_fieldnames = list(fieldnames) + [classification_column]
-    for row in rows:
-        row[classification_column] = mapping[row.get("query", "")]
+    base_columns = ["ai_classification", "ai_classification_2", "ai_classification_3"]
+    has_existing_columns = all(c in fieldnames for c in base_columns)
+
+    skipped_due_to_failure = 0
+
+    if filter_column and has_existing_columns:
+        # 部分上書きモード（旧ai-retry相当）: マッチした行だけ既存3列を上書き、
+        # 他の行・他の列はそのまま保持する。ただし、そのqueryの分類がAPI呼び出し失敗に
+        # よるunknownフォールバックだった場合は、既存3列（前回までの正しい分類結果
+        # かもしれない値）を破壊しないよう上書きをスキップする（モデルが本当に
+        # 「unknown」と判定した場合は通常どおり上書きする）。
+        c1_col, c2_col, c3_col = base_columns
+        out_fieldnames = fieldnames
+        for i in target_indices:
+            query = rows[i].get("query", "")
+            if query in failed_queries:
+                skipped_due_to_failure += 1
+                continue
+            c1, c2, c3 = mapping[query]
+            rows[i][c1_col], rows[i][c2_col], rows[i][c3_col] = c1, c2, c3
+    else:
+        # 全件モード、または絞り込みはあるが3列がまだ無い初回実行。
+        # 既にai_classification列が付いた入力（=一度分類済みのCSVを誤って再度渡した場合）
+        # を上書きしないよう、衝突すれば3列まとめて_2,_3...にする
+        # （unique_column_nameを列ごとに個別適用すると、"ai_classification_2"という
+        # 正規の列名自体を衝突回避後の名前と誤認識してしまうため、3列専用のヘルパーを使う）。
+        c1_col, c2_col, c3_col = column_utils_lib.unique_column_names(fieldnames, base_columns)
+        out_fieldnames = list(fieldnames) + [c1_col, c2_col, c3_col]
+        for row in rows:
+            row[c1_col], row[c2_col], row[c3_col] = "", "", ""
+        for i in target_indices:
+            c1, c2, c3 = mapping[rows[i].get("query", "")]
+            rows[i][c1_col], rows[i][c2_col], rows[i][c3_col] = c1, c2, c3
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=out_fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\n処理件数: {len(rows)}（うちユニークなquery: {unique_count}件をAIに送信）")
-    print(f"モデル: {model}")
+    print(f"\n処理件数: {len(target_indices)}（全{len(rows)}件中、うちユニークなquery: {unique_count}件をAIに送信）")
+    print(f"モデル: {classification_common_lib.model_preset_label(args.model)}")
     if args.batch_api:
-        print(f"失敗バッチ数（othersで埋めた範囲）: {failed_ranges}")
+        print(f"失敗バッチ数（個別リトライに回した回数）: {failed_ranges}")
+    if failed_queries:
+        print(f"個別リトライでも分類に失敗したユニークquery数: {len(failed_queries)}件")
+        if filter_column and has_existing_columns:
+            print(f"  → 既存の分類結果を保持し上書きをスキップした行数: {skipped_due_to_failure}件")
     print(f"所要時間: {elapsed:.1f}秒")
     token_note = "（Batches APIのため通常の50%価格で課金）" if args.batch_api else ""
     print(f"input tokens合計 : {total_in}{token_note}")
     print(f"output tokens合計: {total_out}{token_note}")
-    if classification_column != "ai_classification":
-        print(f"注意: 入力に既に \"ai_classification\" 列があったため \"{classification_column}\" 列として追加しました")
-    print(f"出力先: {output_path}")
-
-
-def cmd_ai_retry(args: argparse.Namespace) -> None:
-    output_path = make_output_path(args.input_csv, "classified_retry_analysis_result")
-
-    with open(args.input_csv, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames
-        if fieldnames is None or "query" not in fieldnames:
-            raise ValueError('入力CSVに "query" 列が見つかりません')
-        if "ai_classification" not in fieldnames:
-            raise ValueError('入力CSVに "ai_classification" 列が見つかりません')
-        rows = list(reader)
-
-    target_category = args.category
-    target_indices = [i for i, row in enumerate(rows) if row.get("ai_classification") == target_category]
-
-    if not target_indices:
-        print(f"{target_category}の行が見つかりませんでした。再実行対象なし。")
-        with open(output_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
-        print(f"出力先: {output_path}（入力をそのままコピー）")
-        return
-
-    if args.max_batches is not None:
-        limit = args.max_batches * args.batch_size
-        target_indices = target_indices[:limit]
-
-    target_queries = [rows[i]["query"] for i in target_indices]
-    unique_count = len(set(target_queries))
-    model = classification_common_lib.MODEL_CHOICES[args.model]
-
-    print(f"再実行対象（{target_category}）: {len(target_indices)}件（全{len(rows)}件中、うちユニークなquery: {unique_count}件をAIに送信）", file=sys.stderr)
-
-    t0 = time.time()
-    failed_ranges = None
-    if args.batch_api:
-        # ai-classifyの--batch-apiと同じくAnthropic Message Batches API版に切り替える。
-        # トークン単価が通常の50%になる代わりに非同期ジョブ(数分〜最大24時間)になる。
-        # プロキシ経由では動かない可能性が高いため、本物のANTHROPIC_API_KEY（--tokenで上書き可）が必要。
-        try:
-            from lib import ai_classify_batch as ai_classify_batch_lib
-        except ImportError as e:
-            print(f"エラー: anthropicパッケージが必要です（pip install anthropic）: {e}", file=sys.stderr)
-            sys.exit(1)
-        from lib.classification_common import SYSTEM_PROMPT
-
-        mapping, total_in, total_out, failed_ranges = ai_classify_batch_lib.classify_unique(
-            target_queries, args.batch_size, model, SYSTEM_PROMPT, api_key=args.token,
-        )
-    else:
-        mapping, total_in, total_out = ai_classify_lib.classify_unique(target_queries, args.batch_size, args.workers, model)
-    elapsed = time.time() - t0
-
-    for i in target_indices:
-        rows[i]["ai_classification"] = mapping[rows[i]["query"]]
-
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    still_same = sum(1 for i in target_indices if rows[i]["ai_classification"] == target_category)
-
-    print(f"\n再実行件数: {len(target_indices)}")
-    print(f"モデル: {model}")
-    print(f"再実行後も{target_category}のまま: {still_same}件")
-    if args.batch_api:
-        print(f"失敗バッチ数（othersで埋めた範囲）: {failed_ranges}")
-    print(f"所要時間: {elapsed:.1f}秒")
-    token_note = "（Batches APIのため通常の50%価格で課金）" if args.batch_api else ""
-    print(f"input tokens合計 : {total_in}{token_note}")
-    print(f"output tokens合計: {total_out}{token_note}")
+    if c1_col != "ai_classification":
+        print(f"注意: 入力に既に分類済み列があったため \"{c1_col}\"/\"{c2_col}\"/\"{c3_col}\" 列として追加しました")
     print(f"出力先: {output_path}")
 
 
@@ -263,6 +279,9 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     daily_volume = analyze_trends_lib.compute_daily_volume(rows)
     hourly_volume = analyze_trends_lib.compute_hourly_volume(rows)
     proximity_data = analyze_trends_lib.compute_proximity_by_prefecture(rows)
+    classification_breakdown = analyze_trends_lib.compute_classification_breakdown(rows, order)
+    poi_taxonomy_breakdown = analyze_trends_lib.compute_poi_taxonomy_breakdown(rows)
+    address_structure_breakdown = analyze_trends_lib.compute_address_structure_breakdown(rows)
 
     ts = current_timestamp()
     top_queries_path = make_output_path(args.input_csv, "trend_top_queries_result", timestamp=ts)
@@ -284,10 +303,12 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     # --with-ai-commentary指定時のみ、集計結果(summary_payload)をAIに渡してコメンタリーを
     # 生成する。元CSVの生データ（行そのもの・query全件）は渡さない。
     ai_commentary = None
+    ai_model = None
     if args.with_ai_commentary:
         summary_payload = ai_analyze_lib.build_summary_payload(order, top_queries, daily, usage, long_tail)
+        ai_model = classification_common_lib.MODEL_CHOICES[args.model]
         try:
-            ai_commentary = ai_analyze_lib.generate_commentary(summary_payload)
+            ai_commentary = ai_analyze_lib.generate_commentary(summary_payload, model=ai_model, api_key=args.token)
         except Exception as e:
             print(f"警告: AIコメンタリー生成に失敗したため、コメンタリーなしでレポートを出力します: {e}", file=sys.stderr)
             ai_commentary = None
@@ -301,6 +322,9 @@ def cmd_analyze(args: argparse.Namespace) -> None:
         daily_volume=daily_volume, hourly_volume=hourly_volume, proximity_data=proximity_data,
         long_tail=long_tail,
         ai_commentary=ai_commentary,
+        classification_breakdown=classification_breakdown,
+        poi_taxonomy_breakdown=poi_taxonomy_breakdown,
+        address_structure_breakdown=address_structure_breakdown,
     )
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html_report)
@@ -308,7 +332,8 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     print(f"総行数: {total_rows}")
     print(f"カテゴリ数: {len(order)}（{', '.join(order)}）")
     if args.with_ai_commentary:
-        print(f"AIコメンタリー: {'生成成功' if ai_commentary else '生成失敗（レポートには含まれません）'}")
+        status = "生成成功" if ai_commentary else "生成失敗（レポートには含まれません）"
+        print(f"AIコメンタリー: {status}（モデル: {args.model} / {ai_model}）")
     print("出力先:")
     print(f"  {top_queries_path}")
     print(f"  {daily_path}")
@@ -353,64 +378,57 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "ai-classify",
         help="LLMでquery列を分類する（プロキシ経由・並行処理。--batch-apiでAnthropic Message Batches "
-        "API版に切り替え可、要ANTHROPIC_API_KEYまたは--token）",
+        "API版に切り替え可、要ANTHROPIC_API_KEYまたは--token）。--filter-column/--filter-op/"
+        "--filter-valueで対象行を任意の列×演算子×値で絞り込める（未指定なら全行対象。既に分類済みの"
+        "ファイルに絞り込み指定で実行すると、マッチした行だけ既存3列を上書きする＝旧ai-retry相当）",
     )
     p.add_argument("input_csv")
     p.add_argument(
         "--model",
-        default="haiku",
-        choices=list(classification_common_lib.MODEL_CHOICES.keys()),
-        help="分類に使うモデル（デフォルト: haiku）",
+        default="haiku+sonnet",
+        choices=list(classification_common_lib.MODEL_PRESETS.keys()),
+        help="分類に使うモデル構成（デフォルト: haiku+sonnet ＝ ai_classification/_2をHaiku・"
+        "ai_classification_3をSonnetで判定。haiku/sonnetは両階層を同一モデルに統一する"
+        "比較検証用の選択肢。--batch-api使用時も含め全プリセット指定可）",
+    )
+    p.add_argument(
+        "--filter-column",
+        default=None,
+        help="対象行を絞り込む列名（未指定なら全行が対象）。--filter-op/--filter-valueと組で指定する",
+    )
+    p.add_argument(
+        "--filter-op",
+        default=None,
+        choices=row_filter_lib.OPERATORS,
+        help="絞り込みの演算子。=/!=は文字列の完全一致/不一致、>/<は両辺を数値変換できれば数値比較・"
+        "できなければ文字列比較、Include/Excludeは部分一致(contains)/部分不一致",
+    )
+    p.add_argument(
+        "--filter-value",
+        default=None,
+        help="絞り込みで比較する値",
     )
     p.add_argument(
         "--batch-api",
         action="store_true",
-        help="Anthropic Message Batches APIを使う（トークン単価が通常の50%%だが非同期・要anthropicパッケージ）。"
-        "プロキシ経由では動かない可能性が高いため、本物のANTHROPIC_API_KEYか--tokenが必要",
+        help="同期呼び出しの代わりにAnthropic Message Batches APIを使う"
+        "（トークン単価が通常の50%%だが非同期でジョブ完了待ちが発生する。要anthropicパッケージ）",
     )
     p.add_argument(
         "--token",
         default=None,
-        help="--batch-api使用時にANTHROPIC_API_KEY環境変数の代わりに使うAPIキー",
+        help="ANTHROPIC_API_KEY環境変数の代わりに使うAPIキー（--batch-apiの有無によらず必要）",
+    )
+    p.add_argument(
+        "--resume-batch-job",
+        default=None,
+        help="中断した--batch-apiジョブを再開する（local_output/batch_state_*.jsonのパスを指定）。"
+        "input_csvや--filter-*/--batch-size/--modelは前回と同じものを指定すること",
     )
     p.add_argument("--batch-size", type=int, default=30)
     p.add_argument("--workers", type=int, default=8, help="並行実行するリクエスト数（--batch-api指定時は無視）")
     p.add_argument("--max-batches", type=int, default=None, help="先頭から指定バッチ数までに処理を絞る（動作確認用）")
     p.set_defaults(func=cmd_ai_classify)
-
-    p = sub.add_parser(
-        "ai-retry",
-        help="ai_classificationが指定カテゴリ（デフォルトothers）の行だけAIで再分類する（--batch-apiでAnthropic "
-        "Message Batches API版に切り替え可、要ANTHROPIC_API_KEYまたは--token）",
-    )
-    p.add_argument("input_csv")
-    p.add_argument(
-        "--category",
-        default="others",
-        choices=list(classification_common_lib.CATEGORIES.values()),
-        help="再分類対象にするai_classificationの値（デフォルト: others）",
-    )
-    p.add_argument(
-        "--model",
-        default="haiku",
-        choices=list(classification_common_lib.MODEL_CHOICES.keys()),
-        help="分類に使うモデル（デフォルト: haiku）",
-    )
-    p.add_argument(
-        "--batch-api",
-        action="store_true",
-        help="Anthropic Message Batches APIを使う（トークン単価が通常の50%%だが非同期・要anthropicパッケージ）。"
-        "プロキシ経由では動かない可能性が高いため、本物のANTHROPIC_API_KEYか--tokenが必要",
-    )
-    p.add_argument(
-        "--token",
-        default=None,
-        help="--batch-api使用時にANTHROPIC_API_KEY環境変数の代わりに使うAPIキー",
-    )
-    p.add_argument("--batch-size", type=int, default=30)
-    p.add_argument("--workers", type=int, default=8, help="並行実行するリクエスト数（--batch-api指定時は無視）")
-    p.add_argument("--max-batches", type=int, default=None, help="先頭から指定バッチ数までに処理を絞る（動作確認用）")
-    p.set_defaults(func=cmd_ai_retry)
 
     p = sub.add_parser("analyze", help="クエリ傾向を分析する（HTMLレポート込み。--with-ai-commentaryでAIコメンタリーを追加）")
     p.add_argument("input_csv")
@@ -418,21 +436,37 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--with-ai-commentary",
         action="store_true",
-        help="集計結果をもとにLLM（Claude Sonnet 5、プロキシ経由）にクエリ傾向のコメンタリーを書かせ、"
-        "レポートに追加する（元CSVの生データはAIに渡さない）",
+        help="集計結果をもとにLLM（本物のAnthropic API、要ANTHROPIC_API_KEYまたは--token）に"
+        "クエリ傾向のコメンタリーを書かせ、レポートに追加する（元CSVの生データはAIに渡さない）",
+    )
+    p.add_argument(
+        "--model",
+        default="sonnet",
+        choices=list(classification_common_lib.MODEL_CHOICES.keys()),
+        help="AIコメンタリー生成に使うモデル（--with-ai-commentary指定時のみ使用、デフォルト: sonnet）",
+    )
+    p.add_argument(
+        "--token",
+        default=None,
+        help="--with-ai-commentary使用時にANTHROPIC_API_KEY環境変数の代わりに使うAPIキー",
     )
     p.set_defaults(func=cmd_analyze)
 
     return parser
 
 
-def ensure_batch_api_venv_and_reexec() -> None:
-    """--batch-api使用時にanthropicパッケージが無ければ、tools/data_cleaning/.venv を
-    自動作成してインストールし、そのvenvのpythonで自分自身を再実行する。
+def ensure_anthropic_venv_and_reexec() -> None:
+    """本物のAnthropic API（anthropicパッケージ）を直接叩く機能（--batch-api /
+    analyzeの--with-ai-commentary）使用時にanthropicパッケージが無ければ、
+    tools/data_cleaning/.venv を自動作成してインストールし、そのvenvのpythonで
+    自分自身を再実行する。
 
     Homebrew管理下のpython3は`externally-managed-environment`（PEP 668）のため
     直接`pip install`できない。venvを切ってそちらのpythonに乗り換えることで、
     ユーザーに事前セットアップを要求せずに済ませる。
+
+    （2026-08-25、analyzeの--with-ai-commentaryがプロキシ経由から本物のAPI直叩きに
+    変わったのに伴い、--batch-api専用だったこの関数を汎用化・改名した）
     """
     try:
         import anthropic  # noqa: F401
@@ -448,7 +482,7 @@ def ensure_batch_api_venv_and_reexec() -> None:
 
     if os.environ.get("_DATA_CLEANING_VENV_ACTIVE") == "1":
         # 既にこのvenv上で動いているのにまだ無い＝install失敗。無限re-execを避けて
-        # ここでは何もせず、呼び出し元（cmd_ai_classify/cmd_ai_retry）の
+        # ここでは何もせず、呼び出し元（cmd_ai_classify/cmd_analyze）の
         # 通常のImportErrorハンドリングに任せる。
         return
 
@@ -457,11 +491,11 @@ def ensure_batch_api_venv_and_reexec() -> None:
     venv_python = os.path.join(venv_dir, "bin", "python3")
 
     if not os.path.exists(venv_python):
-        print(f"[--batch-api] anthropicパッケージ用の仮想環境を作成します: {venv_dir}", file=sys.stderr)
+        print(f"anthropicパッケージ用の仮想環境を作成します: {venv_dir}", file=sys.stderr)
         subprocess.run([sys.executable, "-m", "venv", venv_dir], check=True)
 
-    print("[--batch-api] venv内にanthropicパッケージをインストールします...", file=sys.stderr)
-    subprocess.run([venv_python, "-m", "pip", "install", "--quiet", "anthropic"], check=True)
+    print("venv内にanthropicパッケージをインストールします...", file=sys.stderr)
+    subprocess.run([venv_python, "-m", "pip", "install", "--quiet", ANTHROPIC_PIN], check=True)
 
     env = dict(os.environ, _DATA_CLEANING_VENV_ACTIVE="1")
     os.execve(venv_python, [venv_python] + sys.argv, env)
@@ -470,8 +504,12 @@ def ensure_batch_api_venv_and_reexec() -> None:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    if getattr(args, "batch_api", False):
-        ensure_batch_api_venv_and_reexec()
+    # ai-classifyは2026-08-27より（--batch-apiの有無にかかわらず）常に本物の
+    # Anthropic APIキーを直接使う設計に変更したため、anthropicパッケージが
+    # 常に必要（旧・プロキシ経由の「通常API」パスは廃止。理由はai_classify.pyの
+    # モジュールdocstring参照）。
+    if getattr(args, "command", None) == "ai-classify" or getattr(args, "with_ai_commentary", False):
+        ensure_anthropic_venv_and_reexec()
     args.func(args)
 
 

@@ -18,3 +18,21 @@ def unique_column_name(fieldnames: list[str], base_name: str) -> str:
     while f"{base_name}_{n}" in fieldnames:
         n += 1
     return f"{base_name}_{n}"
+
+
+def unique_column_names(fieldnames: list[str], base_names: list[str]) -> list[str]:
+    """ai_classify系が使う。ai_classification/_2/_3のように、名前自体に既に
+    "_2","_3"という連番が含まれる複数列をまとめて衝突回避するための版。
+
+    unique_column_name()を3列それぞれに個別適用すると、"ai_classification_2"
+    "ai_classification_3"という正規の列名自体が「_2 = 2回目の衝突回避」だと
+    誤認識され、無関係な列(ai_classification)まで"ai_classification_4"に
+    リネームされてしまう。これを避けるため、base_names全体をまとめて1つの
+    グループとして扱い、いずれか1つでも衝突していれば全員に同じ連番接尾辞
+    (base_names[i] + f"_{n}") を付けて返す。衝突が無ければbase_namesをそのまま返す。"""
+    if not any(name in fieldnames for name in base_names):
+        return list(base_names)
+    n = 2
+    while any(f"{name}_{n}" in fieldnames for name in base_names):
+        n += 1
+    return [f"{name}_{n}" for name in base_names]
