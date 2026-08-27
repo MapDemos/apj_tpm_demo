@@ -23,8 +23,18 @@ anthropicパッケージは本機能専用の依存なので、main.py側で遅�
 ai_classification_3（taxonomyリーフ）を判定する。--batch-api使用時はlevel12_model/
 level3_modelに同じモデル（haiku or sonnet単独。main.py参照）を渡す運用だが、
 その場合でも2フェーズに分けることで、taxonomy+BRAND_KNOWLEDGEを含む重い
-system prompt（SYSTEM_PROMPT_LEVEL3）をaddress/semantic_query/unknown行に
+system prompt（SYSTEM_PROMPT_LEVEL3_BRAND）をaddress/semantic_query/unknown行に
 送らずに済むメリットは残る。
+
+2026-08-27、ai_classify.pyと同じ2点の修正をこちらにも適用: (1) LLM応答の要素数が
+入力とズレて頻発していた問題への対策として、入出力の各要素にインデックスを
+付与し、応答から実質的に欠落した要素だけを個別リトライする方式に変更（以前は
+チャンクの応答配列長が1件でも合わないとチャンク全体・既定30件を個別リトライ
+していた）。(2) level3対象をsubtype（brand_poi / unique_poi・category）で
+2グループに分けて別々に送るようにし、BRAND_KNOWLEDGE（1500件超のブランド辞書）を
+実際に必要なbrand_poiのバッチにだけ埋め込む（SYSTEM_PROMPT_LEVEL3_BRAND /
+SYSTEM_PROMPT_LEVEL3_LIGHT。以前は無条件で全level3バッチに埋め込んでいた）。
+両方ともclassification_common.pyのモジュールdocstring・project memory参照。
 """
 
 import json
@@ -41,10 +51,12 @@ from lib import brand_match
 from lib.classification_common import (
     POI_SUBTYPE_VALUES,
     SYSTEM_PROMPT_LEVEL12,
-    SYSTEM_PROMPT_LEVEL3,
+    SYSTEM_PROMPT_LEVEL3_BRAND,
+    SYSTEM_PROMPT_LEVEL3_LIGHT,
     build_level12_user_content,
-    decode_leaf_responses,
-    decode_pairs_with_candidates,
+    build_level3_user_content,
+    decode_indexed_leaf_responses,
+    decode_indexed_level12_responses,
     leaves_for_matched_brand,
     parse_response_text,
 )
@@ -66,7 +78,7 @@ def _build_params(system_prompt: str, user_content: str, model: str) -> MessageC
     params: MessageCreateParamsNonStreaming = {
         "model": model,
         "max_tokens": 4096,
-        # system_promptはSYSTEM_PROMPT_LEVEL3の場合BRAND_KNOWLEDGE(1500件超の
+        # system_promptはSYSTEM_PROMPT_LEVEL3_BRANDの場合BRAND_KNOWLEDGE(1500件超の
         # ブランド辞書)を埋め込んでおりサイズが大きい。Batches API内の各リクエストは
         # 独立実行だが、同一ジョブ内で同じsystem promptを使い回すためcache_controlを
         # 付けておく（Anthropic Messages APIのプロンプトキャッシュ機能）。
@@ -100,9 +112,15 @@ def _build_request_level12(chunk_items: list[tuple[str, list[str] | None]], mode
     return Request(custom_id=custom_id, params=_build_params(SYSTEM_PROMPT_LEVEL12, user_content, model))
 
 
-def _build_request_level3(chunk_items: list[tuple[str, str]], model: str, custom_id: str) -> Request:
-    user_content = json.dumps([[q, sub] for q, sub in chunk_items], ensure_ascii=False)
-    return Request(custom_id=custom_id, params=_build_params(SYSTEM_PROMPT_LEVEL3, user_content, model))
+def _build_request_level3(
+    chunk_items: list[tuple[str, str]], model: str, custom_id: str, system_prompt: str,
+) -> Request:
+    """system_promptはSYSTEM_PROMPT_LEVEL3_BRAND（brand_poi用）とSYSTEM_PROMPT_LEVEL3_LIGHT
+    （unique_poi/category用）のどちらかを呼び出し元(classify_unique)が選んで渡す
+    （2026-08-27、ai_classify.pyと同じsubtype分割。build_system_prompt_level3の
+    docstring参照）。"""
+    user_content = build_level3_user_content(chunk_items)
+    return Request(custom_id=custom_id, params=_build_params(system_prompt, user_content, model))
 
 
 def _state_file_path(run_id: str) -> str:
@@ -151,7 +169,7 @@ def run_batch_job(
     （--resume-batch-job経由の再開、またはAnthropic側で既に完了済みのジョブの
     再ポーリング）ジョブ作成をスキップしてそのjob_idのポーリングから再開する。
     新規作成した場合は、結果取得前に必ずstate_pathへjob_idを書き込む。"""
-    existing = state[jobs_section].get(job_key)
+    existing = state.setdefault(jobs_section, {}).get(job_key)
     if existing:
         job_id = existing["job_id"]
         print(f"バッチジョブ再開: {job_id}（{len(requests)}リクエスト）", file=sys.stderr)
@@ -193,9 +211,16 @@ def _classify_single_direct(client: anthropic.Anthropic, system_prompt: str, use
         content_blocks = message.content or []
         text = "".join(b.text for b in content_blocks if b.type == "text")
         text = parse_response_text(text)
-        items = json.loads(text)
+        try:
+            items = json.loads(text)
+        except json.JSONDecodeError as e:
+            # 生のLLM応答をエラーメッセージに含める（2026-08-27、ai_classify.pyの
+            # _call_claude_rawと同じ修正。以前は「パースに失敗した」しか分からず
+            # 原因究明ができなかった）。
+            snippet = text if len(text) <= 500 else text[:500] + "…(以下省略)"
+            raise ValueError(f"JSONパースに失敗: {e}\n応答内容: {snippet}") from e
         if not isinstance(items, list) or len(items) != 1:
-            raise ValueError("要素数不一致")
+            raise ValueError(f"応答が1要素の配列ではありません（実際: {items!r}）")
         usage = message.usage
         return items, usage.input_tokens or 0, usage.output_tokens or 0
     except (anthropic.APIError, ValueError, json.JSONDecodeError, TypeError) as e:
@@ -220,17 +245,26 @@ def _run_phase_batches(
 ) -> tuple[list, int, int, int, set[int]]:
     """1フェーズ分（level1/2 または level3）のBatches APIジョブを、
     MAX_REQUESTS_PER_JOBごとに分割して実行し、各チャンクの結果をdecode_fnで
-    デコードして input_items と同じ順序のrecordsリストを返す。バッチ全体が
-    失敗した場合は1件ずつ個別に（同期APIで）再試行し、それでも失敗した要素だけを
-    unknown_recordにフォールバックする。
+    デコードして input_items と同じ順序のrecordsリストを返す。
     戻り値は (records, input tokens合計, output tokens合計,
-    失敗レンジ数（個別リトライに回った回数）, フォールバックになったinput_items内の
+    個別リトライに回った回数, フォールバックになったinput_items内の
     インデックス集合)。
 
-    decode_fn(items, chunk_input_items)は、LLM応答をパースしたitemsに加えて
-    対応するinput_items[start:end]（レベル1/2のブランド候補付き判定で、各要素に
-    どの候補配列を渡したかをデコード側でも参照する必要があるため。レベル3では
-    第2引数は使わない）も受け取る2引数関数。"""
+    2026-08-27、ai_classify.py（同期経路）と同じインデックス方式に変更した。
+    以前は「チャンクの応答配列の長さがchunk_lenと一致するか」だけを見ており、
+    1件でもズレるとチャンク全体（既定30件）を1件ずつ個別に再試行していた
+    （project memory参照）。今はdecode_fnがLLM応答から実質的に欠落していた
+    要素のインデックスだけを返すので、その分だけ個別リトライする（チャンクの
+    応答が丸ごと不正な場合のみチャンク全体を個別リトライする、という区別は
+    維持）。
+
+    decode_fn(items, chunk_input_items) -> (records, missing_local_indices)。
+    itemsはLLM応答をパースした配列、chunk_input_itemsは対応するinput_items
+    [start:end]（レベル1/2のブランド候補付き判定で、各要素にどの候補配列を
+    渡したかをデコード側でも参照する必要があるため。レベル3では使わない）。
+    recordsはchunk_input_itemsと同じ長さで、欠落していた位置はNone。
+    missing_local_indicesはNoneのまま残った位置（chunk内の0始まり相対
+    インデックス）の集合。"""
     n = len(input_items)
     records: list = [unknown_record] * n
     total_in = 0
@@ -244,11 +278,14 @@ def _run_phase_batches(
         custom_id = f"batch-{start}"
         chunks.append((start, end, custom_id, build_request_fn(input_items[start:end], model, custom_id)))
 
-    def retry_and_fill(start: int, end: int, reason: str) -> None:
+    def retry_missing_and_fill(indices: list[int], reason: str) -> None:
         nonlocal total_in, total_out, failed_ranges
-        print(f"  警告({phase_label}): batch-{start} は{reason}。1件ずつ個別に再試行します", file=sys.stderr)
+        print(
+            f"  警告({phase_label}): {reason}。{len(indices)}件を個別に再試行します",
+            file=sys.stderr,
+        )
         failed_ranges += 1
-        for i in range(start, end):
+        for i in indices:
             items, in_tok, out_tok = _classify_single_direct(
                 client, system_prompt, build_single_content_fn(input_items[i]), model,
             )
@@ -257,7 +294,16 @@ def _run_phase_batches(
             if items is None:
                 failed_indices.add(i)
                 continue
-            records[i] = decode_fn(items, [input_items[i]])[0]
+            single_records, single_missing = decode_fn(items, [input_items[i]])
+            if single_missing or single_records[0] is None:
+                print(
+                    f"    警告({phase_label}): 個別再試行でもこのクエリが応答から欠落しました"
+                    f"（フォールバックします）: {input_items[i]!r}",
+                    file=sys.stderr,
+                )
+                failed_indices.add(i)
+                continue
+            records[i] = single_records[0]
 
     for job_start in range(0, len(chunks), MAX_REQUESTS_PER_JOB):
         job_chunks = chunks[job_start:job_start + MAX_REQUESTS_PER_JOB]
@@ -268,17 +314,17 @@ def _run_phase_batches(
 
         for start, end, custom_id, _ in job_chunks:
             result = results_by_id.get(custom_id)
-            chunk_len = end - start
+            chunk_range = list(range(start, end))
 
             if result is None:
-                retry_and_fill(start, end, "結果が見つかりません")
+                retry_missing_and_fill(chunk_range, f"batch-{start}: 結果が見つかりません")
                 continue
 
             if result.type != "succeeded":
                 detail = ""
                 if result.type == "errored":
                     detail = f": {result.error.error.type} - {result.error.error.message}"
-                retry_and_fill(start, end, f"{result.type}{detail}")
+                retry_missing_and_fill(chunk_range, f"batch-{start}: {result.type}{detail}")
                 continue
 
             message = result.message
@@ -288,19 +334,33 @@ def _run_phase_batches(
 
             try:
                 items = json.loads(text)
-                if not isinstance(items, list) or len(items) != chunk_len:
-                    raise ValueError("要素数不一致")
-                chunk_records = decode_fn(items, input_items[start:end])
-            except (json.JSONDecodeError, ValueError) as e:
-                retry_and_fill(start, end, f"パースに失敗: {e}")
+            except json.JSONDecodeError as e:
+                snippet = text if len(text) <= 500 else text[:500] + "…(以下省略)"
+                retry_missing_and_fill(
+                    chunk_range, f"batch-{start}: JSONパースに失敗: {e}\n応答内容: {snippet}",
+                )
+                continue
+            if not isinstance(items, list):
+                retry_missing_and_fill(
+                    chunk_range, f"batch-{start}: 応答がJSON配列ではありません（実際: {type(items).__name__}）",
+                )
                 continue
 
+            chunk_records, missing_local = decode_fn(items, input_items[start:end])
             for i, record in enumerate(chunk_records):
-                records[start + i] = record
+                if record is not None:
+                    records[start + i] = record
 
             usage = message.usage
             total_in += usage.input_tokens or 0
             total_out += usage.output_tokens or 0
+
+            if missing_local:
+                missing_global = [start + i for i in sorted(missing_local)]
+                retry_missing_and_fill(
+                    missing_global,
+                    f"batch-{start}: {len(missing_local)}/{end - start}件が応答から欠落",
+                )
 
     return records, total_in, total_out, failed_ranges, failed_indices
 
@@ -369,7 +429,8 @@ def classify_unique(
             "level3_model": level3_model,
             "candidates_per_query": candidates_per_query,
             "jobs_level12": {},
-            "jobs_level3": {},
+            "jobs_level3_brand": {},
+            "jobs_level3_light": {},
         }
         _save_state(state_path, state)
 
@@ -380,7 +441,7 @@ def classify_unique(
         SYSTEM_PROMPT_LEVEL12,
         _build_request_level12,
         lambda item: build_level12_user_content([item[0]], [item[1]]),
-        lambda items, chunk: decode_pairs_with_candidates(items, [c for _, c in chunk]),
+        lambda items, chunk: decode_indexed_level12_responses(items, [c for _, c in chunk]),
         ("unknown", "", None),
         "レベル1/2分類",
     )
@@ -402,24 +463,50 @@ def classify_unique(
         else:
             poi_indices_needing_llm.append(i)
 
-    if poi_indices_needing_llm:
-        level3_items = [(unique_queries[i], triples[i][1]) for i in poi_indices_needing_llm]
-        leaves, in3, out3, failed_ranges3, failed_idx3 = _run_phase_batches(
-            client, level3_items, batch_size, level3_model, state, state_path, "jobs_level3",
-            SYSTEM_PROMPT_LEVEL3,
-            _build_request_level3,
-            lambda item: json.dumps([[item[0], item[1]]], ensure_ascii=False),
-            lambda items, _chunk: decode_leaf_responses(items),
+    # レベル3対象をsubtypeで2グループに分けて送る（2026-08-27、ai_classify.pyと同じ
+    # 修正）。BRAND_KNOWLEDGE（1500件超のブランド辞書）が実際に役立つのはbrand_poi
+    # だけで、unique_poi/categoryには無関係。以前はsubtypeを問わず同じバッチに
+    # 混ぜて送っていたため、unique_poi/categoryだけのバッチにも無条件で
+    # BRAND_KNOWLEDGE込みの重量プロンプトが使われていた
+    # （build_system_prompt_level3のdocstring参照）。
+    brand_indices = [i for i in poi_indices_needing_llm if triples[i][1] == "brand_poi"]
+    light_indices = [i for i in poi_indices_needing_llm if triples[i][1] != "brand_poi"]
+
+    def run_level3_group(
+        indices: list[int], system_prompt: str, jobs_section: str, group_label: str,
+    ) -> tuple[dict[int, str], int, int, int, set[str]]:
+        if not indices:
+            return {}, 0, 0, 0, set()
+        items = [(unique_queries[i], triples[i][1]) for i in indices]
+
+        def build_request(chunk, model, custom_id):
+            return _build_request_level3(chunk, model, custom_id, system_prompt)
+
+        leaves, in_tok, out_tok, failed_ranges_g, failed_local = _run_phase_batches(
+            client, items, batch_size, level3_model, state, state_path, jobs_section,
+            system_prompt,
+            build_request,
+            lambda item: build_level3_user_content([item]),
+            lambda resp_items, chunk: decode_indexed_leaf_responses(resp_items, len(chunk)),
             "unknown",
-            "レベル3分類(taxonomy)",
+            group_label,
         )
-        total_in += in3
-        total_out += out3
-        failed_ranges += failed_ranges3
-        for local_i, global_i in enumerate(poi_indices_needing_llm):
-            leaf_by_index[global_i] = leaves[local_i]
-        for local_i in failed_idx3:
-            failed_queries.add(level3_items[local_i][0])
+        leaf_map = {global_i: leaves[local_i] for local_i, global_i in enumerate(indices)}
+        failed = {items[local_i][0] for local_i in failed_local}
+        return leaf_map, in_tok, out_tok, failed_ranges_g, failed
+
+    brand_leaf_map, in_brand, out_brand, fr_brand, failed_brand = run_level3_group(
+        brand_indices, SYSTEM_PROMPT_LEVEL3_BRAND, "jobs_level3_brand", "レベル3分類(taxonomy/brand_poi)",
+    )
+    light_leaf_map, in_light, out_light, fr_light, failed_light = run_level3_group(
+        light_indices, SYSTEM_PROMPT_LEVEL3_LIGHT, "jobs_level3_light", "レベル3分類(taxonomy/unique_poi・category)",
+    )
+    leaf_by_index.update(brand_leaf_map)
+    leaf_by_index.update(light_leaf_map)
+    total_in += in_brand + in_light
+    total_out += out_brand + out_light
+    failed_ranges += fr_brand + fr_light
+    failed_queries |= failed_brand | failed_light
 
     records: list[Record] = []
     for i, (c1, c2, _matched) in enumerate(triples):

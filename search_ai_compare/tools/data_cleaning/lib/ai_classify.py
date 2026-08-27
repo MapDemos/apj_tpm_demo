@@ -2,8 +2,12 @@
 main.py ai-classify / ai-retry サブコマンドが使う分類ロジック（旧 classify_queries.py）。
 
 LLM（本物のAnthropic API、要ANTHROPIC_API_KEYまたは--token）を使って query 配列を
-分類する。バッチ分割＋並行処理版。1バッチがまるごと失敗した場合は、その中身を
-1件ずつ個別に再試行し、それでも失敗した行だけを unknown にフォールバックする。
+分類する。バッチ分割＋並行処理版。LLM応答から一部の要素だけが欠落した場合は
+その分だけ個別に再試行し、応答全体が不正（JSON配列ですらない等）だった場合のみ
+バッチ全体を1件ずつ個別に再試行する。それでも失敗した行だけを unknown に
+フォールバックする（2026-08-27、入出力の各要素にインデックスを付与する方式に
+変更し、要素数ズレ時にバッチ全体を個別リトライしていた無駄を解消した。
+classification_common.pyのモジュールdocstring参照）。
 
 2026-08-27、プロキシ（Lambda URL）経由の呼び出しを廃止し、本物のAnthropic API
 （anthropicパッケージ）を直接叩く同期呼び出しに変更した
@@ -38,10 +42,12 @@ from lib.classification_common import (
     MODEL,
     POI_SUBTYPE_VALUES,
     SYSTEM_PROMPT_LEVEL12,
-    SYSTEM_PROMPT_LEVEL3,
+    SYSTEM_PROMPT_LEVEL3_BRAND,
+    SYSTEM_PROMPT_LEVEL3_LIGHT,
     build_level12_user_content,
-    decode_leaf_responses,
-    decode_pairs_with_candidates,
+    build_level3_user_content,
+    decode_indexed_leaf_responses,
+    decode_indexed_level12_responses,
     leaves_for_matched_brand,
     parse_response_text,
 )
@@ -84,48 +90,76 @@ def _call_claude_raw(client, system_prompt: str, user_content: str, model: str) 
     content_blocks = message.content or []
     text = "".join(b.text for b in content_blocks if b.type == "text")
     text = parse_response_text(text)
-    items = json.loads(text)
+    try:
+        items = json.loads(text)
+    except json.JSONDecodeError as e:
+        # 生のLLM応答をエラーメッセージに含める。以前はここで握りつぶされ、
+        # 「パースに失敗した」ということしか分からず原因究明ができなかった
+        # （応答の途中がmax_tokensで切れたのか、説明文が混ざったのか等）。
+        snippet = text if len(text) <= 500 else text[:500] + "…(以下省略)"
+        raise ValueError(f"LLM応答をJSONとしてパースできません: {e}\n応答内容: {snippet}") from e
     usage = {"input_tokens": message.usage.input_tokens or 0, "output_tokens": message.usage.output_tokens or 0}
     return items, usage
 
 
 def call_claude_level12(
     client, items: list[tuple[str, list[str] | None]], model: str,
-) -> tuple[list[tuple[str, str, str | None]], dict]:
+) -> tuple[list[tuple[str, str, str | None] | None], dict]:
     """ai_classification/_2に加えて、機械的に検出したブランド候補のうちどれが
     一致したかを判定する。itemsは(query, brand_match.find_candidatesで検出した
     候補配列 or None)の組（BRAND_CANDIDATE_GUIDANCE参照）。SYSTEM_PROMPT_LEVEL12は
     taxonomy(285リーフ)・BRAND_KNOWLEDGE(1500件超)を含まない軽量版のため、
     フルプロンプト比で1/10程度のサイズに収まる（機械マッチで絞った少数の候補だけは
-    別途この呼び出しに乗せる）。"""
+    別途この呼び出しに乗せる）。
+
+    戻り値のレコードリストは、LLM応答から実質的に欠落していた（インデックスが
+    見つからなかった）位置にNoneが入る（2026-08-27、要素数ズレ対策のインデックス
+    方式に変更。以前は要素数が1件でも合わないとバッチ全体を例外にしていたが、
+    今は個々の欠落だけをNoneとして返し、呼び出し元(_run_batches_concurrently)が
+    その位置だけ個別リトライする）。応答自体がJSON配列ですらない場合のみ、
+    ここで例外にしてバッチ全体を個別リトライに回す。"""
     queries = [q for q, _ in items]
     candidates = [c for _, c in items]
     user_content = build_level12_user_content(queries, candidates)
     raw_items, usage = _call_claude_raw(client, SYSTEM_PROMPT_LEVEL12, user_content, model)
-    if not isinstance(raw_items, list) or len(raw_items) != len(items):
-        raise ValueError(
-            f"LLM応答の要素数が不正です（期待{len(items)}件、実際{len(raw_items) if isinstance(raw_items, list) else '不明'}件）"
-        )
-    return decode_pairs_with_candidates(raw_items, candidates), usage
+    if not isinstance(raw_items, list):
+        raise ValueError(f"LLM応答がJSON配列ではありません（実際: {type(raw_items).__name__}）")
+    records, _missing = decode_indexed_level12_responses(raw_items, candidates)
+    return records, usage
 
 
-def call_claude_level3(client, items: list[tuple[str, str]], model: str) -> tuple[list[str], dict]:
+def call_claude_level3(
+    client, items: list[tuple[str, str]], model: str, system_prompt: str,
+) -> tuple[list[str | None], dict]:
     """ai_classification_3（taxonomyリーフ）のみを判定する。itemsは[(query, サブタイプ), ...]
-    で、サブタイプ（unique_poi/brand_poi/category）は呼び出し元で確定済みの前提。"""
-    user_content = json.dumps([[q, sub] for q, sub in items], ensure_ascii=False)
-    leaves_lists, usage = _call_claude_raw(client, SYSTEM_PROMPT_LEVEL3, user_content, model)
-    if not isinstance(leaves_lists, list) or len(leaves_lists) != len(items):
-        raise ValueError(
-            f"LLM応答の要素数が不正です（期待{len(items)}件、実際{len(leaves_lists) if isinstance(leaves_lists, list) else '不明'}件）"
-        )
-    return decode_leaf_responses(leaves_lists), usage
+    で、サブタイプ（unique_poi/brand_poi/category）は呼び出し元で確定済みの前提。
+    system_promptはSYSTEM_PROMPT_LEVEL3_BRAND（BRAND_KNOWLEDGE込み、brand_poi用）と
+    SYSTEM_PROMPT_LEVEL3_LIGHT（unique_poi/category用）のどちらかを呼び出し元
+    (classify_unique)が選んで渡す。
+
+    戻り値の欠落時の扱いはcall_claude_level12と同じ（Noneで返し、部分的な
+    個別リトライに委ねる）。"""
+    user_content = build_level3_user_content(items)
+    raw_items, usage = _call_claude_raw(client, system_prompt, user_content, model)
+    if not isinstance(raw_items, list):
+        raise ValueError(f"LLM応答がJSON配列ではありません（実際: {type(raw_items).__name__}）")
+    leaves, _missing = decode_indexed_leaf_responses(raw_items, len(items))
+    return leaves, usage
 
 
 def _run_batches_concurrently(items, batch_size, max_workers, call_fn, unknown_value, label):
     """itemsをbatch_size件ずつに分けて並行処理する汎用ヘルパー。call_fn(batch)は
     (records, usage)を返す関数（call_claude_level12/level3どちらにも対応できるよう
-    itemsの中身は問わない）。バッチ全体が失敗した場合は1件ずつ個別に再試行し、
-    それでも失敗した要素だけunknown_valueにフォールバックする。
+    itemsの中身は問わない）。recordsはbatchと同じ長さで、LLM応答から実質的に
+    欠落していた要素はNoneになっている想定（call_claude_level12/level3の
+    インデックス方式デコード参照）。
+
+    2026-08-27、バッチが応答全体として失敗（JSON配列ですらない等）した場合と、
+    一部の要素だけが欠落した場合を区別するようにした。前者は従来通りbatch全体を
+    1件ずつ個別リトライするが、後者は欠落した要素だけを個別リトライする
+    （以前はcall_fnが要素数不一致を例外にしていたため、1件でもズレるとバッチ
+    全体（既定30件）を無条件で個別リトライしており無駄が大きかった）。
+    個別リトライでも欠落したままの要素だけunknown_valueにフォールバックする。
     戻り値は (元の順序のrecordsリスト, input tokens合計, output tokens合計,
     フォールバックになったitemsのインデックス集合)。labelはログ出力用の見出し。"""
     import anthropic
@@ -139,7 +173,10 @@ def _run_batches_concurrently(items, batch_size, max_workers, call_fn, unknown_v
     def classify_single_safe(item):
         try:
             records, usage = call_fn([item])
-            return records[0], usage, False
+            record = records[0]
+            if record is None:
+                raise ValueError("個別リトライでもこのクエリが応答から欠落しました")
+            return record, usage, False
         except (anthropic.APIError, ValueError, json.JSONDecodeError, TypeError) as e:
             print(f"    警告({label}): 個別再試行も失敗（フォールバックします）: {item!r}: {e}", file=sys.stderr)
             return unknown_value, {}, True
@@ -147,21 +184,30 @@ def _run_batches_concurrently(items, batch_size, max_workers, call_fn, unknown_v
     def classify_batch_safe(batch, start, end):
         try:
             records, usage = call_fn(batch)
-            return start, records, usage, set()
         except (anthropic.APIError, ValueError, json.JSONDecodeError, TypeError) as e:
             print(
-                f"  警告({label}): バッチ {start + 1}〜{end} の分類に失敗。1件ずつ個別に再試行します: {e}",
+                f"  警告({label}): バッチ {start + 1}〜{end} の分類に失敗（応答全体が不正）。"
+                f"{len(batch)}件を1件ずつ個別に再試行します: {e}",
+                file=sys.stderr,
+            )
+            records = [None] * len(batch)
+            usage = {"input_tokens": 0, "output_tokens": 0}
+
+        missing_local = [i for i, r in enumerate(records) if r is None]
+        if missing_local:
+            missing_display = [start + i + 1 for i in missing_local]
+            print(
+                f"  警告({label}): バッチ {start + 1}〜{end} 中 {len(missing_local)}/{len(batch)}件が"
+                f"LLM応答から欠落（{missing_display}件目）。欠落分だけ個別に再試行します。",
                 file=sys.stderr,
             )
 
-        records = []
-        usage = {"input_tokens": 0, "output_tokens": 0}
         failed_indices: set[int] = set()
-        for i, item in enumerate(batch):
-            record, single_usage, is_failed = classify_single_safe(item)
-            records.append(record)
-            usage["input_tokens"] += single_usage.get("input_tokens", 0) or 0
-            usage["output_tokens"] += single_usage.get("output_tokens", 0) or 0
+        for i in missing_local:
+            record, single_usage, is_failed = classify_single_safe(batch[i])
+            records[i] = record
+            usage["input_tokens"] = (usage.get("input_tokens", 0) or 0) + (single_usage.get("input_tokens", 0) or 0)
+            usage["output_tokens"] = (usage.get("output_tokens", 0) or 0) + (single_usage.get("output_tokens", 0) or 0)
             if is_failed:
                 failed_indices.add(start + i)
         return start, records, usage, failed_indices
@@ -260,21 +306,42 @@ def classify_unique(
         else:
             poi_indices_needing_llm.append(i)
 
-    if poi_indices_needing_llm:
-        level3_items = [(unique_queries[i], triples[i][1]) for i in poi_indices_needing_llm]
+    # レベル3対象をsubtypeで2グループに分けて送る（2026-08-27）。BRAND_KNOWLEDGE
+    # （1500件超のブランド辞書）が実際に役立つのはbrand_poiだけで、unique_poi/
+    # categoryには無関係。以前はsubtypeを問わず同じバッチに混ぜて送っていたため、
+    # unique_poi/categoryだけのバッチにも無条件でBRAND_KNOWLEDGE込みの重量プロンプト
+    # が使われていた（build_system_prompt_level3のdocstring参照）。
+    brand_indices = [i for i in poi_indices_needing_llm if triples[i][1] == "brand_poi"]
+    light_indices = [i for i in poi_indices_needing_llm if triples[i][1] != "brand_poi"]
+
+    def run_level3_group(
+        indices: list[int], system_prompt: str, group_label: str,
+    ) -> tuple[dict[int, str], int, int, set[str]]:
+        if not indices:
+            return {}, 0, 0, set()
+        items = [(unique_queries[i], triples[i][1]) for i in indices]
 
         def call_level3(batch: list[tuple[str, str]]):
-            return call_claude_level3(client, batch, level3_model)
+            return call_claude_level3(client, batch, level3_model, system_prompt)
 
-        leaves, in3, out3, failed_idx2 = _run_batches_concurrently(
-            level3_items, batch_size, max_workers, call_level3, "unknown", "レベル3分類(taxonomy)",
+        leaves, in_tok, out_tok, failed_local = _run_batches_concurrently(
+            items, batch_size, max_workers, call_level3, "unknown", group_label,
         )
-        total_in += in3
-        total_out += out3
-        for local_i, global_i in enumerate(poi_indices_needing_llm):
-            leaf_by_index[global_i] = leaves[local_i]
-        for local_i in failed_idx2:
-            failed_queries.add(level3_items[local_i][0])
+        leaf_map = {global_i: leaves[local_i] for local_i, global_i in enumerate(indices)}
+        failed = {items[local_i][0] for local_i in failed_local}
+        return leaf_map, in_tok, out_tok, failed
+
+    brand_leaf_map, in_brand, out_brand, failed_brand = run_level3_group(
+        brand_indices, SYSTEM_PROMPT_LEVEL3_BRAND, "レベル3分類(taxonomy/brand_poi)",
+    )
+    light_leaf_map, in_light, out_light, failed_light = run_level3_group(
+        light_indices, SYSTEM_PROMPT_LEVEL3_LIGHT, "レベル3分類(taxonomy/unique_poi・category)",
+    )
+    leaf_by_index.update(brand_leaf_map)
+    leaf_by_index.update(light_leaf_map)
+    total_in += in_brand + in_light
+    total_out += out_brand + out_light
+    failed_queries |= failed_brand | failed_light
 
     records: list[Record] = []
     for i, (c1, c2, _matched) in enumerate(triples):

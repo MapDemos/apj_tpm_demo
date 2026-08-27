@@ -26,6 +26,17 @@ unsupported_query_location_intent/broken_query/othersの7分類から全面刷�
 brand_data.BRAND_CATEGORY_MAP（Wikipedia等を元にしたブランド→taxonomyカテゴリの
 辞書、data_cleaning/local/category_and_brand/poi-blocklist.js）をプロンプトに
 埋め込み、brand_poi判定とai_classification_3の精度向上のための参照情報としてLLMに渡す。
+ただしBRAND_KNOWLEDGE自体が実際に役立つのはbrand_poi判定時だけなので、
+ai_classification_3用のプロンプトはbrand_poi用（埋め込みあり）とunique_poi/category用
+（埋め込みなし、軽量）の2種類に分けている（2026-08-27、build_system_prompt_level3
+参照。以前はsubtypeを問わず全バッチに無条件で埋め込んでいた）。
+
+2026-08-27、LLM応答の要素数が入力とズレて頻発していた問題への対策として、
+入出力の各要素に0始まりのインデックスを付与する方式に変更した（配列の「位置」
+だけで入出力を対応付けていたため、LLMが1件飛ばす・多く返すなどしただけで
+バッチ全体を個別リトライせざるを得なかった。build_level12_user_content/
+build_level3_user_content、decode_indexed_level12_responses/
+decode_indexed_leaf_responses参照）。
 """
 
 import json
@@ -176,14 +187,16 @@ BOUNDARY_GUIDANCE_LEVEL12 = BOUNDARY_GUIDANCE.rsplit("\n\nbrand_poi判定には�
 # 取り扱いを指示する（2026-08-27新設）。BRAND_KNOWLEDGE本体（1500件超）は
 # レベル1/2の軽量プロンプトには埋め込まないが、機械的に絞り込んだ少数の候補
 # だけなら軽量に渡せる。「候補があるのに見ずに自分の知識だけで判断してしまう」
-# ことを防ぐため、出力形式側（この下）で候補ありの要素だけ3要素配列を必須にし、
-# 構造的に候補への言及を強制する（3番目の要素を省略した応答はパース失敗として
-# 既存のリトライ処理に乗る）。
+# ことを防ぐため、出力形式側（この下）で候補ありの要素だけ4要素配列を必須にし、
+# 構造的に候補への言及を強制する（末尾要素を省略した応答はデコード失敗として
+# その1件だけが個別リトライに回る。インデックス方式の詳細はbuild_level12_user_content
+# 参照）。
 BRAND_CANDIDATE_GUIDANCE = """
 一部のクエリには、機械的な文字列部分一致（表記ゆれ・カタカナ/ひらがな/ローマ字の
 変換込み）で検出した既知ブランド名の候補が付随している場合がある。その場合、入力
-配列のその要素は文字列単体ではなく[クエリ文字列, [候補1, 候補2, ...]]という2要素
-配列になっている（候補が無い要素は通常通りクエリ文字列単体のまま）。
+配列のその要素は[インデックス, クエリ文字列]ではなく[インデックス, クエリ文字列,
+[候補1, 候補2, ...]]という3要素配列になっている（候補が無い要素は
+[インデックス, クエリ文字列]のまま）。
 
 候補は機械的な文字列一致に過ぎず、必ずしも正しいとは限らない（無関係な言葉が
 偶然一部一致しただけの場合もある）ので鵜呑みにしないこと。しかし候補が付随して
@@ -324,25 +337,47 @@ def build_system_prompt_level12() -> str:
 {BRAND_CANDIDATE_GUIDANCE}
 
 ## 出力形式
-入力配列と同じ順序・同じ要素数のJSON配列のみを返してください。各要素は
-[ai_classification番号, ai_classification_2番号(該当なしは0)]という2要素配列です。
-ただし、入力の要素が[クエリ文字列, 候補配列]という2要素配列だった場合（前述の
-「ブランド候補」参照）、出力側のその要素は[ai_classification番号,
-ai_classification_2番号(該当なしは0), 一致した候補の番号(1始まり。どの候補にも
-当てはまらない場合は0)]という3要素配列で返してください（3番目の要素の省略は不可）。
-説明文やコードフェンスは一切含めず、JSON配列のみを出力してください。
-例: [[1,2], [1,1], [2,5], [4,0], [1,2,1], [1,1,0]]
+入力配列の各要素は[インデックス, クエリ文字列]または[インデックス, クエリ文字列,
+候補配列]という形式です。出力は、入力に含まれていた各インデックスについて1つずつ、
+以下の形式の要素を持つJSON配列で返してください（順序は入力と一致させる必要は
+ありません。各インデックスは1回だけ登場させてください）。
+- 候補配列を伴わない入力要素に対しては、[インデックス, ai_classification番号,
+  ai_classification_2番号(該当なしは0)]という3要素配列
+- 候補配列を伴う入力要素に対しては、[インデックス, ai_classification番号,
+  ai_classification_2番号(該当なしは0), 一致した候補の番号(1始まり。どの候補にも
+  当てはまらない場合は0)]という4要素配列（末尾要素の省略は不可）
+説明文やコードフェンスは一切含めず、JSON配列のみを出力してください。入力に含まれる
+全てのインデックスに対して必ず1件ずつ出力し、省略・統合・重複が無いようにしてください。
+例: [[0,1,2], [1,1,1], [2,2,5], [3,4,0], [4,1,2,1], [5,1,1,0]]
 """
 
 
-def build_system_prompt_level3() -> str:
+def build_system_prompt_level3(include_brand_knowledge: bool) -> str:
     """ai_classification_3（taxonomyカテゴリ）のみを判定するプロンプト（2026-08-26新設、
     2026-08-27にtaxonomyを285リーフの階層構造から45件のフラットカテゴリに刷新）。
     ai_classification_2がunique_poi/brand_poi/categoryと確定済みの
     (query, サブタイプ)の組だけを入力として受け取る想定（呼び出し元でフィルタ済み）。
-    常にSonnetで呼ぶ（build_system_prompt_level12のdocstring参照）。"""
+    常にSonnetで呼ぶ（build_system_prompt_level12のdocstring参照）。
+
+    include_brand_knowledge: BRAND_KNOWLEDGE（1500件超のブランド→taxonomyカテゴリ
+    辞書）を埋め込むかどうか（2026-08-27新設）。これが実際に役立つのはbrand_poi
+    （複数拠点展開ブランド）の判定時だけで、unique_poi（定義上ブランドではない）・
+    category（一般名詞）にはそもそも無関係。以前はsubtypeを問わず全バッチに
+    無条件で埋め込んでいたため、呼び出し元(classify_unique)でbrand_poiのバッチと
+    unique_poi/categoryのバッチを分けて送り、後者にはFalseを渡す
+    （SYSTEM_PROMPT_LEVEL3_LIGHT参照）。"""
     taxonomy_json = json.dumps(brand_data.CATEGORY_TAXONOMY, ensure_ascii=False)
-    brand_json = json.dumps(brand_data.BRAND_CATEGORY_MAP, ensure_ascii=False, separators=(",", ":"))
+
+    brand_section = ""
+    if include_brand_knowledge:
+        brand_json = json.dumps(brand_data.BRAND_CATEGORY_MAP, ensure_ascii=False, separators=(",", ":"))
+        brand_section = f"""
+{BRAND_KNOWLEDGE_GUIDANCE_LEVEL3}
+
+## BRAND_KNOWLEDGE（ブランド名→taxonomyカテゴリの参照データ。出典はWikipedia等の一般情報。
+空配列は「ブランドとして認識してよいが対応するtaxonomyカテゴリが無い」ことを意味する）
+{brand_json}
+"""
 
     return f"""あなたは検索クエリのtaxonomy分類器です。与えられた(query文字列, サブタイプ)の
 組の配列について、それぞれに当てはまるCATEGORY_TAXONOMYのカテゴリを判定してください。
@@ -356,24 +391,26 @@ category（業種を表す一般名詞）のいずれかで既に確定済みな
 {CATEGORY_3_GUIDANCE}
 CATEGORY_TAXONOMY（この配列の文字列以外は使用禁止）:
 {taxonomy_json}
-
-{BRAND_KNOWLEDGE_GUIDANCE_LEVEL3}
-
-## BRAND_KNOWLEDGE（ブランド名→taxonomyカテゴリの参照データ。出典はWikipedia等の一般情報。
-空配列は「ブランドとして認識してよいが対応するtaxonomyカテゴリが無い」ことを意味する）
-{brand_json}
-
+{brand_section}
 ## 出力形式
-入力配列と同じ順序・同じ要素数のJSON配列のみを返してください。各要素はカテゴリ文字列の
-配列です（通常は1要素、複数領域にまたがる場合のみ複数可。文字列を直接入れない。該当する
-カテゴリが1つも無い場合は["unknown"]）。説明文やコードフェンスは一切含めず、JSON配列のみを
-出力してください。
-例: [["コンビニ"], ["専門店（アパレル・服飾雑貨）"], ["unknown"]]
+入力配列の各要素は[インデックス, クエリ文字列, サブタイプ]です。出力は、入力に
+含まれていた各インデックスについて1つずつ、[インデックス, カテゴリ文字列の配列]
+という形式の要素を持つJSON配列で返してください（順序は入力と一致させる必要は
+ありません。各インデックスは1回だけ登場させてください）。カテゴリ文字列の配列は
+通常1要素、複数領域にまたがる場合のみ複数可（文字列を直接入れない。該当する
+カテゴリが1つも無い場合は["unknown"]）。説明文やコードフェンスは一切含めず、
+JSON配列のみを出力してください。入力に含まれる全てのインデックスに対して必ず
+1件ずつ出力し、省略・統合・重複が無いようにしてください。
+例: [[0,["コンビニ"]], [1,["専門店（アパレル・服飾雑貨）"]], [2,["unknown"]]]
 """
 
 
 SYSTEM_PROMPT_LEVEL12 = build_system_prompt_level12()
-SYSTEM_PROMPT_LEVEL3 = build_system_prompt_level3()
+# level3はbrand_poi判定時だけBRAND_KNOWLEDGEが必要（build_system_prompt_level3の
+# docstring参照）。呼び出し元(ai_classify.py/ai_classify_batch.pyのclassify_unique)
+# がsubtypeでバッチを分けて、それぞれに対応するプロンプトを使う。
+SYSTEM_PROMPT_LEVEL3_BRAND = build_system_prompt_level3(include_brand_knowledge=True)
+SYSTEM_PROMPT_LEVEL3_LIGHT = build_system_prompt_level3(include_brand_knowledge=False)
 
 
 # ai_classification_3をCSVの1セルに格納する際の区切り文字。
@@ -393,7 +430,7 @@ def encode_leaves(raw_leaves) -> str:
     taxonomyに存在する値のみ残して重複を除いた上で LEAF_DELIMITER 区切りの1文字列に
     連結する（CSVの1セルに収めるため）。形式が不正・値が範囲外の場合は捨て、
     フィルタ後に何も残らなければUNKNOWN_LEAFにフォールバックする。
-    decode_leaf_response（3階層目だけを判定する形式）から使う共通ロジック。"""
+    decode_indexed_leaf_responses（3階層目だけを判定する形式）から使う共通ロジック。"""
     # 旧形式（単一文字列）が来ても壊れないようにフォールバックしておく。
     if isinstance(raw_leaves, str):
         raw_leaves = [raw_leaves]
@@ -437,10 +474,6 @@ def decode_pair(item) -> tuple[str, str]:
     return classification, sub
 
 
-def decode_pairs(items: list) -> list[tuple[str, str]]:
-    return [decode_pair(item) for item in items]
-
-
 # ai_classification/_2 に加えて、機械的に検出したブランド候補のうちどれが
 # 一致したか（BRAND_CANDIDATE_GUIDANCE参照）まで含めた1件分のレコード。
 # matched_brandは候補の中からLLMが選んだブランド名（BRAND_CATEGORY_MAPのキー）、
@@ -451,46 +484,80 @@ CandidateRecord = tuple[str, str, str | None]
 def build_level12_user_content(queries: list[str], candidates: list[list[str] | None]) -> str:
     """レベル1/2フェーズの入力JSONを組み立てる。candidatesはqueriesと同じ順序・
     同じ長さで、各クエリに機械的に検出したブランド候補のリスト（無ければNone）を
-    渡す。候補が無いクエリはそのまま文字列単体、候補があるクエリだけ
-    [クエリ文字列, 候補配列]という2要素配列にする（BRAND_CANDIDATE_GUIDANCE参照）。"""
+    渡す。各要素の先頭には0始まりのインデックス（queries内の位置）を必ず付与する
+    （2026-08-27新設。従来は入力と出力の「配列位置」だけで対応を取っていたが、
+    LLMが1件飛ばす・1件多く返すなどして配列長がズレると、それだけでバッチ全体を
+    個別リトライに回さざるを得なかった。インデックスを明示することで、
+    どのクエリの応答が欠落したかをピンポイントで特定し、その分だけ個別リトライ
+    できるようにする。project memory参照）。候補が無いクエリは
+    [インデックス, クエリ文字列]、候補があるクエリは
+    [インデックス, クエリ文字列, 候補配列]という配列にする
+    （BRAND_CANDIDATE_GUIDANCE参照）。"""
     if len(queries) != len(candidates):
         raise ValueError(f"queriesとcandidatesの長さが不一致です（{len(queries)} vs {len(candidates)}）")
     payload = [
-        [q, c] if c else q
-        for q, c in zip(queries, candidates)
+        [i, q, c] if c else [i, q]
+        for i, (q, c) in enumerate(zip(queries, candidates))
     ]
     return json.dumps(payload, ensure_ascii=False)
 
 
-def decode_pair_with_candidate(item, candidates: list[str] | None) -> CandidateRecord:
-    """decode_pairの候補対応版。candidatesがNone（このクエリには候補を渡さな
-    かった）場合は通常の2要素[c1, c2]を期待し、matched_brandは常にNone。
-    candidatesがある場合は3要素[c1, c2, idx]を必須とする（BRAND_CANDIDATE_GUIDANCE
-    で指示した通り、省略はLLM側が候補を確認しなかった合図とみなし、ここでは
-    ValueErrorにして呼び出し元のバッチ失敗→個別リトライのフローに委ねる。
-    idxが範囲外の値の場合も同様に扱う）。"""
+def build_level3_user_content(items: list[tuple[str, str]]) -> str:
+    """レベル3フェーズ（taxonomyリーフ判定）の入力JSONを組み立てる。itemsは
+    [(query, サブタイプ), ...]。build_level12_user_contentと同じ理由で、各要素の
+    先頭に0始まりのインデックスを付与する。"""
+    payload = [[i, q, sub] for i, (q, sub) in enumerate(items)]
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _decode_candidate_tail(rest: list, candidates: list[str] | None) -> CandidateRecord | None:
+    """decode_indexed_level12_responsesの1件分。restはインデックスを除いた残りの
+    要素（候補なしなら[c1, c2]、候補ありなら[c1, c2, idx]）。形式が不正・値が
+    範囲外の場合はNoneを返し、呼び出し元でこのインデックスを欠落扱いにする。"""
     if candidates is None:
-        c1, c2 = decode_pair(item)
+        if len(rest) != 2:
+            return None
+        c1, c2 = decode_pair(rest)
         return c1, c2, None
 
-    if not isinstance(item, list) or len(item) != 3:
-        raise ValueError(f"候補ありのクエリなのに3要素配列で返っていません: {item!r}")
-    c1_num, c2_num, idx = item
+    if len(rest) != 3:
+        return None
+    c1_num, c2_num, idx = rest
     c1, c2 = decode_pair([c1_num, c2_num])
     if not isinstance(idx, int) or idx < 0 or idx > len(candidates):
-        raise ValueError(f"候補番号が不正です: {idx!r}（候補{len(candidates)}件）")
+        return None
     matched_brand = candidates[idx - 1] if idx > 0 else None
     return c1, c2, matched_brand
 
 
-def decode_pairs_with_candidates(items: list, candidates_list: list[list[str] | None]) -> list[CandidateRecord]:
-    if len(items) != len(candidates_list):
-        raise ValueError(f"itemsとcandidates_listの長さが不一致です（{len(items)} vs {len(candidates_list)}）")
-    return [decode_pair_with_candidate(item, c) for item, c in zip(items, candidates_list)]
+def decode_indexed_level12_responses(
+    raw_items: list, candidates_list: list[list[str] | None],
+) -> tuple[list[CandidateRecord | None], set[int]]:
+    """build_system_prompt_level12が返すインデックス付き応答配列
+    （各要素は[idx, c1, c2]または[idx, c1, c2, candidate_idx]）を、
+    candidates_listと同じ順序・同じ長さのCandidateRecordのリストに変換する
+    （2026-08-27新設、要素数ズレ対策のインデックス方式）。範囲外・型不正・
+    重複したインデックス、およびデコードに失敗した要素はその位置をNoneのまま
+    残す。戻り値の2つ目はNoneのまま残った（＝LLM応答から実質的に欠落した）
+    インデックスの集合で、呼び出し元(_run_batches_concurrently)がこの分だけ
+    個別リトライする。"""
+    n = len(candidates_list)
+    records: list[CandidateRecord | None] = [None] * n
+    for raw in raw_items:
+        if not isinstance(raw, list) or len(raw) < 2:
+            continue
+        idx, rest = raw[0], raw[1:]
+        if not isinstance(idx, int) or idx < 0 or idx >= n or records[idx] is not None:
+            continue  # 範囲外・型不正・重複インデックスは無視する
+        decoded = _decode_candidate_tail(rest, candidates_list[idx])
+        if decoded is not None:
+            records[idx] = decoded
+    missing = {i for i, r in enumerate(records) if r is None}
+    return records, missing
 
 
 def leaves_for_matched_brand(matched_brand: str | None, ai_classification_2: str) -> str | None:
-    """decode_pair_with_candidateが返したmatched_brandが、レベル3(taxonomy)の
+    """decode_indexed_level12_responsesが返したmatched_brandが、レベル3(taxonomy)の
     LLM呼び出しを省略してBRAND_CATEGORY_MAPから直接引ける対象かどうかを判定する。
     対象ならencode_leaves済みの文字列（辞書にリーフが無いブランドはUNKNOWN_LEAF）
     を返し、対象外（候補が無かった/LLMがどの候補にも当てはまらないと判断した/
@@ -506,14 +573,22 @@ def leaves_for_matched_brand(matched_brand: str | None, ai_classification_2: str
     return encode_leaves(brand_data.BRAND_CATEGORY_MAP.get(matched_brand, []))
 
 
-def decode_leaf_response(item) -> str:
-    """build_system_prompt_level3が返す1件分のリーフ配列を、CSVの1セルに入れる
-    LEAF_DELIMITER区切りの文字列に変換する（2026-08-26新設）。"""
-    return encode_leaves(item)
-
-
-def decode_leaf_responses(items: list) -> list[str]:
-    return [decode_leaf_response(item) for item in items]
+def decode_indexed_leaf_responses(raw_items: list, n: int) -> tuple[list[str | None], set[int]]:
+    """build_system_prompt_level3が返すインデックス付き応答配列
+    （各要素は[idx, リーフ配列]）を、長さnのリストに変換する
+    （2026-08-27新設、decode_indexed_level12_responsesと同じインデックス方式）。
+    範囲外・型不正・重複したインデックスの要素は無視する。戻り値の2つ目は
+    Noneのまま残った（＝LLM応答から実質的に欠落した）インデックスの集合。"""
+    records: list[str | None] = [None] * n
+    for raw in raw_items:
+        if not isinstance(raw, list) or len(raw) != 2:
+            continue
+        idx, leaves = raw
+        if not isinstance(idx, int) or idx < 0 or idx >= n or records[idx] is not None:
+            continue
+        records[idx] = encode_leaves(leaves)
+    missing = {i for i, r in enumerate(records) if r is None}
+    return records, missing
 
 
 def parse_response_text(text: str) -> str:
