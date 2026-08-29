@@ -22,12 +22,35 @@ kana_match.variant_contains()にかけると計算量が爆発する
 この2つを組み合わせることで、クエリ側の計算量はO(クエリ文字数の2乗)のみになり、
 ブランド数(1573件)に依存しなくなる（インデックス構築自体はブランド側データに
 対して最初に1回だけ行う、O(ブランド側文字列の総文字数の2乗)の前処理）。
+
+2026-08-29、substring_index（方向2、「クエリ自体がブランド名の一部分」用）に
+間引き処理を追加した。実データで検証したところ、"ホテル"（98ブランドにヒット）・
+"銀行"（104ブランドにヒット）のような一般名詞1語のクエリが、たまたま多数の
+ブランド名の部分文字列になっているというだけで大量の（無意味な）候補を
+生成してしまうケースが見つかった（AIへの送信トークン増加・候補ノイズによる
+判定精度への悪影響の両面で問題）。「1つの部分文字列が何十件ものブランドに
+ヒットする＝そのクエリ単体では実質的に絞り込みになっていない」という事実を
+そのまま閾値として使い、build_index()構築後にヒット件数がmax_substring_matches
+を超えるキーをsubstring_indexから間引く。実データでの検証（実行ログ・
+project memory参照）:
+- 閾値3でも、ランダムサンプリングした実ブランド名+支店名のクエリ300件は
+  1件も候補から消失しなかった（正常系は無傷）。これは、"アパ"→"アパホテル"の
+  ような**登録済みの略称**はBRAND_SYNONYMSの中で完全一致するためwhole_forms
+  （方向1）経由でヒットし、substring_indexの間引きの影響を受けないため。
+  影響を受けるのは「たまたま偶然一致しただけの、識別力のない断片」だけ。
+- whole_forms（方向1）は間引かない。ブランドの公式名・別名として登録された
+  完全一致なので、この種の「一般名詞が大量ヒット」問題自体が原理的に起きない。
 """
 
 from dataclasses import dataclass, field
 
 from lib import brand_data
 from lib.kana_match import normalize_variants
+
+# substring_index（方向2）のキーがヒットするブランド数の上限。これを超えるキーは
+# 「一般名詞が偶然たくさんのブランド名に含まれているだけ」とみなして間引く
+# （build_index()のモジュールdocstring参照。2026-08-29実データ検証で3を採用）。
+DEFAULT_MAX_SUBSTRING_MATCHES = 3
 
 
 @dataclass
@@ -48,9 +71,15 @@ def build_index(
     brand_map: dict[str, list[str]] | None = None,
     synonyms: dict[str, list[str]] | None = None,
     min_len: int = 2,
+    max_substring_matches: int = DEFAULT_MAX_SUBSTRING_MATCHES,
 ) -> BrandMatchIndex:
     """BRAND_CATEGORY_MAP（既定）とBRAND_SYNONYMS（既定）からインデックスを構築する。
-    引数を渡せばテスト用の別データセットでも構築できる。"""
+    引数を渡せばテスト用の別データセットでも構築できる。
+
+    max_substring_matches: substring_index（方向2）の1キーがヒットしてよい
+    ブランド数の上限。これを超えるキーは間引く（モジュールdocstring参照。
+    "ホテル"/"銀行"のような一般名詞1語が大量の無関係なブランドにヒットする
+    問題への対策）。Noneを渡すと間引きを無効化する（テスト・検証用）。"""
     if brand_map is None:
         brand_map = brand_data.BRAND_CATEGORY_MAP
     if synonyms is None:
@@ -68,6 +97,11 @@ def build_index(
                 idx.whole_forms.setdefault(form, set()).add(canonical)
                 for sub in _all_substrings(form, min_len):
                     idx.substring_index.setdefault(sub, set()).add(canonical)
+
+    if max_substring_matches is not None:
+        for key in [k for k, v in idx.substring_index.items() if len(v) > max_substring_matches]:
+            del idx.substring_index[key]
+
     return idx
 
 

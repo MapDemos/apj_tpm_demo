@@ -26,7 +26,8 @@ argparse.Namespace相当のオブジェクトで直接呼び出すだけ。
   旧「クエリの分析」タブの内容（analyzeツール）は実行設定のツール選択に統合。
   重複クエリの除去（dedup）は2026-08-27より専用ボタンを廃止し、AIによるクエリの
   分類の実行時に自動で前段実行する方式に変更した（_run_in_thread参照）。
-  APIキー・使用モデルの選択もヘッダーの⚙設定（SettingsDialog）に集約した。
+  APIキーの入力もヘッダーの⚙設定（SettingsDialog）に集約した（2026-08-27にモデルは
+  ai-classify=Haiku固定・analyze=Sonnet固定にしたため、モデル選択UI自体は廃止）。
   2026-08-27、プロキシ（Lambda URL）経由の呼び出しを廃止し、本物のAnthropic
   APIキーを直接使う方式に統一（同期・並行呼び出しがデフォルト、実行設定欄の
   「Batches API使用」チェックでオンにすると非同期のBatches API・50%割引に切替）。
@@ -38,6 +39,7 @@ import csv
 import itertools
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -46,7 +48,6 @@ from PySide6.QtCore import Qt, QObject, Signal
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -62,6 +63,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QStyle,
+    QSystemTrayIcon,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -199,39 +202,134 @@ QCheckBox::indicator:checked {{
 
 
 # ---------- AI設定の一元管理 ----------
-# 各ツールのAPIキー入力欄・モデル選択をヘッダーの⚙設定ダイアログに集約し、
-# 全てのAI処理がここから読む（2026-08-27、モデル選択も各ツールの実行設定欄から
-# ここに移動）。バッチサイズ・並行数・Batches API使用の有無は引き続き各ツールの
-# 実行設定欄で個別に持つ。非persistent（ディスクに保存しない）。
+# 各ツールのAPIキー入力欄をヘッダーの⚙設定ダイアログに集約し、全てのAI処理が
+# ここから読む。モデルはai-classify=Haiku固定・analyze=Sonnet固定（2026-08-27、
+# 選択制だったモデル設定を廃止しclassification_common.CLASSIFY_MODEL/ANALYZE_MODEL
+# に一本化）。2026-08-29、バッチサイズ・並行数もここに集約した（各ツールの実行設定欄に
+# あると「AIコメンタリー」等のオン/オフと並んで目立ちすぎる・毎回意識する必要が
+# 無い設定なので、APIキーと同じ「裏方の設定」として⚙設定ダイアログに寄せた）。
+# 非persistent（ディスクに保存しない）。
+# 2026-08-28、30→90に変更（main.pyの--batch-sizeデフォルト変更と合わせた。
+# project memory参照）。2026-08-29、90→300にさらに変更（同じくmain.pyと合わせた。
+# max_tokensも4096→15800に拡大済み）。2026-08-30、Batches API使用時/不使用時で
+# バッチサイズの設定を分離した（main.pyの--batch-size/--sync-batch-size分離と
+# 同じ理由。project memory参照: 非同期ジョブ登録は非ストリーミングSDKのmax_tokens
+# 超過ガード対象外のためbatch_sizeを大きく取れるが、不使用時は全呼び出しが同期の
+# ためガード対象で300前後が実質上限）。同日、実データ550件・1チャンクでの検証
+# （欠落率0.7%、既存水準と同程度）を踏まえてBatches API使用時のデフォルトを
+# 300→1000にさらに引き上げ（main.pyの--batch-sizeデフォルト変更と合わせた）。
+DEFAULT_BATCH_SIZE = 1000
+DEFAULT_SYNC_BATCH_SIZE = 300
+DEFAULT_WORKERS = 8
+
+
 class AISettings:
     def __init__(self) -> None:
         self.api_key: str = ""
-        self.ai_classify_model: str = "haiku+sonnet"
-        self.analyze_model: str = "sonnet"
+        self.batch_size: int = DEFAULT_BATCH_SIZE
+        self.sync_batch_size: int = DEFAULT_SYNC_BATCH_SIZE
+        self.workers: int = DEFAULT_WORKERS
+        # 2026-08-30、実行設定欄（build_ai_options）にあった「Batches API使用」
+        # トグルをここに移動した（project memory参照。batch_size等と同じく毎回
+        # 意識する設定ではなく「裏方の設定」寄りのため、コスト影響が大きい割に
+        # 実行設定欄で毎回触るような場所には置かない判断）。
+        self.batch_api: bool = True
 
 
 AI_SETTINGS = AISettings()
 
 
 # ---------- AI呼び出しコストの見積り ----------
-# USD/1Mトークンのリスト価格。Sonnet 5には2026-08-31までの導入価格($2/$10)があるが、
-# 導入期間が終わっても見積りロジックを直さなくて済むよう、恒久的なリスト価格を採用する。
-PRICING_PER_MTOK: dict[str, tuple[float, float]] = {
-    "claude-haiku-4-5-20251001": (1.00, 5.00),
-    "claude-sonnet-5": (3.00, 15.00),
+# 2026-08-30、実サンプルAPI呼び出しによる見積り（少量実行して見積）を廃止し、
+# ユニークquery数とbatch_size・batch_api有無から実績ベースの分析式で計算する
+# 方式に変更した（project memory参照）。「少量実行して見積」は無料ではなく
+# （実際に1バッチAPIを叩くため課金が発生する）、かつ毎回リアルタイムで待つ
+# 必要があったが、新方式は無料・即時。
+
+# USD/1Mトークンのリスト価格。ファミリー（haiku/sonnet）単位で持つ（2026-08-30、
+# モデルIDが自動解決でバージョンごとに変わるようになったため、固定モデルID文字列
+# キーの辞書だと引けなくなる問題への対策。Sonnet 5には2026-08-31までの導入価格
+# ($2/$10)があるが、導入期間が終わっても見積りロジックを直さなくて済むよう、
+# 恒久的なリスト価格を採用する）。
+PRICING_PER_MTOK_BY_FAMILY: dict[str, tuple[float, float]] = {
+    "haiku": (1.00, 5.00),
+    "sonnet": (3.00, 15.00),
 }
 BATCH_API_DISCOUNT = 0.5  # Message Batches API使用時は通常価格の50%
+USD_TO_JPY = 150.0  # 見積り表示用の概算為替レート（固定値、変動しても厳密追従はしない）
 
-DEFAULT_BATCH_SIZE = 30
-DEFAULT_WORKERS = 8
+# 分析式トークン見積りの実績ベース係数（2026-08-30新設、project memory参照）。
+# 2回の実行実績（24,137件・batch_size300／550件・batch_size600相当）から逆算した
+# 概算値。サンプル数が少ないため今後の実行実績で調整の余地あり。
+#   - _CONTENT_IN_PER_QUERY / _CONTENT_OUT_PER_QUERY: batch_sizeに依存しない
+#     「クエリ本文＋分類結果」部分のトークン数（ユニーク1件あたり平均）。
+#   - _SYSTEM_PROMPT_TOKENS_*: 各フェーズのsystem prompt実測トークン数
+#     （lib/classification_common.pyのSYSTEM_PROMPT_LEVEL12/LEVEL3参照。
+#     いずれもHaiku 4.5のキャッシュ最低サイズ4096トークン未満でキャッシュ非対象）。
+#   - _POI_RATE: レベル3（taxonomy判定）まで進む行の比率。550件実行実績で255件
+#     （46.4%）。カテゴリ再判定フェーズ（少数のみ対象）は計算に含めず、その分
+#     わずかに過小評価になる。
+#
+# _CONTENT_OUT_PER_QUERY: 2026-08-29、level3（taxonomyリーフ判定）の出力形式を
+# カテゴリ文字列からカテゴリ番号に変更し、level3のoutputトークンが実測で約58%
+# 減った（project memory参照）。11.7は「level3が旧・文字列出力だった頃」の実績
+# ベース値なので、この変更分を反映して逆算し直した: 旧値からlevel3寄与分
+# （_POI_RATE×旧level3実測12.05トークン/件）を除いた「level12のみの寄与分」
+# （約6.11トークン/件）に、新level3実測5.06トークン/件×_POI_RATEを足し直した。
+_CONTENT_IN_PER_QUERY = 30.0
+_CONTENT_OUT_PER_QUERY = 8.5
+_SYSTEM_PROMPT_TOKENS_LEVEL12 = 3731
+# 2026-08-29、level3の出力形式変更（カテゴリ文字列→番号、taxonomyを「番号: 名前」の
+# 行で明示列挙する形に変更）でsystem prompt自体もわずかに増えた（2588→2795、
+# count_tokens APIで実測。project memory参照）。
+_SYSTEM_PROMPT_TOKENS_LEVEL3 = 2795
+_POI_RATE = 0.464
+
+
+def estimate_tokens(unique_count: int, batch_size: int) -> tuple[int, int]:
+    """ユニークquery数とbatch_sizeから、input/outputトークン数を分析式で見積もる
+    （実API呼び出し無し。project memory参照）。batch_apiの有無自体は直接の
+    パラメータではなく、呼び出し元がbatch_size（Batches API用/--sync-batch-size用）
+    を使い分けることで反映する（フォーミュラ自体は両モードで共通——system prompt・
+    フェーズ構成は同じで、chunk化の単位が違うだけのため）。"""
+    if unique_count <= 0 or batch_size <= 0:
+        return 0, 0
+    chunks_level12 = math.ceil(unique_count / batch_size)
+    poi_count = unique_count * _POI_RATE
+    chunks_level3 = math.ceil(poi_count / batch_size) if poi_count > 0 else 0
+    system_overhead = (
+        chunks_level12 * _SYSTEM_PROMPT_TOKENS_LEVEL12 + chunks_level3 * _SYSTEM_PROMPT_TOKENS_LEVEL3
+    )
+    input_tokens = round(unique_count * _CONTENT_IN_PER_QUERY + system_overhead)
+    output_tokens = round(unique_count * _CONTENT_OUT_PER_QUERY)
+    return input_tokens, output_tokens
+
+
+def estimate_cost(input_tokens: int, output_tokens: int, model_family: str, batch_api: bool) -> float:
+    """見積りトークン数からUSDコストを計算する。"""
+    price_in, price_out = PRICING_PER_MTOK_BY_FAMILY.get(model_family, (0.0, 0.0))
+    discount = BATCH_API_DISCOUNT if batch_api else 1.0
+    return (input_tokens / 1_000_000 * price_in + output_tokens / 1_000_000 * price_out) * discount
+
+
+# 進捗バーの%表示（_update_progress_from_log参照）が拾う進捗ログの形式。
+# 2026-08-30、残り時間の目安を廃止しこちらに置き換えた（project memory参照）。
+# 3パターンをまとめて解析する:
+#   ①Batches API使用時のジョブポーリング行（ai_classify_batch.pyのrun_batch_job。
+#     phase_label付きでdone=N/Mを出すよう変更済み）
+#   ②Batches API不使用時のバッチ完了行（ai_classify.pyの_run_batches_concurrently）
+#   ③個別/グループリトライの進捗行（ai_classify_batch.py/ai_classify.py共通）
+_PROGRESS_JOB_RE = re.compile(r"\[(.+?)\].*done=(\d+)/(\d+)")
+_PROGRESS_SYNC_RE = re.compile(r"(.+?)中\.\.\. (\d+)/(\d+) バッチ完了")
+_PROGRESS_RETRY_RE = re.compile(r"(.+?): グループリトライ (\d+)/(\d+)グループ完了")
 
 
 def _load_unique_queries_for_estimate(
     input_csv: str, filter_column: str | None, filter_op: str | None, filter_value: str | None
 ) -> list[str]:
-    """見積り用に、query列のユニーク値だけを抽出する。filter_column指定時は
-    ai-classify本体の絞り込みと同じロジック（row_filter_lib）で対象行を絞り込んだ
-    上で抽出する。"""
+    """query列のユニーク値だけを抽出する（見積り計算・実行前の重複排除カウント
+    共通で使う）。filter_column指定時はai-classify本体の絞り込みと同じロジック
+    （row_filter_lib）で対象行を絞り込んだ上で抽出する。"""
     with open(input_csv, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames
@@ -374,17 +472,6 @@ def _bound_combo_width(combo: QComboBox, min_chars: int = 12) -> None:
     combo.setMinimumContentsLength(min_chars)
 
 
-def _model_preset_display_label(preset: str) -> str:
-    """ai-classifyのモデル選択コンボボックス用の表示テキスト（preset名＋実際の
-    モデルID）。classification_common.model_preset_labelはCLIの実行後ログ向けで
-    "ai_classification/_2: ..."のような長い前置きが付くため、ドロップダウンには
-    このgui_app.py専用の短い版を使う。"""
-    level12_model, level3_model = classification_common_lib.MODEL_PRESETS[preset]
-    if level12_model == level3_model:
-        return f"{preset} ({level12_model})"
-    return f"{preset} ({level12_model} + {level3_model})"
-
-
 def build_ai_options(page: "MainPage", layout: QVBoxLayout) -> dict:
     """AIによるクエリの分類の設定欄。旧「ai-retry」ツールはここに統合済み
     （2026-08-25）: 「絞り込み(任意)」で列×演算子×値を指定すると、その行だけが
@@ -421,49 +508,59 @@ def build_ai_options(page: "MainPage", layout: QVBoxLayout) -> dict:
     option_getters["filter_op"] = op_combo.currentText
     option_getters["filter_value"] = value_edit.text
 
-    # 2026-08-27、モデル選択はヘッダーの⚙設定（SettingsDialog）に移動した
-    # （AI_SETTINGS.ai_classify_model）。「最大バッチ数」は「少量実行して見積」
-    # ボタンで十分カバーできるためGUIからは廃止（CLIでは引き続き利用可）。
-    # 並行数・Batches API使用は、2026-08-25にプロキシ（Lambda URL）経由を
-    # 廃止して本物のAnthropic APIキーを直接使う方式に変わった後も、
-    # 「同期・並行 vs 非同期バッチ(50%割引)」という選択自体は引き続き意味を持つ
-    # ため残す（勘違いで一度削除しかけたが、並行数はプロキシ固有の概念ではなく
-    # 直接APIキーで並行呼び出しする場合にも普通に有効な設定だった）。
-    batch_size_spin = QSpinBox()
-    batch_size_spin.setRange(1, 100)
-    batch_size_spin.setValue(DEFAULT_BATCH_SIZE)
-    row = _option_row(layout, "バッチサイズ")
-    row.addWidget(batch_size_spin)
-    row.addStretch(1)
-    option_getters["batch_size"] = batch_size_spin.value
-
-    workers_spin = QSpinBox()
-    workers_spin.setRange(1, 32)
-    workers_spin.setValue(DEFAULT_WORKERS)
-    row = _option_row(layout, "並行数")
-    row.addWidget(workers_spin)
-    row.addStretch(1)
-    option_getters["workers"] = workers_spin.value
-
-    batch_api_row = QVBoxLayout()
-    layout.addLayout(batch_api_row)
-    batch_api_top = QHBoxLayout()
-    batch_api_row.addLayout(batch_api_top)
-    batch_api_label = _muted_label("Batches API使用")
-    batch_api_top.addWidget(batch_api_label)
-    batch_api_checkbox = QCheckBox()
-    # デフォルトは同期・即時レスポンスの通常呼び出し（不使用）。Batches APIは
-    # 非同期でジョブ完了まで数分〜最大24時間待つことがあるため、通常運用では
-    # オフが自然（大量データを安く処理したい場合にオンにする）。
-    batch_api_checkbox.setChecked(False)
-    batch_api_top.addWidget(batch_api_checkbox)
-    batch_api_top.addStretch(1)
-    batch_api_row.addWidget(
-        _muted_label("（オンで50%割引の代わりに非同期・ジョブ完了待ちになる）", wrap=True)
+    # 2026-08-27、モデルはHaiku固定（CLASSIFY_MODEL）になったため選択UI自体が
+    # 不要になり廃止した。「最大バッチ数」は「少量実行して見積」ボタンで
+    # 十分カバーできるためGUIからは廃止（CLIでは引き続き利用可）。
+    # 2026-08-29、バッチサイズ・並行数はヘッダーの⚙設定ダイアログ（AI_SETTINGS）に
+    # 移動した（毎回触る設定ではなく、APIキーと同じ「裏方の設定」寄りのため）。
+    # ここではAI_SETTINGSを読むだけのgetterにする。2026-08-30、Batches API使用時/
+    # 不使用時でバッチサイズの設定を分離した（main.pyの--batch-size/
+    # --sync-batch-size分離と同じ理由。project memory参照）ため、option_getters
+    # ["batch_api"]（下で定義、辞書経由の遅延参照なのでこの時点で未定義でも良い）の
+    # 値でどちらを読むか切り替える。
+    option_getters["batch_size"] = lambda: (
+        AI_SETTINGS.batch_size if option_getters["batch_api"]() else AI_SETTINGS.sync_batch_size
     )
-    option_getters["batch_api"] = batch_api_checkbox.isChecked
+    option_getters["workers"] = lambda: AI_SETTINGS.workers
 
-    layout.addWidget(_muted_label("（APIキー・使用モデルはヘッダーの⚙設定を使用）", wrap=True))
+    # レポート出力: 分類完了後、続けてanalyzeサブコマンド相当のHTMLレポート
+    # （AIコメンタリー無し・上位クエリ50件固定）も自動生成するかどうか
+    # （2026-08-29新設。従来は分類→レポートの2ステップを別々にツールを
+    # 切り替えて実行する必要があった）。他のオン/オフ設定と同じ「使う/使わない」
+    # ではなく「はい/いいえ」にしているのは、Batches API使用・AIコメンタリーが
+    # 「機能をオン/オフする」設定なのに対し、これは「レポートを出すか出さないか」
+    # という結果に対するYes/No選択のため、文言を分けた方が意味が伝わりやすいと
+    # 判断したため。
+    report_row = QVBoxLayout()
+    layout.addLayout(report_row)
+    report_top = QHBoxLayout()
+    report_row.addLayout(report_top)
+    report_label = _muted_label("レポート出力")
+    report_top.addWidget(report_label)
+    report_combo = QComboBox()
+    report_combo.addItems(["はい", "いいえ"])
+    report_combo.setCurrentText("いいえ")
+    _bound_combo_width(report_combo, min_chars=6)
+    report_top.addWidget(report_combo)
+    report_top.addStretch(1)
+    report_row.addWidget(
+        _muted_label("（分類完了後に続けてHTMLレポートも生成する。AIコメンタリー無し・上位50件固定）", wrap=True)
+    )
+    option_getters["with_report"] = lambda: report_combo.currentText() == "はい"
+
+    # 2026-08-30、「Batches API使用」トグルをヘッダーの⚙設定ダイアログ
+    # （AI_SETTINGS.batch_api）に移動した（project memory参照。コストへの影響が
+    # 大きい割に毎回意識する設定ではなく、batch_size等と同じ「裏方の設定」寄りの
+    # ため）。ここではAI_SETTINGSを読むだけのgetterにする。
+    option_getters["batch_api"] = lambda: AI_SETTINGS.batch_api
+
+    layout.addWidget(
+        _muted_label(
+            "（モデル: Haikuファミリー固定（バージョン自動選択）。APIキー・Batches API使用・"
+            "バッチサイズ・並行数はヘッダーの⚙設定を使用）",
+            wrap=True,
+        )
+    )
 
     return option_getters
 
@@ -471,25 +568,29 @@ def build_ai_options(page: "MainPage", layout: QVBoxLayout) -> dict:
 def build_analyze_options(page: "MainPage", layout: QVBoxLayout) -> dict:
     # 2026-08-27、「上位クエリ件数」の選択UIを廃止し50件に固定（選択肢としての
     # 意味が分かりづらいとの指摘のため。_build_argsでargs.top_n=50を直接設定）。
-    # モデル選択もヘッダーの⚙設定（AI_SETTINGS.analyze_model）に移動。
+    # 2026-08-29、チェックボックスから「使う/使わない」のドロップダウンに変更
+    # （project memory参照。オン/オフが視覚的に紛らわしいとの指摘のため）。
     ai_commentary_row = QVBoxLayout()
     layout.addLayout(ai_commentary_row)
     ai_top = QHBoxLayout()
     ai_commentary_row.addLayout(ai_top)
     ai_label = _muted_label("AIコメンタリー")
     ai_top.addWidget(ai_label)
-    ai_checkbox = QCheckBox()
-    ai_top.addWidget(ai_checkbox)
+    ai_combo = QComboBox()
+    ai_combo.addItems(["使う", "使わない"])
+    ai_combo.setCurrentText("使わない")  # 従来のQCheckBox()のデフォルト（未チェック）を踏襲
+    _bound_combo_width(ai_combo, min_chars=6)
+    ai_top.addWidget(ai_combo)
     ai_top.addStretch(1)
     ai_commentary_row.addWidget(
         _muted_label(
-            "（本物のAnthropic APIでレポートに要約を追加。APIキー・使用モデルはヘッダーの⚙設定を使用）",
+            "（本物のAnthropic APIでレポートに要約を追加。モデル: Sonnet固定。APIキーはヘッダーの⚙設定を使用）",
             wrap=True,
         )
     )
 
     return {
-        "with_ai_commentary": ai_checkbox.isChecked,
+        "with_ai_commentary": lambda: ai_combo.currentText() == "使う",
     }
 
 
@@ -516,10 +617,12 @@ class MainPage(QWidget):
         # _load_previewが、CSV読み込み時にこれが立っていれば選択肢をヘッダーで更新する。
         self.filter_column_combo: QComboBox | None = None
         self.running = False
+        self._cancel_event: threading.Event | None = None
         self._before_run_files: set[str] = set()
-        # 出力フォルダは実行直前にoutput_utils_lib.OUTPUT_DIRへ反映する
-        # （_on_run/_on_estimate参照）。
+        # 出力フォルダは実行直前にoutput_utils_lib.OUTPUT_DIRへ反映する（_on_run参照）。
         self.output_dir = OUTPUT_DIR
+        # 完了通知用のQSystemTrayIcon（_notify_completion参照）。遅延生成する。
+        self._tray_icon: QSystemTrayIcon | None = None
 
         self.preview_table: QTableWidget | None = None
         self.output_preview_table: QTableWidget | None = None
@@ -613,21 +716,40 @@ class MainPage(QWidget):
         run_row1.addWidget(self.run_button)
         run_row1.addStretch(1)
 
-        run_row2 = QHBoxLayout()
-        run_col.addLayout(run_row2)
-        # ai-classifyの時だけ表示（_on_selectで出し分ける）。1バッチだけ実際に
-        # 実行し、その結果を全体件数分単純に増加させた場合のコストを見積もってログに出す。
-        self.estimate_button = QPushButton("📊  少量実行して見積")
-        self.estimate_button.setFixedHeight(38)
-        self.estimate_button.clicked.connect(self._on_estimate)
-        run_row2.addWidget(self.estimate_button)
-        run_row2.addStretch(1)
+        # 2026-08-30、「少量実行して見積」ボタンは廃止した（project memory参照）。
+        # 見積りは実行ボタン押下時に自動計算しモーダルダイアログで表示する方式に
+        # 変更したため、専用ボタンは不要になった（_on_run/_show_estimate_dialog参照）。
+        # 「実行」の下にキャンセルボタンを置く（2026-08-29新設）。実行中(self.running)
+        # にのみ有効化する。ai-classifyの実処理は複数のフェーズ（レベル1/2分類→
+        # レベル3分類→カテゴリ再判定、Batches API使用時はさらにジョブ完了までの
+        # ポーリング）に分かれており、cancel_eventをフェーズの境目・ポーリング
+        # ループで確認して中断する（classification_common.OperationCancelled参照）。
+        # 既に投げてしまった1回分のAPI呼び出し自体は打ち切れないため、押してから
+        # 実際に停止するまである程度のタイムラグが起こりうる。
+        run_row3 = QHBoxLayout()
+        run_col.addLayout(run_row3)
+        self.cancel_button = QPushButton("✕  キャンセル")
+        self.cancel_button.setFixedHeight(38)
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.clicked.connect(self._on_cancel)
+        run_row3.addWidget(self.cancel_button)
+        run_row3.addStretch(1)
 
         self.progress = QProgressBar()
         self.progress.setFixedHeight(6)
         self.progress.setTextVisible(False)
         self._set_progress_running(False)
         run_body.addWidget(self.progress)
+
+        # 進捗バーの下にフェーズ名と進捗率(%)を表示する（2026-08-30、残り時間の
+        # 目安を廃止し置き換え）。ログに流れる「レベル1/2分類」等のフェーズ名＋
+        # 「done=N/M」（Batches API使用時）または「N/Mバッチ完了」（不使用時）を
+        # リアルタイムに解析して算出する（_update_progress_from_log参照）。
+        # フェーズが切り替わったらリセットする。個別/グループリトライで母数が
+        # 変わった場合はその時点の母数で%を出し直すため、進捗が後退することもある。
+        self.progress_label = _muted_label("")
+        run_body.addWidget(self.progress_label)
+        self._progress_phase: str | None = None
 
         # ログ
         log_body = _section_card(layout, "ログ")
@@ -755,8 +877,7 @@ class MainPage(QWidget):
         self.current_func = func
         self.option_getters = builder(self, self.options_layout) or {}
 
-        # 「少量実行して見積」はai-classifyだけ意味があるため出し分ける
-        self.estimate_button.setVisible(key == "ai-classify")
+        self._reset_progress()
 
     # ---------- 実行 ----------
 
@@ -768,10 +889,10 @@ class MainPage(QWidget):
             return
 
         key = self.current_key
+        token = AI_SETTINGS.api_key.strip()
         if key == "ai-classify":
             # Batches APIの有無によらず、本物のAnthropic APIキーが常に必須
             # （2026-08-27、プロキシ経由の呼び出しを廃止したため）。
-            token = AI_SETTINGS.api_key.strip()
             if not token and not os.environ.get("ANTHROPIC_API_KEY"):
                 QMessageBox.warning(
                     self, APP_TITLE, "ヘッダーの⚙設定でANTHROPIC_API_KEYを入力してください。"
@@ -779,14 +900,62 @@ class MainPage(QWidget):
                 return
         elif key == "analyze":
             with_ai_commentary = self.option_getters["with_ai_commentary"]()
-            token = AI_SETTINGS.api_key.strip()
             if with_ai_commentary and not token and not os.environ.get("ANTHROPIC_API_KEY"):
                 QMessageBox.warning(
                     self, APP_TITLE, "AIコメンタリー使用時はヘッダーの⚙設定でANTHROPIC_API_KEYを入力してください。"
                 )
                 return
 
+        deduped_input_csv = self.input_csv
+        if key == "ai-classify":
+            # 2026-08-30、実行ボタン押下時に前段の重複排除（cmd_dedup、"周辺クエリの
+            # 重複排除"＝近傍窓内の同一query除去）を先に同期実行し、その出力に対して
+            # query列だけを見たユニーク数（"全体を見てのクエリの重複排除"＝AIに送る
+            # 対象を決めるための重複排除。CSVの行自体はここでは削除しない）を数えて
+            # から見積りモーダルを出す方式に変更した（project memory参照）。
+            # cmd_dedupの出力CSVは以降の実行でもそのまま入力として使い、
+            # _run_in_thread側では二重にdedupしない。
+            try:
+                dedup_args = _Args()
+                dedup_args.input_csv = self.input_csv
+                dedup_args.columns_only = False
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                deduped_input_csv = cli_main.cmd_dedup(dedup_args)
+            except Exception as e:  # noqa: BLE001 GUIなので落とさず表示する
+                QApplication.restoreOverrideCursor()
+                QMessageBox.critical(self, APP_TITLE, f"重複排除に失敗しました:\n{e}")
+                return
+
+            option_getters = self.option_getters
+            filter_column = option_getters["filter_column"]()
+            filter_op = option_getters["filter_op"]()
+            filter_value = option_getters["filter_value"]()
+            try:
+                unique_queries = _load_unique_queries_for_estimate(
+                    deduped_input_csv, filter_column, filter_op, filter_value
+                )
+            except Exception as e:  # noqa: BLE001 GUIなので落とさず表示する
+                QApplication.restoreOverrideCursor()
+                QMessageBox.critical(self, APP_TITLE, f"見積り計算に失敗しました:\n{e}")
+                return
+
+            batch_api = option_getters["batch_api"]()
+            batch_size = AI_SETTINGS.batch_size if batch_api else AI_SETTINGS.sync_batch_size
+            # モデルのバージョン自動解決（project memory参照）。見積り表示用に
+            # ここで一度だけ呼ぶ（軽いAPI呼び出し。失敗時はresolve_model内で
+            # フォールバックするため例外は出ない）。
+            model = classification_common_lib.resolve_model("haiku", api_key=token or None)
+            QApplication.restoreOverrideCursor()
+
+            proceed = self._show_estimate_dialog(
+                unique_count=len(unique_queries), batch_size=batch_size, batch_api=batch_api, model=model,
+            )
+            if not proceed:
+                return
+
         args = self._build_args(key, self.option_getters)
+        if key == "ai-classify":
+            args.input_csv = deduped_input_csv
 
         # main.pyのcmd_*関数はlib/output_utils.make_output_path()経由で出力先を決めており、
         # make_output_path()は呼び出し時点でoutput_utils_lib.OUTPUT_DIRを参照する。
@@ -794,24 +963,52 @@ class MainPage(QWidget):
         # 一切変更せずに出力先を切り替えられる。
         output_utils_lib.OUTPUT_DIR = self.output_dir
 
+        # キャンセルボタン用のイベント。ai-classifyのみ意味を持つ（main.py
+        # cmd_ai_classifyがargs.cancel_eventをgetattrで拾い、classify_unique()の
+        # フェーズ境目・ポーリングループで確認する）が、他ツールでも属性自体は
+        # 常にセットしておく（無ければ単に参照されないだけ）。
+        self._cancel_event = threading.Event()
+        args.cancel_event = self._cancel_event
+
         self._before_run_files = self._snapshot_output_dir()
+        self._reset_progress()
         self._set_running(True)
 
         thread = threading.Thread(target=self._run_in_thread, args=(key, self.current_func, args), daemon=True)
         thread.start()
+
+    def _show_estimate_dialog(self, unique_count: int, batch_size: int, batch_api: bool, model: str) -> bool:
+        """見積りモーダルを表示し、「実行」が押されればTrueを返す
+        （2026-08-30新設。project memory参照: 実APIサンプル実行を廃止し、
+        ユニークquery数とbatch_size・batch_api有無から実績ベースの分析式で
+        計算するだけの無料・即時見積りに変更）。"""
+        input_tokens, output_tokens = estimate_tokens(unique_count, batch_size)
+        cost_usd = estimate_cost(input_tokens, output_tokens, "haiku", batch_api)
+        cost_jpy = cost_usd * USD_TO_JPY
+        dialog = EstimateDialog(
+            self, unique_count=unique_count, batch_size=batch_size, batch_api=batch_api,
+            model=model, input_tokens=input_tokens, output_tokens=output_tokens,
+            cost_usd=cost_usd, cost_jpy=cost_jpy,
+        )
+        return dialog.exec() == QDialog.DialogCode.Accepted
 
     def _build_args(self, key: str, option_getters: dict) -> _Args:
         args = _Args()
         args.input_csv = self.input_csv
 
         if key == "ai-classify":
-            args.model = AI_SETTINGS.ai_classify_model
             args.filter_column = option_getters["filter_column"]()
             args.filter_op = option_getters["filter_op"]()
             args.filter_value = option_getters["filter_value"]()
-            args.batch_size = option_getters["batch_size"]()
+            # cmd_ai_classify側でargs.batch_api次第でどちらを使うか選ぶため
+            # （main.pyの--batch-size/--sync-batch-size分離と同じ。project
+            # memory参照）、option_getters["batch_size"]（モード込みで解決済みの
+            # 値）ではなく、AI_SETTINGSの両方の値をそのまま渡す。
+            args.batch_size = AI_SETTINGS.batch_size
+            args.sync_batch_size = AI_SETTINGS.sync_batch_size
             args.workers = option_getters["workers"]()
             args.batch_api = option_getters["batch_api"]()
+            args.with_report = option_getters["with_report"]()
             # 「最大バッチ数」は「少量実行して見積」ボタンで代替できるため
             # GUIからは常にNone（全件対象）。
             args.max_batches = None
@@ -826,125 +1023,10 @@ class MainPage(QWidget):
             # 2026-08-27、「上位クエリ件数」の選択UIを廃止し50件に固定。
             args.top_n = 50
             args.with_ai_commentary = option_getters["with_ai_commentary"]()
-            args.model = AI_SETTINGS.analyze_model
             token = AI_SETTINGS.api_key.strip()
             args.token = token or None
 
         return args
-
-    # ---------- 少量実行して見積 ----------
-
-    def _on_estimate(self) -> None:
-        if self.running:
-            return
-        if not self.input_csv:
-            QMessageBox.warning(self, APP_TITLE, "入力CSVを選択してください。")
-            return
-        key = self.current_key
-        if key != "ai-classify":
-            return
-
-        option_getters = self.option_getters
-        model_key = AI_SETTINGS.ai_classify_model
-        batch_size = option_getters["batch_size"]()
-        workers = option_getters["workers"]()
-        batch_api = option_getters["batch_api"]()
-        filter_column = option_getters["filter_column"]()
-        filter_op = option_getters["filter_op"]()
-        filter_value = option_getters["filter_value"]()
-        token = AI_SETTINGS.api_key.strip()
-
-        if not token and not os.environ.get("ANTHROPIC_API_KEY"):
-            QMessageBox.warning(
-                self, APP_TITLE, "ヘッダーの⚙設定でANTHROPIC_API_KEYを入力してください。"
-            )
-            return
-
-        self._set_running(True)
-        thread = threading.Thread(
-            target=self._run_estimate_in_thread,
-            args=(
-                self.input_csv, model_key, batch_size, workers, batch_api,
-                filter_column, filter_op, filter_value, token,
-            ),
-            daemon=True,
-        )
-        thread.start()
-
-    def _run_estimate_in_thread(
-        self, input_csv: str, model_key: str, batch_size: int, workers: int, batch_api: bool,
-        filter_column: str | None, filter_op: str | None, filter_value: str | None, token: str | None,
-    ) -> None:
-        """実際に1バッチだけ分類APIを呼び、そのin/outトークン数を全体のバッチ数分
-        単純に増加させてコストを見積もる。1バッチは実データで実際に実行するため、
-        本物のAPI呼び出しが発生する（＝わずかに課金される）。"""
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        writer = QueueWriter(self.signals)
-        sys.stdout = writer
-        sys.stderr = writer
-        error = None
-        try:
-            unique_queries = _load_unique_queries_for_estimate(input_csv, filter_column, filter_op, filter_value)
-            total_unique = len(unique_queries)
-            if total_unique == 0:
-                print("見積り対象のqueryが0件でした（絞り込み条件を確認してください）。")
-            else:
-                sample = unique_queries[:batch_size]
-                print(
-                    f"見積り: 対象ユニークquery数 {total_unique}件のうち先頭 {len(sample)}件を"
-                    "1バッチとして実際に実行します..."
-                )
-                level12_model, level3_model = classification_common_lib.MODEL_PRESETS[model_key]
-
-                t0 = time.time()
-                if batch_api:
-                    from lib import ai_classify_batch as ai_classify_batch_lib
-
-                    _, sample_in, sample_out, _failed_ranges, _failed_queries = ai_classify_batch_lib.classify_unique(
-                        sample, len(sample), level12_model, level3_model, api_key=token,
-                    )
-                else:
-                    from lib import ai_classify as ai_classify_lib
-
-                    mapping, sample_in, sample_out, _failed_queries = ai_classify_lib.classify_unique(
-                        sample, len(sample), workers, level12_model, level3_model, api_key=token,
-                    )
-                elapsed = time.time() - t0
-                total_batches = max(1, math.ceil(total_unique / batch_size))
-                est_in = sample_in * total_batches
-                est_out = sample_out * total_batches
-                # classify_unique()はフェーズ1(level12_model)・フェーズ2(level3_model)
-                # 合算のトークン数しか返さないため、2モデルが異なる場合（haiku+sonnet）は
-                # 単価を正確に按分できない。その場合は2モデルの単価の単純平均で近似し、
-                # その旨を明記する（level12_model==level3_modelなら通常通り正確）。
-                if level12_model == level3_model:
-                    price_in, price_out = PRICING_PER_MTOK.get(level12_model, (0.0, 0.0))
-                    cost_note = ""
-                else:
-                    p12 = PRICING_PER_MTOK.get(level12_model, (0.0, 0.0))
-                    p3 = PRICING_PER_MTOK.get(level3_model, (0.0, 0.0))
-                    price_in, price_out = (p12[0] + p3[0]) / 2, (p12[1] + p3[1]) / 2
-                    cost_note = f"（{level12_model}と{level3_model}の単価の単純平均で近似した概算値です）"
-                discount = BATCH_API_DISCOUNT if batch_api else 1.0
-                est_cost = (est_in / 1_000_000 * price_in + est_out / 1_000_000 * price_out) * discount
-
-                print("")
-                print("=== 見積り結果 ===")
-                print(f"モデル: {classification_common_lib.model_preset_label(model_key)}")
-                print(f"Batches API使用: {'あり（50%割引適用）' if batch_api else 'なし（同期・即時）'}")
-                print(f"バッチサイズ: {batch_size} / 対象ユニークquery数: {total_unique} / 想定バッチ数: {total_batches}")
-                print(f"サンプル1バッチの所要時間: {elapsed:.1f}秒")
-                print(f"サンプル1バッチ input/outputトークン: {sample_in} / {sample_out}")
-                print(f"全体推定 input/outputトークン: {est_in} / {est_out}")
-                print(
-                    f"全体推定コスト: ${est_cost:.2f}{cost_note}"
-                    "（1バッチの結果を単純に比例させた見積りです。実際のコストと異なる場合があります）"
-                )
-        except Exception as e:  # noqa: BLE001 GUIなので落とさず表示する
-            error = e
-        finally:
-            sys.stdout, sys.stderr = old_stdout, old_stderr
-        self.signals.done.emit(error)
 
     def _run_in_thread(self, key: str, func, args) -> None:
         old_stdout, old_stderr = sys.stdout, sys.stderr
@@ -954,18 +1036,11 @@ class MainPage(QWidget):
         error = None
         try:
             if key == "ai-classify":
-                # 2026-08-27、AIによるクエリの分類の前段として、クエリの
-                # クレンジング（重複排除）を自動実行する（旧・プレビュー欄の
-                # 専用ボタンを廃止した代わり）。cmd_dedupの出力（入力行数/
-                # 除去件数/出力先）がそのままログに流れるので、何が起きたかは
-                # ログを見れば分かる。dedup後のCSVをai-classifyの実際の入力にする
-                # （output_utils.pyが元々想定していた「dedupの出力をclassifyに
-                # 渡す」パイプラインを自動化したもの）。
-                print("=== クエリのクレンジング（重複排除）を自動実行します ===")
-                dedup_args = _Args()
-                dedup_args.input_csv = args.input_csv
-                dedup_args.columns_only = False
-                args.input_csv = cli_main.cmd_dedup(dedup_args)
+                # 2026-08-30、クエリのクレンジング（重複排除、cmd_dedup）は
+                # _on_run側で見積りモーダルを出す前に既に実行済み（project memory
+                # 参照）。ここで再実行すると二重にdedupしてしまうため呼ばない。
+                # args.input_csvは既にcmd_dedupの出力パスに差し替わっている。
+                print(f"=== クエリのクレンジング（重複排除）済みCSVを使用します: {args.input_csv} ===")
                 print("=== AIによるクエリの分類を実行します ===")
             func(args)
         except Exception as e:  # noqa: BLE001 GUIなので落とさず表示する
@@ -980,24 +1055,79 @@ class MainPage(QWidget):
         self.log_text.setTextCursor(cursor)
         self.log_text.insertPlainText(text)
         self.log_text.ensureCursorVisible()
+        self._update_progress_from_log(text)
 
     def _on_run_finished(self, error: Exception | None) -> None:
         self._set_running(False)
+        self._cancel_event = None
+        if isinstance(error, classification_common_lib.OperationCancelled):
+            self._append_log("\nキャンセルしました。\n")
+            return
         if error is not None:
             self._append_log(f"\nエラー: {error}\n")
             QMessageBox.critical(self, APP_TITLE, f"実行中にエラーが発生しました:\n{error}")
             return
         self._refresh_output_preview(self._before_run_files)
+        self._notify_completion()
 
     def _set_running(self, running: bool) -> None:
         self.running = running
         self.run_button.setEnabled(not running)
-        self.estimate_button.setEnabled(not running)
+        self.cancel_button.setEnabled(running)
         self._set_progress_running(running)
 
+    # ---------- キャンセル ----------
+
+    def _on_cancel(self) -> None:
+        if not self.running or self._cancel_event is None:
+            return
+        self._cancel_event.set()
+        # 二重クリックでの誤解を防ぐため、リクエスト後はボタン自体を無効化する
+        # （実行中のAPI呼び出し完了・ジョブポーリングの次のチェックまでは実際には
+        # 止まらない。project memory・classification_common.OperationCancelled参照）。
+        self.cancel_button.setEnabled(False)
+        self._append_log("\nキャンセルをリクエストしました。実行中のAPI呼び出しの完了を待って停止します…\n")
+
+    # ---------- 進捗（フェーズ名＋%） ----------
+
+    def _reset_progress(self) -> None:
+        self._progress_phase = None
+        self.progress_label.setText("")
+        # ツール切り替え時（_on_select）にもここを通るため、レンジ自体も
+        # current_keyに合わせて出し直す（_set_progress_running参照。ai-classify
+        # なら確定的0-100、analyzeなら不定進捗のrunning=false状態と同じ扱い）。
+        self._set_progress_running(False)
+
+    def _update_progress_from_log(self, text: str) -> None:
+        """ログに流れる進捗行（_PROGRESS_JOB_RE/_PROGRESS_SYNC_RE/_PROGRESS_RETRY_RE
+        参照）をリアルタイムに解析し、フェーズ名と進捗率(%)を進捗バーに反映する
+        （2026-08-30、残り時間の目安から置き換え。project memory参照）。
+        フェーズが切り替わったら（レベル1/2分類→レベル3分類→カテゴリ再判定、など）
+        表示をリセットする。個別/グループリトライで母数（total）が変わった場合は
+        その時点の母数で%を出し直すため、進捗が後退することもある（意図した挙動）。"""
+        if self.current_key != "ai-classify":
+            return
+        m = _PROGRESS_JOB_RE.search(text) or _PROGRESS_SYNC_RE.search(text) or _PROGRESS_RETRY_RE.search(text)
+        if not m:
+            return
+        label, done, total = m.group(1).strip(), int(m.group(2)), int(m.group(3))
+        if label != self._progress_phase:
+            self._progress_phase = label
+        if total <= 0:
+            return
+        percent = min(100, round(done / total * 100))
+        self.progress.setValue(percent)
+        self.progress_label.setText(f"{label}: {percent}%（{done}/{total}）")
+
     def _set_progress_running(self, running: bool) -> None:
-        # Qtの不定進捗（busy）表現: min=max=0にすると内部的にアニメーションする。
-        if running:
+        # ai-classifyは実際のバッチ完了状況から%を出せるため確定的な進捗バーに
+        # する（2026-08-30、_update_progress_from_log参照）。analyzeにはこの
+        # 種の進捗ログが無いため、従来通り不定進捗（busy）表現のままにする
+        # （Qtではmin=max=0にすると内部的にアニメーションする）。
+        if getattr(self, "current_key", None) == "ai-classify":
+            self.progress.setRange(0, 100)
+            self.progress.setValue(0)
+        elif running:
             self.progress.setRange(0, 0)
         else:
             self.progress.setRange(0, 1)
@@ -1036,24 +1166,97 @@ class MainPage(QWidget):
             self.output_preview_placeholder.show()
         # 新規CSVが0件（見積りのみ実行した等）の場合は、直前のプレビューをそのまま残す。
 
+    # ---------- 完了通知 ----------
 
-def _analyze_model_display_label(model_key: str) -> str:
-    """analyzeのAIコメンタリー用モデル選択コンボボックスの表示テキスト
-    （_model_preset_display_labelのMODEL_CHOICES単体版）。"""
-    return f"{model_key} ({classification_common_lib.MODEL_CHOICES[model_key]})"
+    def _notify_completion(self) -> None:
+        """処理完了時（レポート生成・AI分類完了）に、モーダルダイアログ＋
+        macOS通知センター経由の通知を出す（2026-08-30新設。project memory参照。
+        Dockアイコンへのバッジ付与はPySide6標準機能では実現できずPyObjC等の
+        追加依存が必要になるため見送り、通知センター経由のみ実装した）。"""
+        label = {"ai-classify": "AIによるクエリの分類", "analyze": "傾向分析"}.get(self.current_key, self.current_key)
+        message = f"{label}が完了しました。"
+
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            icon = QApplication.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
+            if self._tray_icon is None:
+                self._tray_icon = QSystemTrayIcon(icon, self)
+            else:
+                self._tray_icon.setIcon(icon)
+            self._tray_icon.show()
+            self._tray_icon.showMessage(APP_TITLE, message, icon, 5000)
+
+        QMessageBox.information(self, APP_TITLE, message)
+
+
+class EstimateDialog(QDialog):
+    """実行ボタン押下時に自動表示する見積りモーダル（2026-08-30新設。project
+    memory参照）。実APIサンプル実行は行わず、ユニークquery数・batch_size・
+    batch_api有無から分析式で計算した値を表示するだけなので無料・即時。
+    「実行」を押すとQDialog.Accepted、「キャンセル」を押すとRejectedを返す。"""
+
+    def __init__(
+        self, parent: QWidget | None, *, unique_count: int, batch_size: int, batch_api: bool, model: str,
+        input_tokens: int, output_tokens: int, cost_usd: float, cost_jpy: float,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("見積り")
+        self.setFixedSize(420, 320)
+
+        layout = QVBoxLayout(self)
+        card = QFrame()
+        card.setObjectName("card")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(16, 16, 16, 16)
+        layout.addWidget(card)
+
+        batch_api_text = "使う（50%割引適用）" if batch_api else "使わない（同期・即時）"
+        lines = [
+            f"ユニークquery数: {unique_count:,}件（重複排除後にAIへ送信する件数）",
+            f"モデル: {model}",
+            f"Batches API使用: {batch_api_text}",
+            f"バッチサイズ: {batch_size:,}",
+            "",
+            f"推定input tokens: {input_tokens:,}",
+            f"推定output tokens: {output_tokens:,}",
+            "",
+            f"推定コスト: ${cost_usd:,.2f}（約{cost_jpy:,.0f}円）",
+        ]
+        card_layout.addWidget(_muted_label("\n".join(lines), wrap=True))
+        card_layout.addWidget(
+            _muted_label(
+                "（実績ベースの分析式による概算です。実際のコストと異なる場合があります。"
+                "実APIは呼び出していません）",
+                wrap=True,
+            )
+        )
+
+        card_layout.addStretch(1)
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        cancel_button = QPushButton("キャンセル")
+        cancel_button.clicked.connect(self.reject)
+        button_row.addWidget(cancel_button)
+        run_button = QPushButton("▶  実行")
+        run_button.setObjectName("runButton")
+        run_button.clicked.connect(self.accept)
+        button_row.addWidget(run_button)
+        card_layout.addLayout(button_row)
 
 
 class SettingsDialog(QDialog):
-    """ヘッダー右端の⚙ボタンから開く、AI関連設定の一元ダイアログ。APIキーに加え、
-    ai-classify/analyzeそれぞれのモデル選択もここに集約する（2026-08-27、各ツールの
-    実行設定欄から移動）。ここで編集する内容はAI_SETTINGSそのものなので、閉じても
-    即座に各ツールの実行に反映される（実行時にここを読むだけで、各ツールの
-    オプション欄には表示しない）。"""
+    """ヘッダー右端の⚙ボタンから開く、AI関連設定の一元ダイアログ。ここで編集する
+    内容はAI_SETTINGSそのものなので、閉じても即座に各ツールの実行に反映される
+    （実行時にここを読むだけで、各ツールのオプション欄には表示しない）。
+    2026-08-27、モデル選択（ai-classify/analyzeそれぞれのコンボボックス）は
+    ai-classify=Haiku固定・analyze=Sonnet固定にしたため廃止し、APIキー入力のみに
+    縮小した（固定値はclassification_common.CLASSIFY_MODEL/ANALYZE_MODEL）。
+    2026-08-29、バッチサイズ・並行数もここに移動した（project memory参照。
+    ai-classifyの実行設定欄からは廃止し、ここのAI_SETTINGSを読むだけにした）。"""
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("AI設定")
-        self.setFixedSize(420, 300)
+        self.setFixedSize(420, 400)
 
         layout = QVBoxLayout(self)
         card = QFrame()
@@ -1063,8 +1266,10 @@ class SettingsDialog(QDialog):
         layout.addWidget(card)
 
         info = _muted_label(
-            "AIのAPIキー・使用モデルをここで一括管理します。\n"
-            "ai-classify / analyze のBatches API・AIコメンタリー使用時は、この設定を使用します。",
+            "AIのAPIキーをここで一括管理します。\n"
+            "ai-classify / analyze のBatches API・AIコメンタリー使用時は、この設定を使用します。\n"
+            "（モデルはai-classify: Haikuファミリー固定、analyze: Sonnetファミリー固定。"
+            "バージョンは実行のたびにModels APIで最新版を自動選択）",
             wrap=True,
         )
         card_layout.addWidget(info)
@@ -1081,29 +1286,53 @@ class SettingsDialog(QDialog):
         self.key_entry.setPlaceholderText("sk-ant-...")
         key_row.addWidget(self.key_entry, stretch=1)
 
-        ai_classify_row = QHBoxLayout()
-        card_layout.addLayout(ai_classify_row)
-        ai_classify_row.addWidget(_muted_label("AI分類のモデル"))
-        self.ai_classify_model_combo = QComboBox()
-        for preset in classification_common_lib.MODEL_PRESETS:
-            self.ai_classify_model_combo.addItem(_model_preset_display_label(preset), preset)
-        self.ai_classify_model_combo.setCurrentIndex(
-            self.ai_classify_model_combo.findData(AI_SETTINGS.ai_classify_model)
-        )
-        _bound_combo_width(self.ai_classify_model_combo, min_chars=14)
-        ai_classify_row.addWidget(self.ai_classify_model_combo, stretch=1)
+        # 2026-08-30、ai-classifyの実行設定欄にあった「Batches API使用」トグルを
+        # ここに移動した（project memory参照。コストへの影響が大きい割に毎回
+        # 意識する設定ではなく、batch_size等と同じ「裏方の設定」寄りのため）。
+        batch_api_row = _option_row(card_layout, "Batches API使用")
+        self.batch_api_combo = QComboBox()
+        self.batch_api_combo.addItems(["使う", "使わない"])
+        self.batch_api_combo.setCurrentText("使う" if AI_SETTINGS.batch_api else "使わない")
+        _bound_combo_width(self.batch_api_combo, min_chars=6)
+        batch_api_row.addWidget(self.batch_api_combo)
+        batch_api_row.addStretch(1)
 
-        analyze_row = QHBoxLayout()
-        card_layout.addLayout(analyze_row)
-        analyze_row.addWidget(_muted_label("レポートのAIコメンタリーのモデル"))
-        self.analyze_model_combo = QComboBox()
-        for model_key in classification_common_lib.MODEL_CHOICES:
-            self.analyze_model_combo.addItem(_analyze_model_display_label(model_key), model_key)
-        self.analyze_model_combo.setCurrentIndex(
-            self.analyze_model_combo.findData(AI_SETTINGS.analyze_model)
+        # 2026-08-30、Batches API使用時/不使用時でバッチサイズの設定を分離した
+        # （project memory参照: 非同期ジョブ登録はmax_tokensを動的計算するため
+        # 300超を許容できるが、不使用時は全呼び出しが同期のため非ストリーミング
+        # SDKのmax_tokensガード対象で300前後が実質上限）。
+        batch_size_row = _option_row(card_layout, "バッチサイズ（Batches API使用時）")
+        self.batch_size_spin = QSpinBox()
+        # 2026-08-29、上限を100→1000に拡大（デフォルト300に対応するため。
+        # project memory参照）。
+        self.batch_size_spin.setRange(1, 1000)
+        self.batch_size_spin.setValue(AI_SETTINGS.batch_size)
+        batch_size_row.addWidget(self.batch_size_spin)
+        batch_size_row.addStretch(1)
+
+        sync_batch_size_row = _option_row(card_layout, "バッチサイズ（Batches API不使用時）")
+        self.sync_batch_size_spin = QSpinBox()
+        # 上限は320（max_tokens=15800固定・1件あたり最大約48.75トークン必要という
+        # 実測ベースの見積りから逆算した安全圏。project memory参照）。これを超えると
+        # 非ストリーミングSDKのmax_tokens>約16,000ガードに引っかかるリスクが増す。
+        self.sync_batch_size_spin.setRange(1, 320)
+        self.sync_batch_size_spin.setValue(AI_SETTINGS.sync_batch_size)
+        sync_batch_size_row.addWidget(self.sync_batch_size_spin)
+        sync_batch_size_row.addStretch(1)
+
+        workers_row = _option_row(card_layout, "並行数")
+        self.workers_spin = QSpinBox()
+        self.workers_spin.setRange(1, 32)
+        self.workers_spin.setValue(AI_SETTINGS.workers)
+        workers_row.addWidget(self.workers_spin)
+        workers_row.addStretch(1)
+        card_layout.addWidget(
+            _muted_label(
+                "（並行数はBatches API不使用時はチャンク並行処理数、使用時は"
+                "個別リトライの並行数として使う）",
+                wrap=True,
+            )
         )
-        _bound_combo_width(self.analyze_model_combo, min_chars=14)
-        analyze_row.addWidget(self.analyze_model_combo, stretch=1)
 
         card_layout.addStretch(1)
         button_row = QHBoxLayout()
@@ -1117,8 +1346,10 @@ class SettingsDialog(QDialog):
 
     def _save_and_close(self) -> None:
         AI_SETTINGS.api_key = self.key_entry.text()
-        AI_SETTINGS.ai_classify_model = self.ai_classify_model_combo.currentData()
-        AI_SETTINGS.analyze_model = self.analyze_model_combo.currentData()
+        AI_SETTINGS.batch_api = self.batch_api_combo.currentText() == "使う"
+        AI_SETTINGS.batch_size = self.batch_size_spin.value()
+        AI_SETTINGS.sync_batch_size = self.sync_batch_size_spin.value()
+        AI_SETTINGS.workers = self.workers_spin.value()
         QMessageBox.information(self, "AI設定", "保存しました。")
         self.accept()
 

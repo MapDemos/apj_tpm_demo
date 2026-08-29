@@ -22,8 +22,12 @@ main.py analyze サブコマンドが使うクエリ傾向分析ロジック（�
      集計＝合計が100%を超えうる。旧仕様ではbrand_poiのみが対象だったが、
      unique_poi/categoryも同様に集計対象に拡大）
   J. Address Structure Breakdown（addressのai_classification_2内訳、件数とパーセント）
-     H/I/JはCSVにai_classification_2/_3列がある場合のみ表示する（無い入力でも
-     analyzeサブコマンド自体は動く。3階層分類スキーマ導入前のファイル用の後方互換）
+  K. Brand Breakdown（ai_classification_2がbrand_poiの行を対象に、
+     ai_classification_2_brand（main.py cmd_ai_classifyが出力するブランド名列）別の
+     内訳を件数とパーセントで表示。2026-08-29新設）
+     H/I/JはCSVにai_classification_2/_3列がある場合のみ、Kはai_classification_2_brand
+     列がある場合のみ表示する（無い入力でもanalyzeサブコマンド自体は動く。
+     3階層分類スキーマ導入前のファイル用の後方互換）
 
 CSV出力・HTMLレポート生成の関数を提供する。ファイルパスの決定（output_utils）や
 CLI引数の処理は main.py 側が担当し、このモジュールは集計・整形ロジックに専念する。
@@ -273,6 +277,29 @@ def compute_poi_taxonomy_breakdown(rows: list[dict]) -> dict[str, dict] | None:
         )
         result[subtype] = {"total": total, "items": items}
     return result
+
+
+def compute_brand_breakdown(rows: list[dict]) -> dict | None:
+    """ai_classification_2がbrand_poiの行を対象に、ai_classification_2_brand
+    （main.py cmd_ai_classifyが出力するブランド名列。BRAND_CATEGORY_MAPのキー）
+    別の件数・brand_poi総数に対する割合を、件数の多い順で返す。空文字
+    （個別リトライでも分類に失敗しフォールバックした行等）は集計から除外する。
+    ai_classification_2_brand列が入力に無い場合はNone（セクション非表示の合図。
+    2026-08-25以前に生成されたclassified CSVにはこの列自体が無い）。2026-08-29新設。"""
+    if not rows or "ai_classification_2_brand" not in rows[0]:
+        return None
+
+    brand_poi_rows = [r for r in rows if r.get("ai_classification_2") == "brand_poi"]
+    total = len(brand_poi_rows)
+    counts = Counter(r.get("ai_classification_2_brand", "") for r in brand_poi_rows if r.get("ai_classification_2_brand"))
+    items = sorted(
+        (
+            {"label": brand, "count": count, "pct": (count / total * 100) if total else 0.0}
+            for brand, count in counts.items()
+        ),
+        key=lambda item: -item["count"],
+    )
+    return {"total": total, "items": items}
 
 
 def compute_address_structure_breakdown(rows: list[dict]) -> dict | None:
@@ -754,44 +781,85 @@ def render_daily_category_section(daily: dict[str, dict[str, int]], order: list[
     </section>"""
 
 
+MAX_BREAKDOWN_COLUMNS = 4
+
+
+def _split_into_columns(items: list, max_cols: int = MAX_BREAKDOWN_COLUMNS) -> list[list]:
+    """itemsを最大max_cols個の、できるだけ均等な（差が最大1件の）連続した塊に
+    分割する。件数の多い方から詰めるitems順を前提に、先頭の列から順に多く
+    割り当てる（例: 5件を4列なら[2,1,1,1]）。items自体は呼び出し元で既に
+    件数降順ソート済みの想定なので、列ごとに上位グループがまとまる
+    （2026-08-29新設。レポートの縦長リストが見づらいとの指摘への対応。
+    project memory参照）。空リストなら[[]]を返す（呼び出し元の"データ無し"
+    表示をそのまま使えるように）。"""
+    if not items:
+        return [[]]
+    cols = min(max_cols, len(items))
+    base, extra = divmod(len(items), cols)
+    chunks = []
+    idx = 0
+    for c in range(cols):
+        size = base + (1 if c < extra else 0)
+        chunks.append(items[idx:idx + size])
+        idx += size
+    return chunks
+
+
 def _render_breakdown_block(heading_html: str, subtitle: str, breakdown: dict) -> str:
     """compute_classification_breakdown/compute_poi_taxonomy_breakdown/
-    compute_address_structure_breakdownの共通レンダラー。件数とパーセントを
-    横棒グラフ＋データテーブルで見せる（render_column_usage_sectionと同じ見た目）。
-    見出し（h2 or h3タグ込みのHTML片）と<section>タグの有無は呼び出し側の
-    責務とし、ここではブロック本体だけを組み立てる。単独で1セクション分
-    （H/Jのように<section>で包んで使う）にも、複数ブロックを1つの<section>に
-    まとめる（Iのようにサブタイプごとにh3見出しで並べる）にも流用できる。"""
+    compute_address_structure_breakdown/compute_brand_breakdownの共通レンダラー。
+    件数とパーセントを横棒グラフ＋データテーブルで見せる
+    （render_column_usage_sectionと同じ見た目）。見出し（h2 or h3タグ込みの
+    HTML片）と<section>タグの有無は呼び出し側の責務とし、ここではブロック本体
+    だけを組み立てる。単独で1セクション分（H/Jのように<section>で包んで使う）
+    にも、複数ブロックを1つの<section>にまとめる（Iのようにサブタイプごとに
+    h3見出しで並べる）にも流用できる。
+
+    2026-08-29、項目数が多いと縦に長くなり見づらいとの指摘のため、棒グラフ・
+    データテーブルの両方を最大MAX_BREAKDOWN_COLUMNS列の段組みにした
+    （_split_into_columns参照。項目数が列数未満ならその数の列になる）。"""
     total = breakdown["total"]
     items = breakdown["items"]
+    columns = _split_into_columns(items)
+    num_cols = len(columns) if items else 1
 
-    rows_html = "".join(
-        f"""<div class="hbar-row">
-              <div class="hbar-label">{esc(item["label"])}</div>
-              <div class="hbar-track"><div class="hbar-fill" style="width:{item["pct"]:.1f}%"></div></div>
-              <div class="hbar-value">{item["count"]} ({item["pct"]:.1f}%)</div>
-            </div>"""
-        for item in items
-    )
+    def render_rows(chunk: list) -> str:
+        return "".join(
+            f"""<div class="hbar-row">
+                  <div class="hbar-label">{esc(item["label"])}</div>
+                  <div class="hbar-track"><div class="hbar-fill" style="width:{item["pct"]:.1f}%"></div></div>
+                  <div class="hbar-value">{item["count"]} ({item["pct"]:.1f}%)</div>
+                </div>"""
+            for item in chunk
+        )
 
-    table_rows = "".join(
-        f"<tr><td>{esc(item['label'])}</td><td class='num'>{item['count']}</td>"
-        f"<td class='num'>{total}</td><td class='num'>{item['pct']:.1f}%</td></tr>"
-        for item in items
+    def render_table_rows(chunk: list) -> str:
+        return "".join(
+            f"<tr><td>{esc(item['label'])}</td><td class='num'>{item['count']}</td>"
+            f"<td class='num'>{total}</td><td class='num'>{item['pct']:.1f}%</td></tr>"
+            for item in chunk
+        )
+
+    chart_columns_html = "".join(f'<div class="hbar-col">{render_rows(chunk)}</div>' for chunk in columns)
+    table_columns_html = "".join(
+        f"""<table class="data-table">
+              <thead><tr><th>label</th><th class="num">count</th><th class="num">total</th><th class="num">pct</th></tr></thead>
+              <tbody>{render_table_rows(chunk)}</tbody>
+            </table>"""
+        for chunk in columns
     )
 
     return f"""
       {heading_html}
       <p class="muted">{esc(subtitle)}</p>
-      <div class="hbar-chart">
-        {rows_html if items else '<p class="muted">No data available.</p>'}
+      <div class="hbar-chart hbar-chart-grid" style="--breakdown-cols:{num_cols}">
+        {chart_columns_html if items else '<p class="muted">No data available.</p>'}
       </div>
       <details class="card">
         <summary>Show data table</summary>
-        <table class="data-table">
-          <thead><tr><th>label</th><th class="num">count</th><th class="num">total</th><th class="num">pct</th></tr></thead>
-          <tbody>{table_rows}</tbody>
-        </table>
+        <div class="data-table-grid" style="--breakdown-cols:{num_cols}">
+          {table_columns_html if items else ''}
+        </div>
       </details>"""
 
 
@@ -996,6 +1064,7 @@ def render_html_report(
     classification_breakdown: dict | None = None,
     poi_taxonomy_breakdown: dict[str, dict] | None = None,
     address_structure_breakdown: dict | None = None,
+    brand_breakdown: dict | None = None,
 ) -> str:
     insights = ai_commentary.get("insights") if ai_commentary else None
 
@@ -1145,6 +1214,15 @@ def render_html_report(
   .hbar-value {{ width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }}
   .hbar-chart-scroll {{ max-height: 480px; overflow-y: auto; }}
 
+  /* 2026-08-29、H/I/J/K内訳セクションの棒グラフ・データテーブルを最大4列の
+     段組みにする（project memory参照。項目数が多いと縦に長くて見づらいとの
+     指摘への対応。列数は_split_into_columnsが決めた実際の列数をインライン
+     styleの--breakdown-colsで渡す）。 */
+  .hbar-chart-grid {{ display: grid; grid-template-columns: repeat(var(--breakdown-cols, 4), 1fr); gap: 4px 20px; align-items: start; }}
+  .hbar-col {{ display: flex; flex-direction: column; min-width: 0; }}
+  .data-table-grid {{ display: grid; grid-template-columns: repeat(var(--breakdown-cols, 4), 1fr); gap: 0 16px; margin-top: 12px; }}
+  .data-table-grid .data-table {{ margin-top: 0; }}
+
   .pie-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }}
   .pie-cell {{
     display: flex; flex-direction: column; align-items: center; gap: 8px;
@@ -1180,6 +1258,12 @@ def render_html_report(
       "(region/place/locality/neighborhood/address) as a count and share of the address total.",
       address_structure_breakdown,
   ) if address_structure_breakdown else ""}
+  {_render_breakdown_section(
+      "brand-breakdown", "K. Brand Breakdown",
+      "Rows classified as brand_poi only, broken down by the matched brand name "
+      "(ai_classification_2_brand) as a count and share of the brand_poi total.",
+      brand_breakdown,
+  ) if brand_breakdown else ""}
 </main>
 </body>
 </html>

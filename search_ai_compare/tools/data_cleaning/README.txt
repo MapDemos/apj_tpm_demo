@@ -97,7 +97,10 @@ ai-classify  [suffix: classified_analysis_result]
   失敗した場合は中身を1件ずつ個別に再試行し、それでも失敗した行だけ
   others にフォールバックする。
 
-  --model haiku|sonnet でモデルを切り替えられる（デフォルト haiku）。
+  モデルはHaikuファミリー固定（--model引数は廃止）。2026-08-30、固定モデルID
+  文字列でなく、実行のたびにModels APIで最新版を自動選択するように変更した
+  （classification_common.resolve_model()。ネットワークエラー等で解決できない
+  場合はCLASSIFY_MODEL/ANALYZE_MODELの固定値にフォールバックする）。
 
   --batch-api を付けると、通常のプロキシ経由リクエストの代わりに
   Anthropic Message Batches API（非同期・トークン単価50%引き、結果取得
@@ -119,11 +122,17 @@ ai-classify  [suffix: classified_analysis_result]
 
 実行例:
   python3 main.py ai-classify input.csv
-  python3 main.py ai-classify input.csv --model sonnet
-  python3 main.py ai-classify input.csv --batch-size 30 --workers 8
+  python3 main.py ai-classify input.csv --batch-size 1000 --workers 8
   python3 main.py ai-classify input.csv --max-batches 3   # 動作確認用に件数を絞る
-  python3 main.py ai-classify input.csv --batch-api
+  python3 main.py ai-classify input.csv --no-batch-api    # 同期・即時（--sync-batch-size使用）
   python3 main.py ai-classify input.csv --batch-api --token sk-ant-...
+
+  --batch-size（デフォルト1000）は--batch-api使用時、--sync-batch-size
+  （デフォルト300）は--no-batch-api時に、それぞれ1回のAPI呼び出しに含める
+  クエリ件数として使う（2026-08-30、設定を分離。project memory参照:
+  --batch-api使用時は非同期ジョブ登録のため非ストリーミングSDKのmax_tokens
+  ガード対象外で300超も指定可能、不使用時は全呼び出しが同期のため300前後が
+  実質上限）。
 
 
 --------------------------------------------------------------
@@ -194,7 +203,7 @@ analyze  [suffix: trend_daily_volume_result / trend_hourly_volume_result / trend
   query・カテゴリ名・都道府県名などデータ由来の値は元の言語のまま）。
 
   --with-ai-commentary を付けると、上記の集計結果をもとにLLM（本物のAnthropic API、
-  --model haiku|sonnet でモデル選択可・デフォルト sonnet）にクエリ傾向の
+  モデルはSonnet固定・--model引数は廃止）にクエリ傾向の
   コメンタリーを書かせ、レポートに追加する（HTML以外のCSV7種の内容・出力先は
   付けない場合と全く同じ。HTMLのsuffixだけ trend_report_ai になる）。
   2026-08-25、プロキシ経由の呼び出しを廃止し、本物の ANTHROPIC_API_KEY か
@@ -225,7 +234,6 @@ analyze  [suffix: trend_daily_volume_result / trend_hourly_volume_result / trend
   python3 main.py analyze classified.csv --top-n 30
   python3 main.py analyze classified.csv --with-ai-commentary
   python3 main.py analyze classified.csv --top-n 30 --with-ai-commentary
-  python3 main.py analyze classified.csv --with-ai-commentary --model haiku
   python3 main.py analyze classified.csv --with-ai-commentary --token sk-ant-...
 
 
@@ -267,19 +275,35 @@ GUI版（同僚への配布用 .app）
   出力先を切り替えている。
 
   AIのANTHROPIC_API_KEYは、ヘッダー右端の「⚙ 設定」ボタンから開くダイアログに
-  一元化されている（ai-classify/ai-retryの--batch-api、analyzeの
-  --with-ai-commentaryのいずれも、実行時にこの1箇所のキーを参照する。
-  非persistent、ディスクには保存しない）。バッチサイズ・並行数・Batches API
-  使用の有無は、従来通り各ツールの実行設定欄で個別に設定する
-  （デフォルトはバッチサイズ30・並行数8・Batches API使用ON）。
+  一元化されている（ai-classifyの--batch-api、analyzeの--with-ai-commentary
+  のいずれも、実行時にこの1箇所のキーを参照する。非persistent、ディスクには
+  保存しない）。Batches API使用の有無・バッチサイズ（Batches API使用時/不使用時
+  で別設定）・並行数も同じ⚙設定ダイアログに集約されている（2026-08-30、
+  Batches API使用トグルを実行設定欄からここに移動。project memory参照。
+  デフォルトはBatches API使用ON・バッチサイズ1000（使用時）/300（不使用時）・
+  並行数8）。
 
-  ai-classify/ai-retryの実行ボタンの横には「📊 少量実行して見積」ボタンがある。
-  実際に1バッチだけAPIを実行し、そのin/outトークン数を全体のバッチ数分
-  単純に比例させてコストを見積もり、モデル・Batches API使用有無を考慮した
-  金額をログに出力する（Batches API使用時は実際に課金が発生する点に注意）。
+  ai-classifyの「実行」ボタンを押すと、内部で(1)周辺クエリの重複排除
+  （cmd_dedup、CSVの行自体は削除しない）→(2)query列だけを見たユニーク数
+  カウント（AIに送信する対象を決める重複排除）を自動実行し、(2)の結果と
+  設定中のバッチサイズ・Batches API使用有無から実績ベースの分析式でトークン数・
+  コスト（USD/JPY）を計算し、モーダルダイアログに表示する（2026-08-30、
+  「📊 少量実行して見積」ボタン＝実APIを実際に叩くサンプル実行方式を廃止。
+  project memory参照。新方式は無料・即時）。モーダル内の「実行」ボタンを押すと
+  実際の分類処理を開始する（キャンセルすれば何も実行されない）。
+
+  進捗バーの下には、現在どのフェーズ（レベル1/2分類→レベル3分類→カテゴリ
+  再判定）にいるかと進捗率(%)を表示する（2026-08-30、残り時間の目安から
+  置き換え。project memory参照。ログの「done=N/M」「N/Mバッチ完了」等の行を
+  解析する。個別/グループリトライで母数が変わると%も出し直すため、進捗が
+  後退することもある）。
+
+  分類完了時（レポート生成も含む）には、モーダルダイアログに加えてmacOS
+  通知センター経由の通知も出す（2026-08-30新設。Dockアイコンへのバッジ付与は
+  PySide6標準機能では実現できないため見送り、通知センターのみ）。
 
   analyzeの --with-ai-commentary は、GUIでは「AIコメンタリー」チェックボックス
-  （デフォルトOFF）＋モデル選択ドロップダウン（デフォルトsonnet）で有効化する。
+  （デフォルトOFF）で有効化する（モデルはSonnet固定）。
   APIキーは上記のヘッダー⚙設定を使用する。
 
 ビルド方法（配布する側が実行）:

@@ -8,7 +8,8 @@ main.py analyze サブコマンド（--with-ai-commentary）が使う、クエ�
 lib/analyze_trends.pyの既存関数（compute_top_queries等）をそのまま使う
 （この集計はPython側のETLであり、AI呼び出しではない）。
 
-モデルは--modelで選択可能（classification_common.MODEL_CHOICES、デフォルトsonnet）。
+モデルはSonnet固定（classification_common.ANALYZE_MODEL、2026-08-27にCLI/GUIの
+モデル選択を廃止）。
 2026-08-25、プロキシ経由の呼び出しを廃止し、本物のAnthropic API（要ANTHROPIC_API_KEY
 または--token）を直接叩く方式に変更（ai-classify --batch-api等と同じくanthropicパッケージ
 を使用。main.pyのensure_batch_api_venv_and_reexec()が--with-ai-commentary指定時にも
@@ -26,9 +27,9 @@ venvへの自動インストールを行う）。
 
 import json
 
-from lib.classification_common import MODEL_CHOICES, parse_response_text
+from lib.classification_common import ANALYZE_MODEL, parse_response_text
 
-MODEL = MODEL_CHOICES["sonnet"]
+MODEL = ANALYZE_MODEL
 
 SYSTEM_PROMPT = """You are a data analyst reviewing aggregated search query log statistics.
 You will receive a JSON summary with four parts:

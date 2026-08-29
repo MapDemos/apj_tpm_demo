@@ -24,12 +24,16 @@ unsupported_query_location_intent/broken_query/othersの7分類から全面刷�
                            ―複数選択の仕組み自体はまだ残っているが例外的な扱い）
 
 brand_data.BRAND_CATEGORY_MAP（Wikipedia等を元にしたブランド→taxonomyカテゴリの
-辞書、data_cleaning/local/category_and_brand/poi-blocklist.js）をプロンプトに
-埋め込み、brand_poi判定とai_classification_3の精度向上のための参照情報としてLLMに渡す。
-ただしBRAND_KNOWLEDGE自体が実際に役立つのはbrand_poi判定時だけなので、
-ai_classification_3用のプロンプトはbrand_poi用（埋め込みあり）とunique_poi/category用
-（埋め込みなし、軽量）の2種類に分けている（2026-08-27、build_system_prompt_level3
-参照。以前はsubtypeを問わず全バッチに無条件で埋め込んでいた）。
+辞書、data_cleaning/local/category_and_brand/poi-blocklist.js）はLEVEL12段階の
+機械的候補マッチ（brand_match.py）とその直後の辞書ショートカット
+（leaves_for_matched_brand）でのみ使う。以前はLEVEL3のai_classification_3用
+プロンプトにもBRAND_KNOWLEDGE全文（1500件超）を埋め込んでbrand_poi用の重量級
+プロンプトを別途用意していたが、実データ検証で「候補マッチが外れてLEVEL3まで
+来た行」の大半はLLM自身の一般知識だけで正しく分類できており、辞書埋め込みが
+実際に判定を変えている証拠が無い一方でトークン消費だけが大きい（他の3プロンプトの
+8〜13倍）と判明したため撤去した（2026-08-29、project memory参照）。ai_classification_3用
+プロンプトはbrand_poi/unique_poi/categoryの全subtypeで共通の1本
+（build_system_prompt_level3）に統合されている。
 
 2026-08-27、LLM応答の要素数が入力とズレて頻発していた問題への対策として、
 入出力の各要素に0始まりのインデックスを付与する方式に変更した（配列の「位置」
@@ -37,41 +41,102 @@ ai_classification_3用のプロンプトはbrand_poi用（埋め込みあり）�
 バッチ全体を個別リトライせざるを得なかった。build_level12_user_content/
 build_level3_user_content、decode_indexed_level12_responses/
 decode_indexed_leaf_responses参照）。
+
+2026-08-28、ai_classification_2="category"・ai_classification_3="unknown"
+（taxonomyのどのリーフにも一致しなかった）という組み合わせだけを対象にした
+再判定フェーズを追加した（build_system_prompt_category_recheck、
+decode_indexed_recheck_responses参照）。"category"は定義上「実在する業種を
+表す一般名詞」なので、正しく判定できていればtaxonomyのどれかに当てはまる
+のが本来の姿であり、taxonomy unknownはlevel2（ai_classification_2）の判定
+自体が誤っていた（知らない固有名詞・愛称をcategoryと誤判定した）可能性を
+示すシグナルとして扱える。unique_poi/brand_poiのtaxonomy unknownは
+taxonomyのカバレッジ不足として正当なケースがあり得るため対象外
+（project memory参照）。呼び出し元(ai_classify.py/ai_classify_batch.pyの
+classify_unique)が、この再判定結果に応じてai_classification_2の訂正・
+taxonomyの再判定・ai_classificationの"unknown"化を行う。
 """
 
 import json
 
 from lib import brand_data
 
-# デフォルトモデル。ai-classify系サブコマンドは --model haiku|sonnet で切り替え可能
-# （MODEL_CHOICESを参照）。ここは後方互換のためhaikuのまま残す。
-MODEL = "claude-haiku-4-5-20251001"
 
-# main.pyの --model 引数(haiku/sonnet)からモデルIDへの変換テーブル
+class OperationCancelled(Exception):
+    """GUIの「キャンセル」ボタンでユーザーが処理の中断を要求した際に送出する。
+    ai_classify.py/ai_classify_batch.pyのclassify_unique()がcancel_event
+    （threading.Event、GUIからのみ渡される。CLI実行時は常にNone）を各フェーズの
+    境目・ポーリングループ内で確認し、セットされていればこの例外を送出して
+    以降の処理（残りのフェーズ・ジョブ完了待ち）を中断する。既に投げてしまった
+    API呼び出し自体を打ち切ることはできない（実行中の1呼び出し分の完了は待つ）
+    ため、あくまで「これ以上新しい呼び出しを増やさない」段階的な中断になる
+    （project memory参照）。"""
+
+
+def raise_if_cancelled(cancel_event) -> None:
+    """cancel_eventがセットされていればOperationCancelledを送出する。
+    cancel_eventがNone（CLI実行時、またはGUIでもキャンセル非対応の呼び出し元）
+    なら何もしない。"""
+    if cancel_event is not None and cancel_event.is_set():
+        raise OperationCancelled("ユーザーによりキャンセルされました")
+
+# main.pyの --model 引数(haiku/sonnet)からモデルIDへの変換テーブル。
+# ai-analyze（AIコメンタリー）がsonnetを引くのに使う（lib/ai_analyze.py参照）。
 MODEL_CHOICES: dict[str, str] = {
     "haiku": "claude-haiku-4-5-20251001",
     "sonnet": "claude-sonnet-5",
 }
 
-# main.pyの --model 引数の選択肢（2026-08-26、2段階分離方式の導入に伴い追加）。
-# 値は (ai_classification/_2に使うモデル, ai_classification_3に使うモデル) のペア。
-# "haiku+sonnet"が既定の推奨構成（安いHaikuで済む部分と、taxonomy精度が必要な
-# ai_classification_3だけSonnetに分ける。project memory参照）。"haiku"/"sonnet"は
-# 両階層を同じモデルで統一したい場合の比較・検証用の選択肢。
-MODEL_PRESETS: dict[str, tuple[str, str]] = {
-    "haiku": (MODEL_CHOICES["haiku"], MODEL_CHOICES["haiku"]),
-    "sonnet": (MODEL_CHOICES["sonnet"], MODEL_CHOICES["sonnet"]),
-    "haiku+sonnet": (MODEL_CHOICES["haiku"], MODEL_CHOICES["sonnet"]),
-}
+# ai-classify（ai_classification/_2/_3の3階層すべて）で使うモデル。
+# 2026-08-26に導入した「level1/2をHaiku・taxonomy判定のlevel3だけSonnet」という
+# 2段階分離方式（旧MODEL_PRESETS）は、taxonomyの285リーフ→45件フラット化と
+# brand_match.pyによる機械的ブランド候補注入の後、Haiku単体でも実用十分な精度に
+# 改善したことを確認できたため2026-08-27に廃止し、常にHaikuで統一した
+# （CLI/GUIのモデル選択自体も廃止）。2026-08-30、resolve_model()による自動追従の
+# フォールバック値（Models API呼び出し失敗時に使う既知の安全な値）としての
+# 役割に変わった。ファミリー（Haiku/Sonnet）自体は変わらず固定。
+CLASSIFY_MODEL: str = MODEL_CHOICES["haiku"]
+
+# ai-analyze（AIコメンタリー）で使うモデル。taxonomy判定と違い分類精度は関係なく、
+# 集計済みサマリーからの文章生成のみなので、常にSonnet固定（CLI/GUIのモデル選択は
+# 廃止、2026-08-27）。2026-08-30、CLASSIFY_MODELと同じくresolve_model()の
+# フォールバック値としての役割に変わった。
+ANALYZE_MODEL: str = MODEL_CHOICES["sonnet"]
 
 
-def model_preset_label(preset: str) -> str:
-    """CLI/GUIの表示用に、プリセット名と実際のモデルIDを両方含む説明文を組み立てる
-    （「haikuを選んだつもりが実は内部でSonnetも動いている」という誤解を防ぐため）。"""
-    level12_model, level3_model = MODEL_PRESETS[preset]
-    if level12_model == level3_model:
-        return f"{preset}（{level12_model}）"
-    return f"{preset}（ai_classification/_2: {level12_model} + ai_classification_3: {level3_model}）"
+def resolve_model(family: str, api_key: str | None = None) -> str:
+    """モデルファミリー（"haiku" or "sonnet"）は固定した上で、その最新版を
+    Models API（client.models.list()）から自動的に選ぶ（2026-08-30新設。project
+    memory参照: 今後Haiku/Sonnetのバージョンが上がっても、コード変更無しで
+    追従できるようにする狙い）。
+
+    familyを含むモデルIDのうち、created_atが最も新しいものを採用する
+    （Models APIのモデル一覧はcreated_at付きで返る。日付サフィックス無しの
+    エイリアスID（例: "claude-haiku-4-5"）も一覧に含まれる場合は、そちらが
+    優先的に最新を指す想定）。
+
+    ネットワークエラー・APIキー不正・該当ファミリーのモデルが1件も見つからない
+    等、何らかの理由で解決できなかった場合は、MODEL_CHOICES[family]
+    （CLASSIFY_MODEL/ANALYZE_MODELの元になっている既知の安全な固定値）に
+    フォールバックする（呼び出し元を落とさないため。この関数自体は例外を
+    送出しない）。
+
+    anthropicパッケージはこの関数の中でのみ遅延importする（classification_common.py
+    はAI呼び出しを伴わない処理からも import されるため、モジュール本体には
+    anthropicへの依存を持ち込まない設計を維持する）。"""
+    fallback = MODEL_CHOICES.get(family)
+    if fallback is None:
+        raise ValueError(f"未知のモデルファミリーです: {family!r}")
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+        candidates = [m for m in client.models.list() if family in m.id.lower()]
+        if not candidates:
+            return fallback
+        candidates.sort(key=lambda m: m.created_at, reverse=True)
+        return candidates[0].id
+    except Exception:  # noqa: BLE001 モデル解決の失敗で全体を落とさない
+        return fallback
 
 # ai_classification（トップレベル）の番号→カテゴリ名。ai-retryの--categoryの
 # 選択肢としても使う（main.py参照）。
@@ -120,6 +185,116 @@ POI_SUBTYPE_DESCRIPTIONS: dict[int, str] = {
     "例: \"ローソン\", \"セブンイレブン\", \"スターバックス\"",
     3: "地点の種別・カテゴリを表す一般名詞（固有名詞ではない）。例: \"コンビニ\", \"バス停\", \"駐車場\"",
 }
+
+# ai_classification_2="category"と判定されたが、ai_classification_3（taxonomy）が
+# どのリーフにも一致せず"unknown"になったクエリだけを対象に、level2の判定自体を
+# 再確認するための選択肢（2026-08-28新設、build_system_prompt_category_recheck
+# 参照）。POI_SUBTYPESとは別の番号体系（このプロンプト内でのみ意味を持つ）。
+CATEGORY_RECHECK_CHOICES: dict[int, str] = {
+    1: "category",
+    2: "unique_poi",
+    3: "brand_poi",
+    4: "broken",
+}
+
+# CATEGORY_RECHECK_CHOICESの各値の説明文。POI_SUBTYPE_DESCRIPTIONS/
+# CATEGORY_DESCRIPTIONSは"2(brand_poi)"のような別の番号体系への参照を含むため
+# そのまま流用せず、この再判定プロンプト単体で意味が完結するよう独立して書く。
+_CATEGORY_RECHECK_CHOICE_DESCRIPTIONS: dict[str, str] = {
+    "category": "見直した結果、やはり業種を表す一般名詞（固有名詞ではない）として"
+    "成立する。例: \"コンビニ\", \"駐車場\"",
+    "unique_poi": "一般名詞ではなく、現実世界に一意にしか存在しない単一の地点・"
+    "施設を指す固有名詞・愛称。知らない店舗名・地域固有の屋号であっても、一意の"
+    "場所を指す固有名詞として成立していればここに含める。",
+    "brand_poi": "一般名詞ではなく、同一名称の拠点が複数箇所に展開されている"
+    "企業・ブランド名（直営店・フランチャイズは問わない）。",
+    "broken": "表記が崩れている、断片的すぎる、または意味を成す単語として"
+    "読み取れず、何を指しているか特定できないもの。",
+}
+
+# CATEGORY_RECHECK_CHOICES専用の境界判断指針。BOUNDARY_GUIDANCEの「1(poi)の
+# サブカテゴリ判定基準」「境界事例」段落と趣旨は同じだが、そちらは"1(poi)"
+# "2(brand_poi)"等このプロンプトとは異なる番号体系への言及を含むため、
+# 数字参照を含まない形に言い換えて独立させている
+# （BRAND_KNOWLEDGE_GUIDANCE_LEVEL3と同じ「文脈に合わせて言い換える」方針）。
+CATEGORY_RECHECK_GUIDANCE = """
+再判定の観点（unique_poiとbrand_poiの境界）: 一般名詞として成立しないと判断した
+場合、次に「実在する一意の施設・愛称を指す固有名詞（unique_poi）」か「複数拠点
+展開する企業・ブランド名（brand_poi）」かを見分けること。同一名称の拠点が複数
+箇所に存在すると判断できる場合（直営店・フランチャイズは問わない）はbrand_poi、
+その名前を持つ場所が現実には1箇所しか存在しないと考えられる場合はunique_poiと
+する。
+
+判断材料が乏しい・知らない単語であるというだけの理由でbrokenへ倒さないこと。
+brokenは表記が崩れている・断片的すぎる・意味を成す単語として読み取れない場合に
+限る（知らない固有名詞・愛称として読める単語はunique_poiへ）。
+"""
+
+
+def build_system_prompt_category_recheck() -> str:
+    """ai_classification_2="category"と判定されたが、taxonomy
+    （ai_classification_3）のどのリーフにも一致せず"unknown"になったクエリだけを
+    対象に、その判定自体が誤っていなかったかを再確認する専用の軽量プロンプト
+    （2026-08-28新設）。
+
+    経緯: "category"は定義上「実在する業種を表す一般名詞」なので、正しく判定
+    できていればtaxonomyのどれかに（多少大味でも）当てはまるのが本来の姿である。
+    つまり"category"×taxonomy unknownという組み合わせは、taxonomyのカバレッジ
+    不足というより、level2（build_system_prompt_level12）が「知らない単語＝
+    実在する業種の一般名詞かもしれない」と誤って安全側に倒した誤判定である
+    可能性が高い（実測でタクシー配車ログ中の地域固有の店の愛称・固有名詞が
+    "category"に誤分類され、taxonomy側でunknownになるケースが見つかった。
+    project memory参照）。
+
+    なお同じ現象がunique_poi/brand_poi側のtaxonomy unknownでは起きにくい
+    （そちらは「実在する特定の施設・ブランドだがtaxonomyがカバーしていない
+    業種」という正当なケースがあり得るため、level2判定を疑う根拠にならない）。
+    よってこの再判定は呼び出し元(classify_unique)で"category"×taxonomy unknown
+    の組み合わせだけに絞り込んで適用する。
+
+    再判定の結果、category（据え置き）以外を選んだ場合はai_classification_2が
+    書き換わる。unique_poi/brand_poiに変わった場合、呼び出し元はtaxonomy
+    （ai_classification_3）も訂正後のsubtypeで再度判定し直す。brokenを選んだ
+    場合、呼び出し元はai_classification自体を"unknown"に書き換える
+    （いずれも呼び出し元の責務。CATEGORY_RECHECK_CHOICES参照）。"""
+    choice_lines = "\n".join(
+        f"{n}. {name}: {_CATEGORY_RECHECK_CHOICE_DESCRIPTIONS[name]}"
+        for n, name in sorted(CATEGORY_RECHECK_CHOICES.items())
+    )
+    return f"""あなたは検索クエリの再分類器です。以下のクエリは、既に"category"
+（{POI_SUBTYPE_DESCRIPTIONS[3]}）と判定されましたが、taxonomyのどのカテゴリにも
+一致せず判定不能（"unknown"）になりました。
+
+"category"は本来「実在する業種を表す一般名詞」なので、正しく判定できていれば
+taxonomyのどれかに（多少大味でも）当てはまるはずです。taxonomyがどれにも
+一致しなかったという事実は、"category"という判定自体が誤りだった可能性を
+示しています。各クエリについて、以下の選択肢のどれが最も適切かを判定し直して
+ください。
+
+{choice_lines}
+
+このクエリログは、タクシー配車事業者のオペレーターが電話で乗客から聞いた場所の
+説明を検索APIにクエリ化したものです。
+
+{CATEGORY_RECHECK_GUIDANCE}
+{BRAND_CANDIDATE_GUIDANCE}
+## 出力形式
+入力配列の各要素は[インデックス, クエリ文字列]または[インデックス, クエリ文字列,
+候補配列]という形式です（候補配列の意味は上記の説明を参照）。出力は、入力に
+含まれていた各インデックスについて1つずつ、以下の形式の要素を持つJSON配列で
+返してください（順序は入力と一致させる必要はありません。各インデックスは
+1回だけ登場させてください）。
+- 候補配列を伴わない入力要素に対しては、[インデックス, 選択肢番号(1〜4)]という
+  2要素配列
+- 候補配列を伴う入力要素に対しては、[インデックス, 選択肢番号(1〜4), 一致した
+  候補の番号(1始まり。どの候補にも当てはまらない場合は0)]という3要素配列
+  （末尾要素の省略は不可）
+説明文やコードフェンスは一切含めず、JSON配列のみを出力してください。入力に
+含まれる全てのインデックスに対して必ず1件ずつ出力し、省略・統合・重複が
+無いようにしてください。
+例: [[0,1], [1,2], [2,3,1], [3,4]]
+"""
+
 
 # ai_classification_2（addressの場合）の番号→サブカテゴリ名
 ADDRESS_SUBTYPES: dict[int, str] = {
@@ -207,19 +382,12 @@ BRAND_CANDIDATE_GUIDANCE = """
 あるべきで、無視した結果ではあってはならない。
 """
 
-# BOUNDARY_GUIDANCEの末尾2段落（BRAND_KNOWLEDGE参照部分）を、taxonomyリーフ選定の
-# 文脈向けに言い換えたもの。build_system_prompt_level3専用
-# （brand_poiか否かの「判定」は既にlevel12側で確定済みなので、代わりに
-# 「どのリーフを選ぶか」の判断材料として使う指示にしている）。
+# build_system_prompt_level3専用のbrand_poi向け短い補足（2026-08-29、BRAND_KNOWLEDGE
+# 全文埋め込みを撤去した際に、辞書参照の指示だけ削ってこの一文を残した。「モデル
+# 自身の知識で判断してよい」という許可自体は判定品質のヒントとして有効なため）。
 BRAND_KNOWLEDGE_GUIDANCE_LEVEL3 = """
-対象がbrand_poi（複数拠点展開するブランド）の場合、以下に埋め込んだBRAND_KNOWLEDGE
-（ブランド名→taxonomyリーフの参照データ）を積極的に使い、対応するリーフを選ぶこと。
-表記が完全一致する場合に限らず、支店名・「店」等が付加された形も含めてブランド名を
-認識して参照する。BRAND_KNOWLEDGEに無いブランドでも、モデル自身の知識で妥当な
-リーフを判断してよい。
-
-同じブランドが複数の異なるクエリ文字列（支店名付き・省略形など）で登場する場合、
-実行のたびに違う判定にならないよう、判断に迷ったときはBRAND_KNOWLEDGEの値を優先する。
+対象がbrand_poi（複数拠点展開するブランド）の場合、モデル自身の知識でそのブランド・
+チェーン店が何であるかを特定し、妥当なリーフを判断すること。
 """
 
 SEMANTIC_QUERY_GUIDANCE = """
@@ -273,6 +441,9 @@ ai_classification_3は、ai_classification_2がunique_poi・brand_poi・category
   それ以外の観光目的の名所・史跡（城、神社仏閣、庭園等）は「観光名所」。
 - 銭湯・サウナ・日帰り温泉施設など入浴が主目的の施設は「入浴施設」。宿泊が主目的の
   温泉旅館・ホテルは「宿泊施設」。
+- 分譲・賃貸のマンション、アパート、団地など居住目的の集合住宅は「マンション・
+  アパート」（一戸建ては対象外）。マンスリーマンション・ウィークリーマンション等、
+  宿泊が主目的の施設は「宿泊施設」を優先する。
 - 弁護士・税理士・保険・金融・翻訳・人材派遣など、専用カテゴリの無い生活関連の
   専門サービス業は「生活サービス」に含める。
 - 映画館・水族館・動物園・美術館・遊園地・競技場等、細かい種別のレジャー施設は
@@ -352,32 +523,35 @@ def build_system_prompt_level12() -> str:
 """
 
 
-def build_system_prompt_level3(include_brand_knowledge: bool) -> str:
+def build_system_prompt_level3() -> str:
     """ai_classification_3（taxonomyカテゴリ）のみを判定するプロンプト（2026-08-26新設、
     2026-08-27にtaxonomyを285リーフの階層構造から45件のフラットカテゴリに刷新）。
     ai_classification_2がunique_poi/brand_poi/categoryと確定済みの
     (query, サブタイプ)の組だけを入力として受け取る想定（呼び出し元でフィルタ済み）。
-    常にSonnetで呼ぶ（build_system_prompt_level12のdocstring参照）。
+    2026-08-27以降はCLASSIFY_MODEL（Haiku）で呼ぶ（build_system_prompt_level12の
+    docstring参照。旧版はSonnetで呼んでいたが、taxonomyのフラット化とブランド候補
+    注入によりHaikuでも精度十分と確認できたため統一した）。
 
-    include_brand_knowledge: BRAND_KNOWLEDGE（1500件超のブランド→taxonomyカテゴリ
-    辞書）を埋め込むかどうか（2026-08-27新設）。これが実際に役立つのはbrand_poi
-    （複数拠点展開ブランド）の判定時だけで、unique_poi（定義上ブランドではない）・
-    category（一般名詞）にはそもそも無関係。以前はsubtypeを問わず全バッチに
-    無条件で埋め込んでいたため、呼び出し元(classify_unique)でbrand_poiのバッチと
-    unique_poi/categoryのバッチを分けて送り、後者にはFalseを渡す
-    （SYSTEM_PROMPT_LEVEL3_LIGHT参照）。"""
-    taxonomy_json = json.dumps(brand_data.CATEGORY_TAXONOMY, ensure_ascii=False)
+    2026-08-27〜08-29、brand_poi用（BRAND_KNOWLEDGE全文埋め込みあり）と
+    unique_poi/category用（埋め込みなし）の2種類のプロンプトに分けていたが、
+    実データ検証で辞書埋め込みの効果が確認できず、トークン消費（他プロンプトの
+    8〜13倍）だけが大きいと判明したため撤去し、全subtypeで共通のこの1本に統合した
+    （project memory参照）。
 
-    brand_section = ""
-    if include_brand_knowledge:
-        brand_json = json.dumps(brand_data.BRAND_CATEGORY_MAP, ensure_ascii=False, separators=(",", ":"))
-        brand_section = f"""
-{BRAND_KNOWLEDGE_GUIDANCE_LEVEL3}
-
-## BRAND_KNOWLEDGE（ブランド名→taxonomyカテゴリの参照データ。出典はWikipedia等の一般情報。
-空配列は「ブランドとして認識してよいが対応するtaxonomyカテゴリが無い」ことを意味する）
-{brand_json}
-"""
+    2026-08-29、出力形式をカテゴリ文字列の配列から番号の数値配列に変更した
+    （decode_indexed_leaf_responsesが番号→カテゴリ文字列の変換を行う）。
+    実測（project memory参照）でoutputトークンは約57%減ったが、当初taxonomyを
+    従来と同じJSON配列のまま渡し「配列内の位置(1始まり)がそのまま番号」という
+    指示だけで済ませる版を試したところ、Haikuが位置を0始まりで数えてしまう
+    系統的なオフバイワンが発生し、精度が79.3%→26.0%まで崩壊した（inputトークンの
+    節約を優先した結果、精度が犠牲になった）。taxonomyを「番号: カテゴリ名」の
+    行形式で明示的に列挙する形に変えたところ、この崩壊は解消し精度は旧方式と
+    同水準（78.0%、通常のrun間ブレの範囲内）に戻った。inputトークンの増加は
+    わずか（実測で+3%未満）で、outputの削減効果を相殺しないため、この明示列挙
+    形式を採用している。"""
+    taxonomy_numbered = "\n".join(
+        f"{i}: {name}" for i, name in enumerate(brand_data.CATEGORY_TAXONOMY, start=1)
+    )
 
     return f"""あなたは検索クエリのtaxonomy分類器です。与えられた(query文字列, サブタイプ)の
 組の配列について、それぞれに当てはまるCATEGORY_TAXONOMYのカテゴリを判定してください。
@@ -389,28 +563,64 @@ category（業種を表す一般名詞）のいずれかで既に確定済みな
 説明を検索APIにクエリ化したものです。
 
 {CATEGORY_3_GUIDANCE}
-CATEGORY_TAXONOMY（この配列の文字列以外は使用禁止）:
-{taxonomy_json}
-{brand_section}
+{BRAND_KNOWLEDGE_GUIDANCE_LEVEL3}
+CATEGORY_TAXONOMY（番号→カテゴリ名の対応。出力では番号のみを使い、カテゴリ名の
+文字列自体は出力に含めないこと）:
+{taxonomy_numbered}
+
 ## 出力形式
 入力配列の各要素は[インデックス, クエリ文字列, サブタイプ]です。出力は、入力に
-含まれていた各インデックスについて1つずつ、[インデックス, カテゴリ文字列の配列]
-という形式の要素を持つJSON配列で返してください（順序は入力と一致させる必要は
-ありません。各インデックスは1回だけ登場させてください）。カテゴリ文字列の配列は
-通常1要素、複数領域にまたがる場合のみ複数可（文字列を直接入れない。該当する
-カテゴリが1つも無い場合は["unknown"]）。説明文やコードフェンスは一切含めず、
-JSON配列のみを出力してください。入力に含まれる全てのインデックスに対して必ず
-1件ずつ出力し、省略・統合・重複が無いようにしてください。
-例: [[0,["コンビニ"]], [1,["専門店（アパレル・服飾雑貨）"]], [2,["unknown"]]]
+含まれていた各インデックスについて1つずつ、[インデックス, 番号の配列]という形式の
+要素を持つJSON配列で返してください（順序は入力と一致させる必要はありません。各
+インデックスは1回だけ登場させてください）。番号は上記CATEGORY_TAXONOMYの番号を指す
+（1始まり。位置を自分で数え直すのではなく、上記に明記されている番号をそのまま使う
+こと）。番号の配列は通常1要素、複数領域にまたがる場合のみ複数可（該当するカテゴリが
+1つも無い場合は[0]。0はCATEGORY_TAXONOMYには存在しないが「判定不能」を表す唯一の
+許可された番号）。カテゴリ名の文字列は一切出力に含めず、必ず番号のみを使うこと。
+説明文やコードフェンスは一切含めず、JSON配列のみを出力してください。入力に含まれる
+全てのインデックスに対して必ず1件ずつ出力し、省略・統合・重複が無いようにしてください。
+例: [[0,[3]], [1,[27]], [2,[0]]]
 """
 
 
 SYSTEM_PROMPT_LEVEL12 = build_system_prompt_level12()
-# level3はbrand_poi判定時だけBRAND_KNOWLEDGEが必要（build_system_prompt_level3の
-# docstring参照）。呼び出し元(ai_classify.py/ai_classify_batch.pyのclassify_unique)
-# がsubtypeでバッチを分けて、それぞれに対応するプロンプトを使う。
-SYSTEM_PROMPT_LEVEL3_BRAND = build_system_prompt_level3(include_brand_knowledge=True)
-SYSTEM_PROMPT_LEVEL3_LIGHT = build_system_prompt_level3(include_brand_knowledge=False)
+# 2026-08-29、brand_poi用/unique_poi・category用の2本に分けていたプロンプトを
+# 統合（build_system_prompt_level3のdocstring参照）。subtypeを問わず全level3
+# バッチでこの1本を使う。
+SYSTEM_PROMPT_LEVEL3 = build_system_prompt_level3()
+# "category"×taxonomy unknownの再判定専用（2026-08-28新設。build_system_prompt_
+# category_recheckのdocstring参照）。
+SYSTEM_PROMPT_CATEGORY_RECHECK = build_system_prompt_category_recheck()
+
+
+# APIレスポンスのusageを集計する共通ヘルパー（2026-08-28新設）。従来は
+# input_tokens/output_tokensしか合計しておらず、system promptに付けている
+# cache_control（プロンプトキャッシュ）の書き込み(cache_creation_input_tokens、
+# 通常のinput tokensの約1.25倍課金)・読み込み(cache_read_input_tokens、約0.1倍課金)
+# 分のコストが実行結果のトークン集計に一切反映されていなかった（project memory
+# 参照。1日分の実行だけで数百円かかり高すぎるという相談を受けての可視化対応）。
+# ai_classify.py/ai_classify_batch.py双方の複数フェーズ（level12/level3/カテゴリ
+# 再判定）にまたがる集計をタプルの要素数を増やさずに扱えるよう、辞書1つを
+# 使い回す方式にしている。
+
+
+def new_usage_totals() -> dict[str, int]:
+    """usageトークン集計の初期値（全て0）。"""
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+    }
+
+
+def add_usage(totals: dict[str, int], usage: dict) -> None:
+    """new_usage_totals()で作った集計辞書に、1回分のAPI呼び出しのusageを加算する。
+    usage側に他のキー（stop_reason等）が含まれていても、totalsに存在するキーだけを
+    加算するので無視される。usageが空辞書（個別リトライが完全に失敗した場合の
+    フォールバック）でも安全に0加算になる。"""
+    for key in totals:
+        totals[key] += usage.get(key, 0) or 0
 
 
 # ai_classification_3をCSVの1セルに格納する際の区切り文字。
@@ -556,6 +766,65 @@ def decode_indexed_level12_responses(
     return records, missing
 
 
+# CATEGORY_RECHECK_CHOICES選定結果と、機械マッチしたブランド候補のうちどれが
+# 一致したかの組（build_system_prompt_category_recheck参照）。choiceは
+# "category"/"unique_poi"/"brand_poi"/"broken"のいずれか。matched_brandは候補の
+# 中からLLMが選んだブランド名、該当なし/候補自体が無かった場合はNone
+# （CandidateRecordのmatched_brandと同じ意味）。
+RecheckRecord = tuple[str, str | None]
+
+
+def _decode_recheck_tail(rest: list, candidates: list[str] | None) -> RecheckRecord | None:
+    """decode_indexed_recheck_responsesの1件分。restはインデックスを除いた残りの
+    要素（候補なしなら[choice_num]、候補ありなら[choice_num, idx]）。_decode_
+    candidate_tailと同じ考え方だが、level12のc1/c2ペアではなくCATEGORY_RECHECK_
+    CHOICESの単一選択肢を復元する。形式が不正・値が範囲外の場合はNoneを返し、
+    呼び出し元でこのインデックスを欠落扱いにする。"""
+    if candidates is None:
+        if len(rest) != 1:
+            return None
+        choice = CATEGORY_RECHECK_CHOICES.get(rest[0])
+        if choice is None:
+            return None
+        return choice, None
+
+    if len(rest) != 2:
+        return None
+    choice_num, idx = rest
+    choice = CATEGORY_RECHECK_CHOICES.get(choice_num)
+    if choice is None:
+        return None
+    if not isinstance(idx, int) or idx < 0 or idx > len(candidates):
+        return None
+    matched_brand = candidates[idx - 1] if idx > 0 else None
+    return choice, matched_brand
+
+
+def decode_indexed_recheck_responses(
+    raw_items: list, candidates_list: list[list[str] | None],
+) -> tuple[list[RecheckRecord | None], set[int]]:
+    """build_system_prompt_category_recheckが返すインデックス付き応答配列
+    （各要素は[idx, choice_num]または[idx, choice_num, candidate_idx]）を、
+    candidates_listと同じ順序・同じ長さのRecheckRecordのリストに変換する
+    （decode_indexed_level12_responsesと同じインデックス方式、2026-08-28新設）。
+    範囲外・型不正・重複したインデックス、およびデコードに失敗した要素は
+    その位置をNoneのまま残す。戻り値の2つ目はNoneのまま残った（＝LLM応答から
+    実質的に欠落した）インデックスの集合。"""
+    n = len(candidates_list)
+    records: list[RecheckRecord | None] = [None] * n
+    for raw in raw_items:
+        if not isinstance(raw, list) or len(raw) < 2:
+            continue
+        idx, rest = raw[0], raw[1:]
+        if not isinstance(idx, int) or idx < 0 or idx >= n or records[idx] is not None:
+            continue  # 範囲外・型不正・重複インデックスは無視する
+        decoded = _decode_recheck_tail(rest, candidates_list[idx])
+        if decoded is not None:
+            records[idx] = decoded
+    missing = {i for i, r in enumerate(records) if r is None}
+    return records, missing
+
+
 def leaves_for_matched_brand(matched_brand: str | None, ai_classification_2: str) -> str | None:
     """decode_indexed_level12_responsesが返したmatched_brandが、レベル3(taxonomy)の
     LLM呼び出しを省略してBRAND_CATEGORY_MAPから直接引ける対象かどうかを判定する。
@@ -573,9 +842,28 @@ def leaves_for_matched_brand(matched_brand: str | None, ai_classification_2: str
     return encode_leaves(brand_data.BRAND_CATEGORY_MAP.get(matched_brand, []))
 
 
+def _leaf_string_for_number(n) -> str | None:
+    """build_system_prompt_level3が返す番号（プロンプト内で明示した「番号: カテゴリ名」
+    列挙の番号、1始まり。0は"判定不能"）を、対応するtaxonomyのカテゴリ文字列
+    （またはUNKNOWN_LEAF）に変換する。型不正・範囲外の番号はNoneを返し、呼び出し元
+    （encode_leaves）がハルシネーション扱いで捨てる（2026-08-29新設、出力形式の
+    文字列→番号化の一部。project memory参照）。"""
+    if not isinstance(n, int):
+        return None
+    if n == 0:
+        return UNKNOWN_LEAF
+    taxonomy = brand_data.CATEGORY_TAXONOMY
+    if 1 <= n <= len(taxonomy):
+        return taxonomy[n - 1]
+    return None
+
+
 def decode_indexed_leaf_responses(raw_items: list, n: int) -> tuple[list[str | None], set[int]]:
     """build_system_prompt_level3が返すインデックス付き応答配列
-    （各要素は[idx, リーフ配列]）を、長さnのリストに変換する
+    （各要素は[idx, 番号配列]。2026-08-29以前はカテゴリ文字列の配列だったが、
+    outputトークン削減のためプロンプト内で明示した「番号: カテゴリ名」列挙の番号
+    （1始まり、0は判定不能）の数値配列に変更した。project memory参照）を、長さnの
+    リストに変換する
     （2026-08-27新設、decode_indexed_level12_responsesと同じインデックス方式）。
     範囲外・型不正・重複したインデックスの要素は無視する。戻り値の2つ目は
     Noneのまま残った（＝LLM応答から実質的に欠落した）インデックスの集合。"""
@@ -583,9 +871,12 @@ def decode_indexed_leaf_responses(raw_items: list, n: int) -> tuple[list[str | N
     for raw in raw_items:
         if not isinstance(raw, list) or len(raw) != 2:
             continue
-        idx, leaves = raw
+        idx, numbers = raw
         if not isinstance(idx, int) or idx < 0 or idx >= n or records[idx] is not None:
             continue
+        if not isinstance(numbers, list):
+            numbers = []
+        leaves = [s for s in (_leaf_string_for_number(x) for x in numbers) if s is not None]
         records[idx] = encode_leaves(leaves)
     missing = {i for i, r in enumerate(records) if r is None}
     return records, missing

@@ -8,15 +8,16 @@ data_cleaning/ のCSVクレンジング・AI分類・傾向分析を1つにま�
   add-query-count        same_query_count列だけを付与する（重複除去はしない、プログラム的カウントのみ、AI不使用）
   count-column           指定した列の出現回数を集計する（--columnでquery/ai_classification等を指定、デフォルトquery）
   ai-classify             AI分類（本物のAnthropic APIを直接叩く。要ANTHROPIC_API_KEY
-                          または--token。同期・並行処理がデフォルトで、--batch-apiで
-                          非同期のBatches API版（50%割引・ジョブ待ちあり）に切り替え可）。
+                          または--token。モデルはHaiku固定。2026-08-28よりBatches API
+                          （50%割引・非同期でジョブ待ちあり）がデフォルトで、
+                          --no-batch-apiで従来の同期・並行処理に戻せる）。
                           --filter-column/--filter-op/--filter-valueで対象行を
                           任意の列×演算子×値で絞り込める（未指定なら全行対象）。
                           既に分類済み(ai_classification列あり)のファイルに絞り込み
                           指定で実行すると、マッチした行だけ既存の3列を上書きする
                           （旧ai-retryサブコマンドはこの機能に統合し廃止）
   analyze                クエリ傾向分析（HTMLレポート込み。--with-ai-commentaryで本物のAnthropic API
-                          （要ANTHROPIC_API_KEYまたは--token、--modelでモデル選択可）によるAI要約を追加）
+                          （要ANTHROPIC_API_KEYまたは--token、モデルはSonnet固定）によるAI要約を追加）
 
 各サブコマンドの詳細は `python3 main.py <subcommand> --help` を参照。
 出力は全サブコマンド共通で local_output/ 配下に自動生成される
@@ -162,13 +163,24 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
         print(f"出力先: {output_path}（入力をそのままコピー）")
         return
 
+    # --batch-api使用時と不使用時でバッチサイズの設定を分ける（project memory参照）。
+    # --batch-api: 非同期ジョブ登録（client.messages.batches.create()）なので
+    # 非ストリーミングSDKの~16,000トークン超過ガード対象外。Haiku 4.5のmax_tokens
+    # ハード上限(64,000)まで使えるため、大きい値を許容する（ai_classify_batch.py
+    # の_batch_max_tokens()がbatch_sizeから動的にmax_tokensを計算する）。
+    # --no-batch-api: 全呼び出しが同期client.messages.create()なので、上記ガードの
+    # 対象。300前後が実質的な上限（project memory参照）。
+    batch_size = args.batch_size if args.batch_api else args.sync_batch_size
+
     if args.max_batches is not None:
-        target_indices = target_indices[: args.max_batches * args.batch_size]
+        target_indices = target_indices[: args.max_batches * batch_size]
 
     target_queries = [rows[i].get("query", "") for i in target_indices]
     unique_count = len(set(target_queries))
 
-    level12_model, level3_model = classification_common_lib.MODEL_PRESETS[args.model]
+    # 2026-08-30、固定モデル文字列でなくModels APIで最新版を自動解決する
+    # （project memory参照。ファミリー(Haiku)自体は固定、バージョンのみ追従）。
+    level12_model = level3_model = classification_common_lib.resolve_model("haiku", api_key=args.token)
 
     if filter_column:
         print(
@@ -179,6 +191,11 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
 
     if args.resume_batch_job and not args.batch_api:
         raise ValueError("--resume-batch-job は --batch-api 指定時のみ使えます")
+
+    # cancel_eventはGUI専用（キャンセルボタン）。CLI実行時はargsにこの属性が無い
+    # ためgetattrで常にNoneを補う（ai_classify.py/ai_classify_batch.pyの
+    # classify_unique()docstring・classification_common.raise_if_cancelled参照）。
+    cancel_event = getattr(args, "cancel_event", None)
 
     t0 = time.time()
     failed_ranges = None
@@ -192,56 +209,62 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
             print(f"エラー: anthropicパッケージが必要です（pip install anthropic）: {e}", file=sys.stderr)
             sys.exit(1)
 
-        mapping, total_in, total_out, failed_ranges, failed_queries = ai_classify_batch_lib.classify_unique(
-            target_queries, args.batch_size, level12_model, level3_model, api_key=args.token,
-            resume_state_path=args.resume_batch_job,
+        mapping, usage_totals, failed_ranges, failed_queries = ai_classify_batch_lib.classify_unique(
+            target_queries, batch_size, level12_model, level3_model, api_key=args.token,
+            resume_state_path=args.resume_batch_job, max_workers=args.workers, cancel_event=cancel_event,
         )
     else:
         # 2026-08-27、プロキシ（Lambda URL）経由の呼び出しを廃止し、本物の
         # Anthropic APIを直接叩く同期呼び出しに変更（詳細はai_classify.pyの
         # モジュールdocstring参照）。--batch-apiと同じくANTHROPIC_API_KEYが必要。
         try:
-            mapping, total_in, total_out, failed_queries = ai_classify_lib.classify_unique(
-                target_queries, args.batch_size, args.workers, level12_model, level3_model, api_key=args.token,
+            mapping, usage_totals, failed_queries = ai_classify_lib.classify_unique(
+                target_queries, batch_size, args.workers, level12_model, level3_model, api_key=args.token,
+                cancel_event=cancel_event,
             )
         except ImportError as e:
             print(f"エラー: anthropicパッケージが必要です（pip install anthropic）: {e}", file=sys.stderr)
             sys.exit(1)
     elapsed = time.time() - t0
 
-    base_columns = ["ai_classification", "ai_classification_2", "ai_classification_3"]
+    # ai_classification_2_brand: ai_classification_2がbrand_poiの行についてのみ、
+    # 機械マッチ+LLM確定したブランド名（BRAND_CATEGORY_MAPのキー）を出力する列
+    # （2026-08-29新設。従来はLLM応答内部でmatched_brandとして持っていたが、
+    # taxonomy判定のショートカット判定にしか使わずCSV出力前に捨てていた。
+    # project memory参照）。
+    base_columns = ["ai_classification", "ai_classification_2", "ai_classification_3", "ai_classification_2_brand"]
     has_existing_columns = all(c in fieldnames for c in base_columns)
 
     skipped_due_to_failure = 0
 
     if filter_column and has_existing_columns:
-        # 部分上書きモード（旧ai-retry相当）: マッチした行だけ既存3列を上書き、
+        # 部分上書きモード（旧ai-retry相当）: マッチした行だけ既存4列を上書き、
         # 他の行・他の列はそのまま保持する。ただし、そのqueryの分類がAPI呼び出し失敗に
-        # よるunknownフォールバックだった場合は、既存3列（前回までの正しい分類結果
+        # よるunknownフォールバックだった場合は、既存4列（前回までの正しい分類結果
         # かもしれない値）を破壊しないよう上書きをスキップする（モデルが本当に
         # 「unknown」と判定した場合は通常どおり上書きする）。
-        c1_col, c2_col, c3_col = base_columns
+        c1_col, c2_col, c3_col, c4_col = base_columns
         out_fieldnames = fieldnames
         for i in target_indices:
             query = rows[i].get("query", "")
             if query in failed_queries:
                 skipped_due_to_failure += 1
                 continue
-            c1, c2, c3 = mapping[query]
-            rows[i][c1_col], rows[i][c2_col], rows[i][c3_col] = c1, c2, c3
+            c1, c2, c3, c4 = mapping[query]
+            rows[i][c1_col], rows[i][c2_col], rows[i][c3_col], rows[i][c4_col] = c1, c2, c3, c4
     else:
-        # 全件モード、または絞り込みはあるが3列がまだ無い初回実行。
+        # 全件モード、または絞り込みはあるが4列がまだ無い初回実行。
         # 既にai_classification列が付いた入力（=一度分類済みのCSVを誤って再度渡した場合）
-        # を上書きしないよう、衝突すれば3列まとめて_2,_3...にする
+        # を上書きしないよう、衝突すれば4列まとめて_2,_3...にする
         # （unique_column_nameを列ごとに個別適用すると、"ai_classification_2"という
-        # 正規の列名自体を衝突回避後の名前と誤認識してしまうため、3列専用のヘルパーを使う）。
-        c1_col, c2_col, c3_col = column_utils_lib.unique_column_names(fieldnames, base_columns)
-        out_fieldnames = list(fieldnames) + [c1_col, c2_col, c3_col]
+        # 正規の列名自体を衝突回避後の名前と誤認識してしまうため、4列専用のヘルパーを使う）。
+        c1_col, c2_col, c3_col, c4_col = column_utils_lib.unique_column_names(fieldnames, base_columns)
+        out_fieldnames = list(fieldnames) + [c1_col, c2_col, c3_col, c4_col]
         for row in rows:
-            row[c1_col], row[c2_col], row[c3_col] = "", "", ""
+            row[c1_col], row[c2_col], row[c3_col], row[c4_col] = "", "", "", ""
         for i in target_indices:
-            c1, c2, c3 = mapping[rows[i].get("query", "")]
-            rows[i][c1_col], rows[i][c2_col], rows[i][c3_col] = c1, c2, c3
+            c1, c2, c3, c4 = mapping[rows[i].get("query", "")]
+            rows[i][c1_col], rows[i][c2_col], rows[i][c3_col], rows[i][c4_col] = c1, c2, c3, c4
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=out_fieldnames)
@@ -249,7 +272,7 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
         writer.writerows(rows)
 
     print(f"\n処理件数: {len(target_indices)}（全{len(rows)}件中、うちユニークなquery: {unique_count}件をAIに送信）")
-    print(f"モデル: {classification_common_lib.model_preset_label(args.model)}")
+    print(f"モデル: {level12_model}（Haikuファミリー固定、バージョンはModels APIで自動解決）")
     if args.batch_api:
         print(f"失敗バッチ数（個別リトライに回した回数）: {failed_ranges}")
     if failed_queries:
@@ -258,11 +281,40 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
             print(f"  → 既存の分類結果を保持し上書きをスキップした行数: {skipped_due_to_failure}件")
     print(f"所要時間: {elapsed:.1f}秒")
     token_note = "（Batches APIのため通常の50%価格で課金）" if args.batch_api else ""
-    print(f"input tokens合計 : {total_in}{token_note}")
-    print(f"output tokens合計: {total_out}{token_note}")
+    print(f"input tokens合計 : {usage_totals['input_tokens']}{token_note}")
+    print(f"output tokens合計: {usage_totals['output_tokens']}{token_note}")
+    # 2026-08-28、プロンプトキャッシュの書き込み・読み込み分も表示するように
+    # した。従来はinput/output tokensしか見ておらず、system promptに付けている
+    # cache_control分のコストが一切可視化されていなかった（project memory参照）。
+    if usage_totals["cache_creation_input_tokens"] or usage_totals["cache_read_input_tokens"]:
+        print(
+            f"cache write tokens合計: {usage_totals['cache_creation_input_tokens']}"
+            f"（通常のinput tokensの約1.25倍単価{token_note}）"
+        )
+        print(
+            f"cache read tokens合計 : {usage_totals['cache_read_input_tokens']}"
+            f"（通常のinput tokensの約0.1倍単価{token_note}）"
+        )
     if c1_col != "ai_classification":
-        print(f"注意: 入力に既に分類済み列があったため \"{c1_col}\"/\"{c2_col}\"/\"{c3_col}\" 列として追加しました")
+        print(
+            f"注意: 入力に既に分類済み列があったため "
+            f"\"{c1_col}\"/\"{c2_col}\"/\"{c3_col}\"/\"{c4_col}\" 列として追加しました"
+        )
     print(f"出力先: {output_path}")
+
+    # --with-report指定時は、分類結果のCSVをそのままanalyzeサブコマンドに渡して
+    # HTMLレポートも続けて生成する（GUIの「AIによるクエリの分類」設定に「レポート
+    # 出力（はい/いいえ）」を追加したのに合わせて2026-08-29新設。project memory
+    # 参照）。AIコメンタリー無し・上位クエリ50件固定はcmd_analyze単体実行時の
+    # GUIデフォルトと揃える。argparse.Namespaceを直接組み立てるのは、CLI側の
+    # 本物のargparse.Namespaceとgui_app._Args（duck-typedな簡易Namespace）の
+    # どちらから呼ばれてもcmd_analyzeがargs.xxxで属性アクセスできればよいため。
+    if getattr(args, "with_report", False):
+        print("\n=== レポート出力（analyze）を続けて実行します ===")
+        analyze_args = argparse.Namespace(
+            input_csv=output_path, top_n=50, with_ai_commentary=False, token=args.token,
+        )
+        cmd_analyze(analyze_args)
 
 
 def cmd_analyze(args: argparse.Namespace) -> None:
@@ -282,6 +334,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     classification_breakdown = analyze_trends_lib.compute_classification_breakdown(rows, order)
     poi_taxonomy_breakdown = analyze_trends_lib.compute_poi_taxonomy_breakdown(rows)
     address_structure_breakdown = analyze_trends_lib.compute_address_structure_breakdown(rows)
+    brand_breakdown = analyze_trends_lib.compute_brand_breakdown(rows)
 
     ts = current_timestamp()
     top_queries_path = make_output_path(args.input_csv, "trend_top_queries_result", timestamp=ts)
@@ -306,7 +359,9 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     ai_model = None
     if args.with_ai_commentary:
         summary_payload = ai_analyze_lib.build_summary_payload(order, top_queries, daily, usage, long_tail)
-        ai_model = classification_common_lib.MODEL_CHOICES[args.model]
+        # 2026-08-30、固定モデル文字列でなくModels APIで最新版を自動解決する
+        # （project memory参照。ファミリー(Sonnet)自体は固定、バージョンのみ追従）。
+        ai_model = classification_common_lib.resolve_model("sonnet", api_key=args.token)
         try:
             ai_commentary = ai_analyze_lib.generate_commentary(summary_payload, model=ai_model, api_key=args.token)
         except Exception as e:
@@ -325,6 +380,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
         classification_breakdown=classification_breakdown,
         poi_taxonomy_breakdown=poi_taxonomy_breakdown,
         address_structure_breakdown=address_structure_breakdown,
+        brand_breakdown=brand_breakdown,
     )
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html_report)
@@ -333,7 +389,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     print(f"カテゴリ数: {len(order)}（{', '.join(order)}）")
     if args.with_ai_commentary:
         status = "生成成功" if ai_commentary else "生成失敗（レポートには含まれません）"
-        print(f"AIコメンタリー: {status}（モデル: {args.model} / {ai_model}）")
+        print(f"AIコメンタリー: {status}（モデル: {ai_model}）")
     print("出力先:")
     print(f"  {top_queries_path}")
     print(f"  {daily_path}")
@@ -384,14 +440,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("input_csv")
     p.add_argument(
-        "--model",
-        default="haiku+sonnet",
-        choices=list(classification_common_lib.MODEL_PRESETS.keys()),
-        help="分類に使うモデル構成（デフォルト: haiku+sonnet ＝ ai_classification/_2をHaiku・"
-        "ai_classification_3をSonnetで判定。haiku/sonnetは両階層を同一モデルに統一する"
-        "比較検証用の選択肢。--batch-api使用時も含め全プリセット指定可）",
-    )
-    p.add_argument(
         "--filter-column",
         default=None,
         help="対象行を絞り込む列名（未指定なら全行が対象）。--filter-op/--filter-valueと組で指定する",
@@ -410,9 +458,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--batch-api",
-        action="store_true",
-        help="同期呼び出しの代わりにAnthropic Message Batches APIを使う"
-        "（トークン単価が通常の50%%だが非同期でジョブ完了待ちが発生する。要anthropicパッケージ）",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Anthropic Message Batches APIを使う（トークン単価が通常の50%%になる代わりに"
+        "非同期でジョブ完了待ちが発生する。要anthropicパッケージ）。2026-08-28よりデフォルトON"
+        "（大量実行時のコスト削減のため）。--no-batch-apiで従来の同期即時呼び出しに戻せる",
     )
     p.add_argument(
         "--token",
@@ -423,11 +473,46 @@ def build_parser() -> argparse.ArgumentParser:
         "--resume-batch-job",
         default=None,
         help="中断した--batch-apiジョブを再開する（local_output/batch_state_*.jsonのパスを指定）。"
-        "input_csvや--filter-*/--batch-size/--modelは前回と同じものを指定すること",
+        "input_csvや--filter-*/--batch-sizeは前回と同じものを指定すること",
     )
-    p.add_argument("--batch-size", type=int, default=30)
-    p.add_argument("--workers", type=int, default=8, help="並行実行するリクエスト数（--batch-api指定時は無視）")
+    p.add_argument(
+        "--batch-size",
+        type=int,
+        default=1000,
+        help="--batch-api使用時（デフォルト）に1回のAPI呼び出しに含めるクエリ件数。"
+        "2026-08-28、30→90に変更（system promptがHaiku 4.5のキャッシュ最低サイズ4096"
+        "トークン未満で毎回フルプライス課金になっている問題への対策として、呼び出し"
+        "回数自体を減らす狙い。実データ154バッチ・4500件での検証でbatch_size 30/90間の"
+        "欠落率・エラー率に有意差は見られなかった）。2026-08-29、level3のBRAND_KNOWLEDGE"
+        "撤去後もsystem promptが引き続きキャッシュ最低サイズ未満のままだったため、"
+        "同じ狙いで90→300にさらに引き上げ。2026-08-30、非同期ジョブ登録"
+        "（client.messages.batches.create()）は同期待ちしないため、非ストリーミング"
+        "SDKのmax_tokens>約16,000ガードの対象外と判明し、--no-batch-api用の"
+        "--sync-batch-sizeと設定を分離。max_tokensはbatch_sizeから動的に計算する"
+        "ようになった（Haiku 4.5のmax_tokensハード上限64,000まで使える。project"
+        "memory参照）ため、300より大きい値も指定可能になり、実データ550件・1チャンク"
+        "での検証（欠落率0.7%%、既存水準と同程度）を踏まえて300→1000にさらに引き上げ",
+    )
+    p.add_argument(
+        "--sync-batch-size",
+        type=int,
+        default=300,
+        help="--no-batch-api使用時に1回のAPI呼び出しに含めるクエリ件数。こちらは全"
+        "呼び出しが同期client.messages.create()のため、非ストリーミングSDKの"
+        "max_tokens>約16,000ガードの対象（--batch-size使用時と違い300超は非推奨。"
+        "project memory参照）",
+    )
+    p.add_argument(
+        "--workers", type=int, default=8,
+        help="並行実行するリクエスト数（--batch-api指定時は、個別リトライ分の並行数として使う）",
+    )
     p.add_argument("--max-batches", type=int, default=None, help="先頭から指定バッチ数までに処理を絞る（動作確認用）")
+    p.add_argument(
+        "--with-report",
+        action="store_true",
+        help="分類完了後、続けてanalyzeサブコマンド相当のHTMLレポートも生成する"
+        "（AIコメンタリー無し・上位クエリ50件固定。GUIの「レポート出力」に対応）",
+    )
     p.set_defaults(func=cmd_ai_classify)
 
     p = sub.add_parser("analyze", help="クエリ傾向を分析する（HTMLレポート込み。--with-ai-commentaryでAIコメンタリーを追加）")
@@ -436,14 +521,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--with-ai-commentary",
         action="store_true",
-        help="集計結果をもとにLLM（本物のAnthropic API、要ANTHROPIC_API_KEYまたは--token）に"
-        "クエリ傾向のコメンタリーを書かせ、レポートに追加する（元CSVの生データはAIに渡さない）",
-    )
-    p.add_argument(
-        "--model",
-        default="sonnet",
-        choices=list(classification_common_lib.MODEL_CHOICES.keys()),
-        help="AIコメンタリー生成に使うモデル（--with-ai-commentary指定時のみ使用、デフォルト: sonnet）",
+        help="集計結果をもとにLLM（本物のAnthropic API、要ANTHROPIC_API_KEYまたは--token、"
+        "モデルはSonnet固定）にクエリ傾向のコメンタリーを書かせ、レポートに追加する"
+        "（元CSVの生データはAIに渡さない）",
     )
     p.add_argument(
         "--token",
