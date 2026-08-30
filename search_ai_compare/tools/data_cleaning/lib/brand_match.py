@@ -45,12 +45,40 @@ project memory参照）:
 from dataclasses import dataclass, field
 
 from lib import brand_data
+from lib.jp_prefectures import PREFECTURES
 from lib.kana_match import normalize_variants
 
 # substring_index（方向2）のキーがヒットするブランド数の上限。これを超えるキーは
 # 「一般名詞が偶然たくさんのブランド名に含まれているだけ」とみなして間引く
 # （build_index()のモジュールdocstring参照。2026-08-29実データ検証で3を採用）。
 DEFAULT_MAX_SUBSTRING_MATCHES = 3
+
+# クエリ全体が都道府県名(正式名称またはサフィックス省略形)と完全一致する場合、
+# substring_index（方向2、「クエリ自体がブランド名の一部分」）の参照をスキップする
+# （2026-08-30、project memory参照）。
+#
+# 背景: 「富山」「山形」のような都道府県名の省略形クエリが、「富山銀行」
+# 「山形銀行」のような無関係な地方銀行ブランド名の部分文字列にたまたま一致し、
+# brand_poiへ誤誘導される実データ上のバグが見つかった。地方銀行ブランド自体は
+# データから削除した（BRAND_CATEGORY_MAP参照）が、都道府県名を含むブランドは
+# 銀行以外にも存在する(例: "東京電力"に対する"東京"、"大阪王将"に対する"大阪")。
+# 都道府県は47件の閉じた集合なので、機械的に確実に除外できる。
+#
+# 方向1(whole_forms、ブランド名がまるごとクエリに埋め込まれているケース)は
+# この除外の対象外: 都道府県名自体が正式なブランド名・別名として登録されている
+# ような場合（例: "北海道"がBRAND_CATEGORY_MAPのキーそのもの）は、これまで通り
+# 拾える。影響を受けるのは「クエリが地名の断片に過ぎず、ブランド名の前方一致に
+# 偶然引っかかっただけ」というケースだけ。
+def _build_administrative_place_names() -> frozenset[str]:
+    names = set()
+    for full_name, _lat, _lon, _romaji in PREFECTURES:
+        names.add(full_name)
+        if full_name != "北海道":
+            names.add(full_name[:-1])  # 都/府/県を1文字落とした省略形
+    return frozenset(names)
+
+
+ADMINISTRATIVE_PLACE_NAMES: frozenset[str] = _build_administrative_place_names()
 
 
 @dataclass
@@ -113,14 +141,19 @@ def find_candidates(query: str, idx: BrandMatchIndex) -> set[str]:
 
     candidates: set[str] = set()
     query_forms = normalize_variants(query)
+    is_bare_place_name = query.strip() in ADMINISTRATIVE_PLACE_NAMES
 
     for qform in query_forms:
         if len(qform) < idx.min_len:
             continue
         # 方向2: クエリ自体がブランド名の一部分（プレフィックス等）→ O(1)照合
-        hit = idx.substring_index.get(qform)
-        if hit:
-            candidates.update(hit)
+        # ただし、クエリ全体が都道府県名と完全一致する場合はスキップする
+        # （ADMINISTRATIVE_PLACE_NAMES参照。地名の断片がたまたま無関係な
+        # ブランド名の部分文字列に一致するノイズを構造的に防ぐ）。
+        if not is_bare_place_name:
+            hit = idx.substring_index.get(qform)
+            if hit:
+                candidates.update(hit)
         # 方向1: クエリの中にブランド名の変換形がまるごと埋め込まれている
         # → クエリ側の部分文字列を生成してO(1)照合
         for sub in _all_substrings(qform, idx.min_len):
