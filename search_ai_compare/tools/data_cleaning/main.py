@@ -7,7 +7,10 @@ data_cleaning/ のCSVクレンジング・AI分類・傾向分析を1つにま�
                           same_query_count列を自動付与）
   add-query-count        same_query_count列だけを付与する（重複除去はしない、プログラム的カウントのみ、AI不使用）
   collapse-sessions      セッションID列（session_token等、自動検出）内でタイピング途中の断片を間引く
-                          （リアルタイム検索候補APIの生ログ対策。dedupの後に使う想定）
+                          （リアルタイム検索候補APIの生ログ対策。dedupの後に使う想定）。
+                          proximity列があれば、session_token単独行（毎リクエスト新規発行される
+                          クライアントの癖への対策）をproximity完全一致＋時間窓で疑似セッション化
+                          してから間引く（--fallback-window-secondsで時間窓を変更可）
   ai-collapse-sessions   collapse-sessionsの後段。文字列前方一致だけでは間引けない
                           IME変換途中・住所桁の打ち直し・表記ゆれをHaikuで判定して間引く
   count-column           指定した列の出現回数を集計する（--columnでquery/ai_classification等を指定、デフォルトquery）
@@ -113,7 +116,13 @@ def cmd_add_query_count(args: argparse.Namespace) -> None:
 def cmd_collapse_sessions(args: argparse.Namespace) -> None:
     """セッションID列（自動検出）内で、タイピング途中の断片（後続に自分自身を
     先頭に含むより長いqueryが存在する行）を間引く（lib/session_collapse.py参照）。
-    セッションID列が見つからない場合は処理をスキップし、入力をそのまま出力する。"""
+    セッションID列が見つからない場合は処理をスキップし、入力をそのまま出力する。
+
+    2026-08-31、proximity列が見つかり、かつsession_token単独行（＝実際は同じ
+    タイピングセッションのはずがsession_tokenがリクエストごとにバラバラに
+    発行されている、LUUP実データで確認済みのケース）がある場合、proximity
+    完全一致＋時間窓（--fallback-window-seconds、デフォルト30秒）で疑似
+    セッションを再構成してから同じ間引きにかける（project memory参照）。"""
     fieldnames, rows = session_collapse_lib.read_rows(args.input_csv)
     before = len(rows)
 
@@ -128,12 +137,19 @@ def cmd_collapse_sessions(args: argparse.Namespace) -> None:
         return
 
     datetime_column = "datetime" if "datetime" in fieldnames else None
+    proximity_column = session_collapse_lib.detect_proximity_column(fieldnames)
     result = session_collapse_lib.collapse_sessions(
         rows, session_column, datetime_column=datetime_column,
+        proximity_column=proximity_column, fallback_time_window_seconds=args.fallback_window_seconds,
     )
     session_collapse_lib.write_rows(output_path, fieldnames, result.kept_rows)
 
     print(f"セッションID列: \"{session_column}\"" + ("（datetime列で順序判定）" if datetime_column else "（元のファイル順で順序判定）"))
+    if proximity_column and datetime_column:
+        print(f"Proximity列: \"{proximity_column}\"（フォールバック時間窓: {args.fallback_window_seconds}秒）")
+        print(f"session_token単独行から再構成した疑似セッション数: {result.fallback_session_count}")
+    elif proximity_column and not datetime_column:
+        print("proximity列はあるがdatetime列が無いため、フォールバックの疑似セッション化はスキップしました。")
     print(f"入力行数: {before}")
     print(f"間引き後の行数: {len(result.kept_rows)}（{result.dropped_count}件削除）")
     print(f"出力先: {output_path}")
@@ -523,9 +539,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "collapse-sessions",
         help="セッションID列（session_token等、自動検出）内でタイピング途中の断片を間引く"
-        "（dedupの後に使う想定。セッションID列が無ければ入力をそのまま出力）",
+        "（dedupの後に使う想定。セッションID列が無ければ入力をそのまま出力）。"
+        "proximity列がある場合、session_token単独行はproximity完全一致＋時間窓で"
+        "疑似セッション化してから間引く",
     )
     p.add_argument("input_csv")
+    p.add_argument(
+        "--fallback-window-seconds", type=int, default=session_collapse_lib.DEFAULT_FALLBACK_TIME_WINDOW_SECONDS,
+        help=f"session_token単独行の疑似セッション化に使う時間窓（秒、デフォルト"
+        f"{session_collapse_lib.DEFAULT_FALLBACK_TIME_WINDOW_SECONDS}。実データ分析に基づく値、詳細はlib/session_collapse.py参照）",
+    )
     p.set_defaults(func=cmd_collapse_sessions)
 
     p = sub.add_parser(

@@ -24,10 +24,41 @@ analyze集計に流すと、コストの無駄・レポートの歪みの両方�
 先頭一致で続く場合、AはCに対しても間接的に先頭一致する）が成り立つため、
 「削除された行」ではなく「残すと決めた行」の集合とだけ比較すればよく、
 O(セッション内行数 × 残った行数)で計算できる。
+
+【フォールバック疑似セッション（2026-08-31、project memory参照）】
+LUUP由来のログ実データで、session_token列が「1文字打つごとに毎回新規発行」
+されており、同一タイピングセッションのはずの行群がすべて別々のsession_token
+（＝上記の間引きロジックが一切効かない、比較対象がいないため）になっている
+ケースが実測で確認された（あるファイルではsuggest行の89.6%がsession_token
+単独行）。
+
+これを救うため、session_token単独行（＝真のグループサイズが1の行）に限り、
+proximity列（unquote後の文字列で完全一致）＋タイムスタンプの近さ（デフォルト
+30秒以内が連続していれば同一クラスタ、それ以上開けば別クラスタに分割）で
+疑似セッションを再構成し、上記と同じ前方一致ロジックに乗せる。
+
+閾値の根拠（実データ分析）:
+- proximityは完全一致 or 大きくジャンプ(≧0.01度=1km超の実移動)の二極化で、
+  中間の「揺らぎ」はほぼ存在しない（隣接ペア6,765件中98.8%が完全一致、
+  0.0001〜0.001度のズレはわずか0.03%）。LUUPアプリは現在地でなく地図描画
+  範囲の中央をproximityにしているらしく、GPS由来の揺らぎが出ないため
+  （ユーザー確認済み）。よって小数点以下を丸めての緩い一致は不要かつ、
+  無関係な別ユーザーを誤って同一視するリスクを増やすだけなので採用しない。
+- 一方、1つのproximity値に137個もの異なるsession_tokenがぶら下がる
+  ケースがあり（駅前のLUUPポート等、固定地点に丸められた座標とみられる）、
+  proximity完全一致だけでは別人同士を誤結合しかねない。時間窓は実測の
+  セッション内リクエスト間隔（99%ileが14秒）から30秒とし、かつ実際の
+  行削除判定は依然として前方一致ロジックに委ねる（疑似クラスタ内に無関係な
+  別人のクエリが紛れ込んでも、前方一致しない限り削除されないため実害は
+  ほぼ出ない設計）。
+- datetime列が無い、またはproximityが空の行はフォールバック対象外
+  （時間窓判定ができないため）。
 """
 
 import csv
+import urllib.parse
 from dataclasses import dataclass
+from datetime import datetime
 
 # 列名の自動検出候補（gui_app.pyのQUERY_COLUMN_CANDIDATESと同じ発想。
 # 大文字小文字を無視して照合する）。
@@ -35,6 +66,13 @@ SESSION_COLUMN_CANDIDATES = [
     "session_token", "session_id", "sessionid", "session",
     "セッション", "セッションid", "セッショントークン",
 ]
+
+# proximityはMapbox Search Box/Geocoding APIの決まったパラメータ名なので、
+# session列ほど表記ゆれを想定していない（case-insensitiveのみ吸収する）。
+PROXIMITY_COLUMN_CANDIDATES = ["proximity"]
+
+# フォールバック疑似セッションの時間窓（秒）。上記docstring参照。
+DEFAULT_FALLBACK_TIME_WINDOW_SECONDS = 30
 
 
 def detect_session_column(fieldnames: list[str]) -> str | None:
@@ -47,10 +85,74 @@ def detect_session_column(fieldnames: list[str]) -> str | None:
     return None
 
 
+def detect_proximity_column(fieldnames: list[str]) -> str | None:
+    """fieldnamesの中からproximity列を検出する（大文字小文字を無視）。
+    見つからなければNone（フォールバック疑似セッションはスキップされる）。"""
+    lowered = {name.lower(): name for name in fieldnames}
+    for candidate in PROXIMITY_COLUMN_CANDIDATES:
+        if candidate.lower() in lowered:
+            return lowered[candidate.lower()]
+    return None
+
+
+def _parse_datetime(raw: str) -> datetime | None:
+    """"2026-08-25 23:59:49 UTC" 形式をパースする。失敗時はNone。"""
+    s = (raw or "").strip()
+    if s.endswith(" UTC"):
+        s = s[: -len(" UTC")]
+    try:
+        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def _build_fallback_pseudo_sessions(
+    rows: list[dict],
+    candidate_indices: list[int],
+    proximity_column: str,
+    datetime_column: str,
+    time_window_seconds: int,
+) -> list[list[int]]:
+    """session_token単独行（candidate_indices）を、proximity完全一致＋時間窓で
+    疑似セッションにクラスタリングする。2行以上になったクラスタのみ返す
+    （1行だけのクラスタは間引きようがないので不要）。"""
+    by_proximity: dict[str, list[int]] = {}
+    for i in candidate_indices:
+        raw = rows[i].get(proximity_column, "")
+        prox = urllib.parse.unquote(raw or "").strip()
+        if not prox:
+            continue
+        dt = _parse_datetime(rows[i].get(datetime_column, ""))
+        if dt is None:
+            continue
+        by_proximity.setdefault(prox, []).append(i)
+
+    clusters: list[list[int]] = []
+    for indices in by_proximity.values():
+        ordered = sorted(indices, key=lambda i: _parse_datetime(rows[i].get(datetime_column, "")))
+        current: list[int] = [ordered[0]]
+        prev_dt = _parse_datetime(rows[ordered[0]].get(datetime_column, ""))
+        for i in ordered[1:]:
+            dt = _parse_datetime(rows[i].get(datetime_column, ""))
+            gap = (dt - prev_dt).total_seconds()
+            if gap <= time_window_seconds:
+                current.append(i)
+            else:
+                if len(current) >= 2:
+                    clusters.append(current)
+                current = [i]
+            prev_dt = dt
+        if len(current) >= 2:
+            clusters.append(current)
+
+    return clusters
+
+
 @dataclass
 class CollapseResult:
     kept_rows: list[dict]
     dropped_count: int
+    fallback_session_count: int = 0
 
 
 def collapse_sessions(
@@ -58,6 +160,8 @@ def collapse_sessions(
     session_column: str,
     query_column: str = "query",
     datetime_column: str | None = "datetime",
+    proximity_column: str | None = None,
+    fallback_time_window_seconds: int = DEFAULT_FALLBACK_TIME_WINDOW_SECONDS,
 ) -> CollapseResult:
     """セッションごとにタイピング途中の断片を間引く。rowsは元の行順のまま
     （csv.DictReaderの出現順）を前提とする。datetime_column（存在する場合）で
@@ -67,7 +171,12 @@ def collapse_sessions(
     行が混在する場合は元のファイル順を使う。
 
     session_column の値が空文字列の行は、グルーピング対象外として無条件で残す
-    （判定不能なため）。"""
+    （判定不能なため）。
+
+    proximity_columnを指定すると、session_column単独行（真のグループサイズが1）
+    に限りフォールバック疑似セッションを追加で構成する（モジュールdocstring
+    参照。LUUP実データでsession_tokenが1リクエストごとに使い捨てにされている
+    ケースへの対策）。datetime_columnが無い場合はフォールバックは効かない。"""
     n = len(rows)
     # (session値, 元のインデックス, ソートキー) の3つ組でグルーピングする。
     groups: dict[str, list[int]] = {}
@@ -81,8 +190,15 @@ def collapse_sessions(
         (row.get(datetime_column) or "").strip() for row in rows
     )
 
+    fallback_clusters: list[list[int]] = []
+    if proximity_column is not None and has_datetime:
+        singleton_indices = [indices[0] for indices in groups.values() if len(indices) == 1]
+        fallback_clusters = _build_fallback_pseudo_sessions(
+            rows, singleton_indices, proximity_column, datetime_column, fallback_time_window_seconds,
+        )
+
     dropped = [False] * n
-    for indices in groups.values():
+    for indices in list(groups.values()) + fallback_clusters:
         if len(indices) < 2:
             continue
         if has_datetime:
@@ -135,7 +251,11 @@ def collapse_sessions(
             dropped[i] = True
 
     kept_rows = [row for i, row in enumerate(rows) if not dropped[i]]
-    return CollapseResult(kept_rows=kept_rows, dropped_count=n - len(kept_rows))
+    return CollapseResult(
+        kept_rows=kept_rows,
+        dropped_count=n - len(kept_rows),
+        fallback_session_count=len(fallback_clusters),
+    )
 
 
 def read_rows(input_path: str) -> tuple[list[str], list[dict]]:
