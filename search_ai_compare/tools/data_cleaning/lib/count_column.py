@@ -50,7 +50,9 @@ def count_values(values: list[str], column: str) -> list[tuple[str, int]]:
 
 
 def write_counts(output_path: str, column: str, items: list[tuple[str, int]], total: int) -> None:
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
+    # 2026-08-31、Excel等での文字化け対策としてBOM付きUTF-8で出力するようにした
+    # （project memory参照）。
+    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
         writer.writerow([column, "count", "ratio"])
         for label, count in items:

@@ -156,7 +156,9 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
 
     if filter_column and not target_indices:
         print(f'絞り込み条件（{filter_column} {args.filter_op} {args.filter_value!r}）に一致する行が見つかりませんでした。処理対象なし。')
-        with open(output_path, "w", newline="", encoding="utf-8") as f:
+        # 2026-08-31、Excel等での文字化け対策としてBOM付きUTF-8で出力するようにした
+        # （project memory参照）。
+        with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
@@ -266,7 +268,9 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
             c1, c2, c3, c4 = mapping[rows[i].get("query", "")]
             rows[i][c1_col], rows[i][c2_col], rows[i][c3_col], rows[i][c4_col] = c1, c2, c3, c4
 
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
+    # 2026-08-31、Excel等での文字化け対策としてBOM付きUTF-8で出力するようにした
+    # （project memory参照）。
+    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=out_fieldnames)
         writer.writeheader()
         writer.writerows(rows)

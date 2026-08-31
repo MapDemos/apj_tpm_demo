@@ -60,7 +60,7 @@ import anthropic
 from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
 from anthropic.types.messages.batch_create_params import Request
 
-from lib import brand_match
+from lib import brand_match, jp_municipalities
 from lib.classification_common import (
     POI_SUBTYPE_VALUES,
     SYSTEM_PROMPT_CATEGORY_RECHECK,
@@ -594,7 +594,17 @@ def classify_unique(
     いる場合、ジョブのポーリング中・各フェーズの境目でclassification_common.
     OperationCancelledを送出して中断する。ジョブ自体はAnthropic側で動き続けるため、
     state_pathに保存済みのjob_idを使って後から--resume-batch-jobで再開できる。"""
-    unique_queries = list(dict.fromkeys(queries))
+    unique_queries_all = list(dict.fromkeys(queries))
+
+    # 2026-08-31、市区町村名(lib/jp_municipalities.py)に完全一致するクエリは
+    # Python側で決定的にaddress/placeと確定させ、level1/2/3いずれのLLM呼び出し
+    # 対象からも除外する（ai_classify.classify_unique（同期API版）と同じ設計。
+    # project memory参照）。
+    municipality_matches = {
+        q for q in unique_queries_all if jp_municipalities.is_bare_municipality_name(q)
+    }
+    unique_queries = [q for q in unique_queries_all if q not in municipality_matches]
+
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
 
     # brand_match: クエリごとに機械的な部分一致（表記体系をまたぐ）で検出した
@@ -794,4 +804,6 @@ def classify_unique(
         pass
 
     mapping = dict(zip(unique_queries, records))
+    for q in municipality_matches:
+        mapping[q] = ("address", "place", "", "")
     return mapping, usage_totals, failed_ranges, failed_queries

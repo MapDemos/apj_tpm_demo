@@ -47,7 +47,7 @@ import json
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from lib import brand_match
+from lib import brand_match, jp_municipalities
 from lib.classification_common import (
     CLASSIFY_MODEL,
     POI_SUBTYPE_VALUES,
@@ -375,7 +375,23 @@ def classify_unique(
     直前のフェーズが完了するまでは通常通り待つ（project memory参照）。"""
     import anthropic
 
-    unique_queries = list(dict.fromkeys(queries))
+    unique_queries_all = list(dict.fromkeys(queries))
+
+    # 2026-08-31、市区町村名(lib/jp_municipalities.py)に完全一致するクエリは
+    # Python側で決定的にaddress/placeと確定させ、level1/2/3いずれのLLM呼び出し
+    # 対象からも除外する（project memory参照。「加古川」「喜多方」のような、
+    # 全国的な知名度が高くない市区町村名がLLMの「有名地名かどうか」という主観的
+    # 判断に依存してunique_poiに誤判定される問題への対策。brand_matchの候補注入
+    # とは違い、この判定はLLMへのヒントではなく機械的なbypassである点に注意
+    # （出力スキーマを変えないため、候補ありの応答で発生したデコード周りの
+    # 非決定性リスクを再発させない）。前方一致（"仙台城"等の地名+施設語）は
+    # 対象外（BOUNDARY_GUIDANCEの「地名の既定値」ルールの例外規定で引き続き
+    # LLMがpoi判定できるため）。
+    municipality_matches = {
+        q for q in unique_queries_all if jp_municipalities.is_bare_municipality_name(q)
+    }
+    unique_queries = [q for q in unique_queries_all if q not in municipality_matches]
+
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
 
     # brand_match: クエリごとに機械的な部分一致（表記体系をまたぐ）で検出した
@@ -519,4 +535,6 @@ def classify_unique(
         records.append((c1, c2, c3, brand))
 
     mapping = dict(zip(unique_queries, records))
+    for q in municipality_matches:
+        mapping[q] = ("address", "place", "", "")
     return mapping, usage_totals, failed_queries

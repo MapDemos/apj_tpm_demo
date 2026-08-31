@@ -35,7 +35,9 @@ def read_rows(input_path: str) -> tuple[list[str], list[dict]]:
 
 
 def write_rows(output_path: str, fieldnames: list[str], rows: list[dict]) -> None:
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
+    # 2026-08-31、Excel等での文字化け対策としてBOM付きUTF-8で出力するようにした
+    # （project memory参照）。
+    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
