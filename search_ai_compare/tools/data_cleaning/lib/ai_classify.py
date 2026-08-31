@@ -52,13 +52,15 @@ from lib.classification_common import (
     CLASSIFY_MODEL,
     POI_SUBTYPE_VALUES,
     SYSTEM_PROMPT_CATEGORY_RECHECK,
-    SYSTEM_PROMPT_LEVEL12,
+    SYSTEM_PROMPT_LEVEL1,
+    SYSTEM_PROMPT_LEVEL2_POI,
     SYSTEM_PROMPT_LEVEL3,
     add_usage,
-    build_level12_user_content,
+    build_indexed_candidates_user_content,
     build_level3_user_content,
     decode_indexed_leaf_responses,
-    decode_indexed_level12_responses,
+    decode_indexed_level1_responses,
+    decode_indexed_level2_poi_responses,
     decode_indexed_recheck_responses,
     leaves_for_matched_brand,
     new_usage_totals,
@@ -79,7 +81,7 @@ RETRY_GROUP_SIZE = 100
 
 def _call_claude_raw(client, system_prompt: str, user_content: str, model: str) -> tuple[list, dict]:
     """本物のAnthropic APIに同期リクエストを送り、パース済みのJSON配列(items)と
-    usageを返す。system_promptだけがcall_claude_level12/level3で異なり、リクエスト
+    usageを返す。system_promptだけがcall_claude_level1/level2_poi/level3で異なり、リクエスト
     送信・レスポンスのコードフェンス除去・JSONパースは共通なのでここに集約する。
     clientはclassify_unique()で1回だけ作って使い回す（anthropicのクライアントは
     スレッドセーフなので、ThreadPoolExecutorの並行呼び出しでも問題ない。
@@ -141,14 +143,15 @@ def _call_claude_raw(client, system_prompt: str, user_content: str, model: str) 
     return items, usage
 
 
-def call_claude_level12(
-    client, items: list[tuple[str, list[str] | None]], model: str,
+def call_claude_level1(
+    client, items: list[str], model: str,
 ) -> tuple[list[tuple[str, str, str | None] | None], dict]:
-    """ai_classification/_2に加えて、機械的に検出したブランド候補のうちどれが
-    一致したかを判定する。itemsは(query, brand_match.find_candidatesで検出した
-    候補配列 or None)の組（BRAND_CANDIDATE_GUIDANCE参照）。SYSTEM_PROMPT_LEVEL12は
-    CATEGORY_TAXONOMYの全カテゴリ一覧を含まない軽量版のため、SYSTEM_PROMPT_LEVEL3比で
-    サイズが小さい（機械マッチで絞った少数の候補だけは別途この呼び出しに乗せる）。
+    """ai_classificationと、addressの場合のみそのサブタイプ(ai_classification_2)を
+    判定する（2026-08-31新設。旧call_claude_level12から分離、project memory参照）。
+    itemsはクエリ文字列のリスト——brand_match候補は一切見せない（候補情報がpoi/
+    address/unknown/semantic_queryの判定自体に漏れ出し、短い断片や有名な駅名の
+    地名がpoiに誤誘導される問題への対策）。SYSTEM_PROMPT_LEVEL1はPOI_SUBTYPES・
+    BRAND_CANDIDATE_GUIDANCEを含まないため、call_claude_level2_poi比でさらに軽量。
 
     戻り値のレコードリストは、LLM応答から実質的に欠落していた（インデックスが
     見つからなかった）位置にNoneが入る（2026-08-27、要素数ズレ対策のインデックス
@@ -156,13 +159,34 @@ def call_claude_level12(
     今は個々の欠落だけをNoneとして返し、呼び出し元(_run_batches_concurrently)が
     その位置だけ個別リトライする）。応答自体がJSON配列ですらない場合のみ、
     ここで例外にしてバッチ全体を個別リトライに回す。"""
-    queries = [q for q, _ in items]
-    candidates = [c for _, c in items]
-    user_content = build_level12_user_content(queries, candidates)
-    raw_items, usage = _call_claude_raw(client, SYSTEM_PROMPT_LEVEL12, user_content, model)
+    candidates: list[list[str] | None] = [None] * len(items)
+    user_content = build_indexed_candidates_user_content(items, candidates)
+    raw_items, usage = _call_claude_raw(client, SYSTEM_PROMPT_LEVEL1, user_content, model)
     if not isinstance(raw_items, list):
         raise ValueError(f"LLM応答がJSON配列ではありません（実際: {type(raw_items).__name__}）")
-    records, _missing = decode_indexed_level12_responses(raw_items, candidates)
+    records, _missing = decode_indexed_level1_responses(raw_items, candidates)
+    return records, usage
+
+
+def call_claude_level2_poi(
+    client, items: list[tuple[str, list[str] | None]], model: str,
+) -> tuple[list[tuple[str, str, str | None] | None], dict]:
+    """poiと確定済みのクエリのサブタイプ(ai_classification_2、unique_poi/brand_poi/
+    category)と、機械的に検出したブランド候補のうちどれが一致したかを判定する
+    （2026-08-31新設。旧call_claude_level12から分離、project memory参照）。itemsは
+    (query, brand_match.find_candidatesで検出した候補配列 or None)の組
+    （BRAND_CANDIDATE_GUIDANCE参照）。呼び出し元(classify_unique)はcall_claude_
+    level1でai_classification="poi"と確定した行だけをここに渡す。
+
+    戻り値の欠落時の扱いはcall_claude_level1と同じ（Noneで返し、部分的な
+    個別リトライに委ねる）。"""
+    queries = [q for q, _ in items]
+    candidates = [c for _, c in items]
+    user_content = build_indexed_candidates_user_content(queries, candidates)
+    raw_items, usage = _call_claude_raw(client, SYSTEM_PROMPT_LEVEL2_POI, user_content, model)
+    if not isinstance(raw_items, list):
+        raise ValueError(f"LLM応答がJSON配列ではありません（実際: {type(raw_items).__name__}）")
+    records, _missing = decode_indexed_level2_poi_responses(raw_items, candidates)
     return records, usage
 
 
@@ -175,7 +199,7 @@ def call_claude_level3(
     （2026-08-29、subtype別に分かれていたプロンプトを統合。classification_common.
     build_system_prompt_level3のdocstring参照）。
 
-    戻り値の欠落時の扱いはcall_claude_level12と同じ（Noneで返し、部分的な
+    戻り値の欠落時の扱いはcall_claude_level1と同じ（Noneで返し、部分的な
     個別リトライに委ねる）。"""
     user_content = build_level3_user_content(items)
     raw_items, usage = _call_claude_raw(client, system_prompt, user_content, model)
@@ -192,16 +216,16 @@ def call_claude_category_recheck(
     どのリーフにも一致しなかった）と判定された行だけを対象に、その判定自体が
     正しかったかを再確認する（2026-08-28新設。classification_common.
     build_system_prompt_category_recheckのdocstring・project memory参照）。
-    itemsはcall_claude_level12と同じ形式（query, 機械マッチしたブランド候補配列
-    or None）を流用する（入出力の形自体がlevel12と同一のため、
-    build_level12_user_contentをそのまま再利用している）。
+    itemsはcall_claude_level2_poiと同じ形式（query, 機械マッチしたブランド候補配列
+    or None）を流用する（入出力の形自体が同一のため、
+    build_indexed_candidates_user_contentをそのまま再利用している）。
 
     戻り値のレコードは(choice, matched_brand)のタプルで、choiceは
     "category"/"unique_poi"/"brand_poi"/"broken"のいずれか。LLM応答から実質的に
-    欠落していた位置はNone（call_claude_level12と同じ欠落時の扱い）。"""
+    欠落していた位置はNone（call_claude_level2_poiと同じ欠落時の扱い）。"""
     queries = [q for q, _ in items]
     candidates = [c for _, c in items]
-    user_content = build_level12_user_content(queries, candidates)
+    user_content = build_indexed_candidates_user_content(queries, candidates)
     raw_items, usage = _call_claude_raw(client, SYSTEM_PROMPT_CATEGORY_RECHECK, user_content, model)
     if not isinstance(raw_items, list):
         raise ValueError(f"LLM応答がJSON配列ではありません（実際: {type(raw_items).__name__}）")
@@ -211,9 +235,9 @@ def call_claude_category_recheck(
 
 def _run_batches_concurrently(items, batch_size, max_workers, call_fn, unknown_value, label):
     """itemsをbatch_size件ずつに分けて並行処理する汎用ヘルパー。call_fn(batch)は
-    (records, usage)を返す関数（call_claude_level12/level3どちらにも対応できるよう
-    itemsの中身は問わない）。recordsはbatchと同じ長さで、LLM応答から実質的に
-    欠落していた要素はNoneになっている想定（call_claude_level12/level3の
+    (records, usage)を返す関数（call_claude_level1/level2_poi/level3どれにも
+    対応できるようitemsの中身は問わない）。recordsはbatchと同じ長さで、LLM応答から
+    実質的に欠落していた要素はNoneになっている想定（各call_claude_*関数の
     インデックス方式デコード参照）。
 
     2026-08-27、バッチが応答全体として失敗（JSON配列ですらない等）した場合と、
@@ -343,8 +367,9 @@ def classify_unique(
     api_key: str | None = None,
     cancel_event=None,
 ) -> tuple[dict[str, Record], dict[str, int], set[str]]:
-    """queriesからユニークな値だけを抽出し、最大3段階でLLMに分類させる
-    （フェーズ3はcategory×taxonomy unknownの行が無ければ実行されない）。
+    """queriesからユニークな値だけを抽出し、最大4段階でLLMに分類させる
+    （フェーズ2はpoiと確定した行が無ければ、フェーズ4はcategory×taxonomy unknown
+    の行が無ければ実行されない）。
     {query文字列: (ai_classification, ai_classification_2, ai_classification_3)} の辞書・
     usage集計辞書（全フェーズ合算。classification_common.new_usage_totals参照。
     input_tokens/output_tokensに加えてcache_creation_input_tokens/cache_read_
@@ -354,17 +379,24 @@ def classify_unique(
     API呼び出し回数を削減するとともに、同一クエリが別バッチに分かれて別々の判定結果に
     なる不整合を防ぐ。
 
-    フェーズ1（level12_model）: ai_classification/_2を軽量プロンプトで判定する。
-    フェーズ2（level3_model）: フェーズ1でunique_poi/brand_poi/categoryと判定された
-    行だけを対象に、ai_classification_3（taxonomyリーフ）を判定する。それ以外
+    フェーズ1（level12_model、レベル1分類）: ai_classificationと、addressの場合
+    のみそのサブタイプを軽量プロンプトで判定する。brand_match候補は一切見せない
+    （2026-08-31、旧フェーズ1「level12」から分離。project memory参照。実データで
+    短い断片・有名な駅名の地名が、本来2階層目にしか関係ないブランド候補情報に
+    引っ張られてpoiに誤誘導される問題が見つかったための対策）。
+    フェーズ2（level12_model、レベル2分類・POI判定）: フェーズ1でpoiと判定された
+    行だけを対象に、ai_classification_2（unique_poi/brand_poi/category）と
+    ブランド候補の一致有無を判定する。brand_match候補はこのフェーズでのみ渡す。
+    フェーズ3（level3_model）: フェーズ2でunique_poi/brand_poi/categoryと判定された
+    行を対象に、ai_classification_3（taxonomyリーフ）を判定する。それ以外
     （address/semantic_query/unknown）の行はこのフェーズをスキップするため、level3_model
     への送信対象は全体の一部に絞られる（詳細はモジュールdocstring参照）。
     level12_model/level3_modelに同じモデルを渡しても動作する（2026-08-27以降、
     main.py/gui_app.pyは常に両方にclassification_common.CLASSIFY_MODELを渡す）。
-    フェーズ3（level12_model、2026-08-28新設）: フェーズ2で"category"×taxonomy
+    フェーズ4（level12_model、2026-08-28新設）: フェーズ3で"category"×taxonomy
     unknownになった行だけを対象に、level2判定自体を再確認する（category据え置き/
     unique_poi/brand_poi/broken＝ai_classificationを"unknown"化、の4択）。
-    unique_poi/brand_poiに訂正された行は、訂正後のsubtypeでフェーズ2相当の
+    unique_poi/brand_poiに訂正された行は、訂正後のsubtypeでフェーズ3相当の
     taxonomy判定をもう一度行う（詳細はモジュールdocstring参照）。
 
     api_key を渡すと ANTHROPIC_API_KEY 環境変数の代わりにそれを使う。
@@ -394,29 +426,47 @@ def classify_unique(
 
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
 
-    # brand_match: クエリごとに機械的な部分一致（表記体系をまたぐ）で検出した
-    # ブランド名候補を求め、候補があるクエリだけレベル1/2の入力に添える
-    # （BRAND_CANDIDATE_GUIDANCE参照。候補が無いクエリは今まで通り文字列単体で
-    # 送るため挙動は変わらない。ai_classify_batch.pyのclassify_unique()と同じ設計）。
-    brand_idx = brand_match.build_index()
-    candidates_per_query: list[list[str] | None] = [
-        sorted(brand_match.find_candidates(q, brand_idx)) or None for q in unique_queries
-    ]
-    level12_input = list(zip(unique_queries, candidates_per_query))
+    def call_level1(batch: list[str]):
+        return call_claude_level1(client, batch, level12_model)
 
-    def call_level12(batch: list[tuple[str, list[str] | None]]):
-        return call_claude_level12(client, batch, level12_model)
-
-    triples, level12_totals, failed_idx1 = _run_batches_concurrently(
-        level12_input, batch_size, max_workers, call_level12, ("unknown", "", None), "レベル1/2分類",
+    triples, level1_totals, failed_idx1 = _run_batches_concurrently(
+        unique_queries, batch_size, max_workers, call_level1, ("unknown", "", None), "レベル1分類",
     )
     usage_totals = new_usage_totals()
-    add_usage(usage_totals, level12_totals)
+    add_usage(usage_totals, level1_totals)
     failed_queries: set[str] = {unique_queries[i] for i in failed_idx1}
 
     raise_if_cancelled(cancel_event)
 
-    poi_indices = [i for i, (_, sub, _matched) in enumerate(triples) if sub in POI_SUBTYPE_VALUES]
+    # フェーズ1でpoiと確定した行だけがフェーズ2(POIサブタイプ判定)の対象。
+    # brand_match: クエリごとに機械的な部分一致（表記体系をまたぐ）で検出した
+    # ブランド名候補を求め、候補があるクエリだけレベル2の入力に添える
+    # （BRAND_CANDIDATE_GUIDANCE参照。候補が無いクエリは今まで通り文字列単体で
+    # 送るため挙動は変わらない。2026-08-31、poi確定前の全クエリに対して事前計算
+    # していたのを、poi確定後の対象だけに計算するよう変更した——挙動は同じだが、
+    # レベル1にブランド候補を一切見せないという設計をコード上でも明確にするため）。
+    poi_indices = [i for i, (c1, _c2, _matched) in enumerate(triples) if c1 == "poi"]
+
+    if poi_indices:
+        brand_idx = brand_match.build_index()
+        candidates_by_poi_index: dict[int, list[str] | None] = {
+            i: sorted(brand_match.find_candidates(unique_queries[i], brand_idx)) or None
+            for i in poi_indices
+        }
+        level2_input = [(unique_queries[i], candidates_by_poi_index[i]) for i in poi_indices]
+
+        def call_level2_poi(batch: list[tuple[str, list[str] | None]]):
+            return call_claude_level2_poi(client, batch, level12_model)
+
+        level2_records, level2_totals, failed_idx2 = _run_batches_concurrently(
+            level2_input, batch_size, max_workers, call_level2_poi,
+            ("poi", "category", None), "レベル2分類(POI判定)",
+        )
+        add_usage(usage_totals, level2_totals)
+        for local_i, global_i in enumerate(poi_indices):
+            triples[global_i] = level2_records[local_i]
+        failed_queries |= {unique_queries[poi_indices[local_i]] for local_i in failed_idx2}
+
     leaf_by_index: dict[int, str] = {}
 
     # ④: ブランド候補の中からLLMが確定させたブランドで、かつBRAND_CATEGORY_MAPに
@@ -476,7 +526,7 @@ def classify_unique(
 
     broken_indices: set[int] = set()
     if recheck_indices:
-        recheck_items = [(unique_queries[i], candidates_per_query[i]) for i in recheck_indices]
+        recheck_items = [(unique_queries[i], candidates_by_poi_index[i]) for i in recheck_indices]
 
         def call_recheck(batch: list[tuple[str, list[str] | None]]):
             return call_claude_category_recheck(client, batch, level12_model)

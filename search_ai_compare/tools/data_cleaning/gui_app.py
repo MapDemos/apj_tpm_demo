@@ -283,11 +283,12 @@ USD_TO_JPY = 150.0  # 見積り表示用の概算為替レート（固定値、�
 #   - _CONTENT_IN_PER_QUERY / _CONTENT_OUT_PER_QUERY: batch_sizeに依存しない
 #     「クエリ本文＋分類結果」部分のトークン数（ユニーク1件あたり平均）。
 #   - _SYSTEM_PROMPT_TOKENS_*: 各フェーズのsystem prompt実測トークン数
-#     （lib/classification_common.pyのSYSTEM_PROMPT_LEVEL12/LEVEL3参照。
-#     いずれもHaiku 4.5のキャッシュ最低サイズ4096トークン未満でキャッシュ非対象）。
-#   - _POI_RATE: レベル3（taxonomy判定）まで進む行の比率。550件実行実績で255件
-#     （46.4%）。カテゴリ再判定フェーズ（少数のみ対象）は計算に含めず、その分
-#     わずかに過小評価になる。
+#     （lib/classification_common.pyのSYSTEM_PROMPT_LEVEL1/LEVEL2_POI/LEVEL3参照。
+#     count_tokens APIで実測。いずれもHaiku 4.5のキャッシュ最低サイズ4096トークン
+#     未満でキャッシュ非対象）。
+#   - _POI_RATE: レベル2(POI判定)・レベル3(taxonomy判定)まで進む行の比率。
+#     550件実行実績で255件（46.4%）。カテゴリ再判定フェーズ（少数のみ対象）は
+#     計算に含めず、その分わずかに過小評価になる。
 #
 # _CONTENT_OUT_PER_QUERY: 2026-08-29、level3（taxonomyリーフ判定）の出力形式を
 # カテゴリ文字列からカテゴリ番号に変更し、level3のoutputトークンが実測で約58%
@@ -297,11 +298,21 @@ USD_TO_JPY = 150.0  # 見積り表示用の概算為替レート（固定値、�
 # （約6.11トークン/件）に、新level3実測5.06トークン/件×_POI_RATEを足し直した。
 _CONTENT_IN_PER_QUERY = 30.0
 _CONTENT_OUT_PER_QUERY = 8.5
-_SYSTEM_PROMPT_TOKENS_LEVEL12 = 3731
+# 2026-08-31、poi/level2(POI)判定の分離に伴い、poiと確定した行のクエリ本文が
+# レベル2でもう一度送信されるようになった分の追加コスト（token-consumption
+# 検証時の実測、poi 515件でuser content 8,429トークン≒1件あたり約16.4トークン。
+# project memory参照）。_POI_RATEでゲートしてinput_tokens計算に加算する。
+_CONTENT_IN_PER_POI_QUERY_LEVEL2 = 16.4
+# poi/address/unknown/semantic_queryを軽量プロンプトで判定するのみ、
+# ブランド候補を含まない（旧SYSTEM_PROMPT_LEVEL12から分離。project memory参照）。
+_SYSTEM_PROMPT_TOKENS_LEVEL1 = 3205
+# poiと確定した行のサブタイプ(unique_poi/brand_poi/category)＋ブランド候補
+# 一致判定のみを行う（2026-08-31新設。project memory参照）。
+_SYSTEM_PROMPT_TOKENS_LEVEL2_POI = 2072
 # 2026-08-29、level3の出力形式変更（カテゴリ文字列→番号、taxonomyを「番号: 名前」の
-# 行で明示列挙する形に変更）でsystem prompt自体もわずかに増えた（2588→2795、
-# count_tokens APIで実測。project memory参照）。
-_SYSTEM_PROMPT_TOKENS_LEVEL3 = 2795
+# 行で明示列挙する形に変更）でsystem prompt自体もわずかに増えた（2026-08-31、
+# taxonomyのリーフ追加(49→53件)も反映して再実測。project memory参照）。
+_SYSTEM_PROMPT_TOKENS_LEVEL3 = 3180
 _POI_RATE = 0.464
 
 
@@ -313,13 +324,20 @@ def estimate_tokens(unique_count: int, batch_size: int) -> tuple[int, int]:
     フェーズ構成は同じで、chunk化の単位が違うだけのため）。"""
     if unique_count <= 0 or batch_size <= 0:
         return 0, 0
-    chunks_level12 = math.ceil(unique_count / batch_size)
+    chunks_level1 = math.ceil(unique_count / batch_size)
     poi_count = unique_count * _POI_RATE
+    chunks_level2 = math.ceil(poi_count / batch_size) if poi_count > 0 else 0
     chunks_level3 = math.ceil(poi_count / batch_size) if poi_count > 0 else 0
     system_overhead = (
-        chunks_level12 * _SYSTEM_PROMPT_TOKENS_LEVEL12 + chunks_level3 * _SYSTEM_PROMPT_TOKENS_LEVEL3
+        chunks_level1 * _SYSTEM_PROMPT_TOKENS_LEVEL1
+        + chunks_level2 * _SYSTEM_PROMPT_TOKENS_LEVEL2_POI
+        + chunks_level3 * _SYSTEM_PROMPT_TOKENS_LEVEL3
     )
-    input_tokens = round(unique_count * _CONTENT_IN_PER_QUERY + system_overhead)
+    input_tokens = round(
+        unique_count * _CONTENT_IN_PER_QUERY
+        + poi_count * _CONTENT_IN_PER_POI_QUERY_LEVEL2
+        + system_overhead
+    )
     output_tokens = round(unique_count * _CONTENT_OUT_PER_QUERY)
     return input_tokens, output_tokens
 
@@ -350,12 +368,17 @@ _PROGRESS_RETRY_RE = re.compile(r"(.+?): グループリトライ (\d+)/(\d+)グ
 
 # ai-classifyの実処理フェーズの想定順序（2026-08-31新設。project memory参照:
 # 進捗バーが「今のフェーズ名」しか示さず全体の何合目か分からないという指摘への
-# 対応）。カテゴリ再判定関連の2フェーズ（再判定そのもの・訂正後のtaxonomy
-# 再分類）は対象データがある場合しか実行されないため、表示上は同じ番号
-# （3フェーズ目）にまとめる。レポート生成（--with-report）は別コマンド
-# （main.py内部でcmd_analyzeを呼ぶだけ）で、この進捗ログの形式に乗らないため
-# フェーズ番号には含めない（実行はされるが進捗バーには反映されない既知の制約）。
-_PHASE_SEQUENCE = ["レベル1/2分類", "レベル3分類(taxonomy)", "カテゴリ再判定"]
+# 対応）。同日さらに、旧「レベル1/2分類」を「レベル1分類」（poi/address/unknown/
+# semantic_queryの判定）と「レベル2分類(POI判定)」（poiのサブタイプ判定、
+# ブランド候補はここでのみ渡す）に分離したため3→4フェーズになった
+# （project memory参照。ブランド候補が本来2階層目にしか関係ないはずの
+# ai_classification自体の判定に漏れ出し誤分類を招いていた問題への対策）。
+# カテゴリ再判定関連の2フェーズ（再判定そのもの・訂正後のtaxonomy再分類）は
+# 対象データがある場合しか実行されないため、表示上は同じ番号（4フェーズ目）に
+# まとめる。レポート生成（--with-report）は別コマンド（main.py内部でcmd_analyzeを
+# 呼ぶだけ）で、この進捗ログの形式に乗らないためフェーズ番号には含めない
+# （実行はされるが進捗バーには反映されない既知の制約）。
+_PHASE_SEQUENCE = ["レベル1分類", "レベル2分類(POI判定)", "レベル3分類(taxonomy)", "カテゴリ再判定"]
 _PHASE_ALIASES = {"レベル3再分類(taxonomy、再判定後)": "カテゴリ再判定"}
 
 
@@ -836,10 +859,11 @@ class MainPage(QWidget):
         # 見積りは実行ボタン押下時に自動計算しモーダルダイアログで表示する方式に
         # 変更したため、専用ボタンは不要になった（_on_run/_show_estimate_dialog参照）。
         # 「実行」の下にキャンセルボタンを置く（2026-08-29新設）。実行中(self.running)
-        # にのみ有効化する。ai-classifyの実処理は複数のフェーズ（レベル1/2分類→
-        # レベル3分類→カテゴリ再判定、Batches API使用時はさらにジョブ完了までの
-        # ポーリング）に分かれており、cancel_eventをフェーズの境目・ポーリング
-        # ループで確認して中断する（classification_common.OperationCancelled参照）。
+        # にのみ有効化する。ai-classifyの実処理は複数のフェーズ（レベル1分類→
+        # レベル2分類(POI判定)→レベル3分類→カテゴリ再判定、Batches API使用時は
+        # さらにジョブ完了までのポーリング）に分かれており、cancel_eventを
+        # フェーズの境目・ポーリングループで確認して中断する
+        # （classification_common.OperationCancelled参照）。
         # 既に投げてしまった1回分のAPI呼び出し自体は打ち切れないため、押してから
         # 実際に停止するまである程度のタイムラグが起こりうる。
         run_row3 = QHBoxLayout()
@@ -1391,7 +1415,8 @@ class MainPage(QWidget):
         フェーズ名（全体のn/mフェーズ目かも含む）と進捗率(%)を進捗バーに反映する
         （2026-08-30、残り時間の目安から置き換え。2026-08-31、フェーズ番号表示を
         追加。project memory参照）。フェーズが切り替わったら
-        （レベル1/2分類→レベル3分類→カテゴリ再判定、など）表示をリセットする。
+        （レベル1分類→レベル2分類(POI判定)→レベル3分類→カテゴリ再判定、など）
+        表示をリセットする。
         個別/グループリトライで母数（total）が変わった場合はその時点の母数で%を
         出し直すため、進捗が後退することもある（意図した挙動）。"""
         if self.current_key != "ai-classify":

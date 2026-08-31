@@ -17,14 +17,17 @@ Anthropic Message Batches API を使って query 配列を分類する。
 anthropicパッケージは本機能専用の依存なので、main.py側で遅延import
 （--batch-api指定時のみimport）し、他のサブコマンドには影響しないようにしている。
 
-2026-08-26、ai_classify.py（プロキシ版）と同様に2段階分離方式へ変更: フェーズ1
-（level12_model）でai_classification/_2を軽量プロンプトで判定し、フェーズ2
-（level3_model）でunique_poi/brand_poi/categoryと判定された行だけを対象に
+2026-08-26、ai_classify.py（プロキシ版）と同様に段階分離方式へ変更（2026-08-31、
+フェーズ1をさらにレベル1/レベル2(POI)に分離し4段階構成に。project memory参照）:
+フェーズ1（level12_model）でai_classification/addressサブタイプのみを軽量
+プロンプトで判定し、フェーズ2（level12_model）でフェーズ1がpoiと判定した行だけを
+対象にunique_poi/brand_poi/categoryとブランド候補の一致有無を判定、フェーズ3
+（level3_model）でunique_poi/brand_poi/categoryと判定された行を対象に
 ai_classification_3（taxonomyリーフ）を判定する。--batch-api使用時はlevel12_model/
 level3_modelに同じモデル（haiku or sonnet単独。main.py参照）を渡す運用だが、
-その場合でも2フェーズに分けることで、taxonomyを含む重いsystem prompt
-（SYSTEM_PROMPT_LEVEL3）をaddress/semantic_query/unknown行に送らずに済む
-メリットは残る。
+その場合でもフェーズを分けることで、taxonomyを含む重いsystem prompt
+（SYSTEM_PROMPT_LEVEL3）やブランド候補情報をaddress/semantic_query/unknown行に
+送らずに済むメリットは残る。
 
 2026-08-27、ai_classify.pyと同じ修正を適用: LLM応答の要素数が入力とズレて
 頻発していた問題への対策として、入出力の各要素にインデックスを付与し、応答から
@@ -64,13 +67,15 @@ from lib import brand_match, jp_municipalities
 from lib.classification_common import (
     POI_SUBTYPE_VALUES,
     SYSTEM_PROMPT_CATEGORY_RECHECK,
-    SYSTEM_PROMPT_LEVEL12,
+    SYSTEM_PROMPT_LEVEL1,
+    SYSTEM_PROMPT_LEVEL2_POI,
     SYSTEM_PROMPT_LEVEL3,
     add_usage,
-    build_level12_user_content,
+    build_indexed_candidates_user_content,
     build_level3_user_content,
     decode_indexed_leaf_responses,
-    decode_indexed_level12_responses,
+    decode_indexed_level1_responses,
+    decode_indexed_level2_poi_responses,
     decode_indexed_recheck_responses,
     leaves_for_matched_brand,
     new_usage_totals,
@@ -99,8 +104,8 @@ Record = tuple[str, str, str, str]  # (ai_classification, ai_classification_2, a
 
 # 2026-08-29実測（08-26データ、level3の1件あたり出力トークン: 平均17・p99 24・
 # 最大39）を基にした、1件あたりの安全マージン込み必要トークン数（39÷安全率0.8）。
-# Batches API本体（_build_request_level12/_build_request_recheck/
-# _build_request_level3）用のmax_tokensをbatch_sizeから動的に計算する
+# Batches API本体（_build_request_level1/_build_request_level2_poi/
+# _build_request_recheck/_build_request_level3）用のmax_tokensをbatch_sizeから動的に計算する
 # _batch_max_tokens()と、個別/グループリトライ用の固定値RETRY_MAX_TOKENSの
 # 両方がこの係数を根拠にしている（project memory参照）。
 _PER_ITEM_MAX_TOKENS_WITH_MARGIN = 39 / 0.8  # = 48.75
@@ -162,25 +167,39 @@ def _build_params(system_prompt: str, user_content: str, model: str, max_tokens:
     return params
 
 
-def _build_request_level12(chunk_items: list[tuple[str, list[str] | None]], model: str, custom_id: str) -> Request:
-    """chunk_itemsは(query, 機械マッチしたブランド候補配列 or None)の組。
-    候補が無い(None)クエリはbuild_level12_user_content側で文字列単体に戻される
+def _build_request_level1(chunk_items: list[str], model: str, custom_id: str) -> Request:
+    """chunk_itemsはクエリ文字列のリスト（2026-08-31新設、旧_build_request_level12
+    から分離。project memory参照）。brand_match候補は一切見せない（build_indexed_
+    candidates_user_contentに全要素Noneのcandidatesを渡す）。"""
+    candidates: list[list[str] | None] = [None] * len(chunk_items)
+    user_content = build_indexed_candidates_user_content(chunk_items, candidates)
+    max_tokens = _batch_max_tokens(len(chunk_items))
+    return Request(custom_id=custom_id, params=_build_params(SYSTEM_PROMPT_LEVEL1, user_content, model, max_tokens))
+
+
+def _build_request_level2_poi(chunk_items: list[tuple[str, list[str] | None]], model: str, custom_id: str) -> Request:
+    """chunk_itemsは(query, 機械マッチしたブランド候補配列 or None)の組
+    （2026-08-31新設、旧_build_request_level12から分離。project memory参照）。
+    呼び出し元はai_classification="poi"と確定した行だけをここに渡す。候補が無い
+    (None)クエリはbuild_indexed_candidates_user_content側で文字列単体に戻される
     （BRAND_CANDIDATE_GUIDANCE参照）。"""
     queries = [q for q, _ in chunk_items]
     candidates = [c for _, c in chunk_items]
-    user_content = build_level12_user_content(queries, candidates)
+    user_content = build_indexed_candidates_user_content(queries, candidates)
     max_tokens = _batch_max_tokens(len(chunk_items))
-    return Request(custom_id=custom_id, params=_build_params(SYSTEM_PROMPT_LEVEL12, user_content, model, max_tokens))
+    return Request(
+        custom_id=custom_id, params=_build_params(SYSTEM_PROMPT_LEVEL2_POI, user_content, model, max_tokens),
+    )
 
 
 def _build_request_recheck(chunk_items: list[tuple[str, list[str] | None]], model: str, custom_id: str) -> Request:
-    """chunk_itemsは_build_request_level12と同じ形式（query, 機械マッチした
-    ブランド候補配列 or None）。入出力の形自体がlevel12と同一のため、
-    build_level12_user_contentをそのまま再利用する（2026-08-28新設、
+    """chunk_itemsは_build_request_level2_poiと同じ形式（query, 機械マッチした
+    ブランド候補配列 or None）。入出力の形自体が同一のため、
+    build_indexed_candidates_user_contentをそのまま再利用する（2026-08-28新設、
     ai_classify.pyのcall_claude_category_recheck参照）。"""
     queries = [q for q, _ in chunk_items]
     candidates = [c for _, c in chunk_items]
-    user_content = build_level12_user_content(queries, candidates)
+    user_content = build_indexed_candidates_user_content(queries, candidates)
     max_tokens = _batch_max_tokens(len(chunk_items))
     return Request(
         custom_id=custom_id, params=_build_params(SYSTEM_PROMPT_CATEGORY_RECHECK, user_content, model, max_tokens),
@@ -240,7 +259,7 @@ def run_batch_job(
     """1つのバッチジョブを送信し、完了までポーリングしてから結果を返す。
     戻り値は custom_id -> result.result のマッピング。
 
-    jobs_section（"jobs_level12" or "jobs_level3"）でフェーズごとにジョブ台帳を
+    jobs_section（"jobs_level1"/"jobs_level2poi"/"jobs_level3"等）でフェーズごとにジョブ台帳を
     分けて管理する。state[jobs_section][job_key]に既にjob_idがあれば
     （--resume-batch-job経由の再開、またはAnthropic側で既に完了済みのジョブの
     再ポーリング）ジョブ作成をスキップしてそのjob_idのポーリングから再開する。
@@ -561,14 +580,16 @@ def classify_unique(
     max_workers: int = 8,
     cancel_event=None,
 ) -> tuple[dict[str, Record], dict[str, int], int, set[str]]:
-    """queriesからユニークな値だけを抽出し、Batches APIで3段階に分けて分類する。
+    """queriesからユニークな値だけを抽出し、Batches APIで最大4段階に分けて
+    分類する（フェーズ2はpoiと確定した行が無ければ、フェーズ4はcategory×
+    taxonomy unknownの行が無ければ実行されない）。
     {query文字列: (ai_classification, ai_classification_2, ai_classification_3)} の辞書・
     usage集計辞書（全フェーズ合算。classification_common.new_usage_totals参照。
     input_tokens/output_tokensに加えてcache_creation_input_tokens/cache_read_
     input_tokensも含む。2026-08-28、プロンプトキャッシュのコストが可視化されて
     いなかった問題への対応。project memory参照）・失敗レンジ数（個別リトライに
     回った回数の合計）・個別リトライでも失敗しfallbackになったquery集合を
-    返す。ai_classify.classify_unique（同期API版）と同じ3段階設計（モジュール
+    返す。ai_classify.classify_unique（同期API版）と同じ4段階設計（モジュール
     docstring参照）で、重複クエリをまとめて送ることでコストと不整合を抑える点も同様。
 
     api_key を渡すと ANTHROPIC_API_KEY 環境変数の代わりにそれを使う。
@@ -583,6 +604,12 @@ def classify_unique(
     のデータが前回実行時から更新されていた場合、送信済みジョブの応答内の
     候補番号(idx)を誤って別の候補配列に対して解釈してしまう事故を防ぐために
     含めている）。
+
+    2026-08-31、このジョブ台帳の"jobs_level12"キーを"jobs_level1"/"jobs_level2poi"
+    の2つに分割した（project memory参照。フェーズ1/2分離に伴う変更）。このため、
+    分割前に作られた--resume-batch-job用の状態ファイルは以降再開できなくなる
+    （batch_size/モデル一致検証で弾かれる。CLIのニッチな機能でデプロイ直後に
+    ジョブが進行中という稀なケースなので許容する）。
 
     max_workers は、Batches APIの結果に対する個別リトライ（要素欠落・チャンク
     全体不正時のフォールバック）をThreadPoolExecutorで並行実行する際の並行数
@@ -640,38 +667,63 @@ def classify_unique(
             "level12_model": level12_model,
             "level3_model": level3_model,
             "candidates_per_query": candidates_per_query,
-            "jobs_level12": {},
+            "jobs_level1": {},
+            "jobs_level2poi": {},
             "jobs_level3": {},
             "jobs_recheck": {},
             "jobs_level3_recheck": {},
         }
         _save_state(state_path, state)
 
-    level12_input = list(zip(unique_queries, candidates_per_query))
-
-    triples, level12_totals, failed_ranges, failed_idx12 = _run_phase_batches(
-        client, level12_input, batch_size, level12_model, state, state_path, "jobs_level12",
-        SYSTEM_PROMPT_LEVEL12,
-        _build_request_level12,
-        lambda items: build_level12_user_content([it[0] for it in items], [it[1] for it in items]),
-        lambda items, chunk: decode_indexed_level12_responses(items, [c for _, c in chunk]),
+    triples, level1_totals, failed_ranges, failed_idx1 = _run_phase_batches(
+        client, unique_queries, batch_size, level12_model, state, state_path, "jobs_level1",
+        SYSTEM_PROMPT_LEVEL1,
+        _build_request_level1,
+        lambda items: build_indexed_candidates_user_content(items, [None] * len(items)),
+        lambda items, chunk: decode_indexed_level1_responses(items, [None] * len(chunk)),
         ("unknown", "", None),
-        "レベル1/2分類",
+        "レベル1分類",
         max_workers,
         cancel_event=cancel_event,
     )
     usage_totals = new_usage_totals()
-    add_usage(usage_totals, level12_totals)
-    failed_queries: set[str] = {unique_queries[i] for i in failed_idx12}
+    add_usage(usage_totals, level1_totals)
+    failed_queries: set[str] = {unique_queries[i] for i in failed_idx1}
 
     raise_if_cancelled(cancel_event)
 
-    poi_indices = [i for i, (_, sub, _matched) in enumerate(triples) if sub in POI_SUBTYPE_VALUES]
+    # フェーズ1でpoiと確定した行だけがフェーズ2(POIサブタイプ判定)の対象
+    # （candidates_per_queryは上で既に全クエリ分計算済みなので、ここではpoi分だけ
+    # 抜き出して使う。2026-08-31、フェーズ1/2分離に伴う変更。project memory参照）。
+    poi_indices = [i for i, (c1, _c2, _matched) in enumerate(triples) if c1 == "poi"]
+
+    if poi_indices:
+        level2_input = [(unique_queries[i], candidates_per_query[i]) for i in poi_indices]
+
+        level2_records, level2_totals, failed_ranges_l2, failed_idx2 = _run_phase_batches(
+            client, level2_input, batch_size, level12_model, state, state_path, "jobs_level2poi",
+            SYSTEM_PROMPT_LEVEL2_POI,
+            _build_request_level2_poi,
+            lambda items: build_indexed_candidates_user_content([it[0] for it in items], [it[1] for it in items]),
+            lambda items, chunk: decode_indexed_level2_poi_responses(items, [c for _, c in chunk]),
+            ("poi", "category", None),
+            "レベル2分類(POI判定)",
+            max_workers,
+            cancel_event=cancel_event,
+        )
+        add_usage(usage_totals, level2_totals)
+        failed_ranges += failed_ranges_l2
+        for local_i, global_i in enumerate(poi_indices):
+            triples[global_i] = level2_records[local_i]
+        failed_queries |= {unique_queries[poi_indices[local_i]] for local_i in failed_idx2}
+
+    raise_if_cancelled(cancel_event)
+
     leaf_by_index: dict[int, str] = {}
 
     # ④: ブランド候補の中からLLMが確定させたブランドで、かつBRAND_CATEGORY_MAPに
     # taxonomyリーフの参照データがある場合は、レベル3のLLM判定を省略して辞書から
-    # 直接採用する（project memory参照。brand_poi判定は既にlevel12側で確定済み
+    # 直接採用する（project memory参照。brand_poi判定は既にlevel2(POI)側で確定済み
     # なので、taxonomyリーフも同じ情報源から一貫して取れる場合はLLMに二度聞かない）。
     poi_indices_needing_llm = []
     for i in poi_indices:
@@ -739,7 +791,7 @@ def classify_unique(
             client, recheck_items, batch_size, level12_model, state, state_path, "jobs_recheck",
             SYSTEM_PROMPT_CATEGORY_RECHECK,
             _build_request_recheck,
-            lambda items: build_level12_user_content([it[0] for it in items], [it[1] for it in items]),
+            lambda items: build_indexed_candidates_user_content([it[0] for it in items], [it[1] for it in items]),
             lambda items, chunk: decode_indexed_recheck_responses(items, [c for _, c in chunk]),
             ("category", None),
             "カテゴリ再判定",

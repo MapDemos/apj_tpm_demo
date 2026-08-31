@@ -24,7 +24,7 @@ unsupported_query_location_intent/broken_query/othersの7分類から全面刷�
                            ―複数選択の仕組み自体はまだ残っているが例外的な扱い）
 
 brand_data.BRAND_CATEGORY_MAP（Wikipedia等を元にしたブランド→taxonomyカテゴリの
-辞書、data_cleaning/local/category_and_brand/poi-blocklist.js）はLEVEL12段階の
+辞書、data_cleaning/local/category_and_brand/poi-blocklist.js）はLEVEL2(POI)段階の
 機械的候補マッチ（brand_match.py）とその直後の辞書ショートカット
 （leaves_for_matched_brand）でのみ使う。以前はLEVEL3のai_classification_3用
 プロンプトにもBRAND_KNOWLEDGE全文（1500件超）を埋め込んでbrand_poi用の重量級
@@ -38,8 +38,8 @@ brand_data.BRAND_CATEGORY_MAP（Wikipedia等を元にしたブランド→taxono
 2026-08-27、LLM応答の要素数が入力とズレて頻発していた問題への対策として、
 入出力の各要素に0始まりのインデックスを付与する方式に変更した（配列の「位置」
 だけで入出力を対応付けていたため、LLMが1件飛ばす・多く返すなどしただけで
-バッチ全体を個別リトライせざるを得なかった。build_level12_user_content/
-build_level3_user_content、decode_indexed_level12_responses/
+バッチ全体を個別リトライせざるを得なかった。build_indexed_candidates_user_content/
+build_level3_user_content、decode_indexed_level1_responses/
 decode_indexed_leaf_responses参照）。
 
 2026-08-28、ai_classification_2="category"・ai_classification_3="unknown"
@@ -212,8 +212,8 @@ _CATEGORY_RECHECK_CHOICE_DESCRIPTIONS: dict[str, str] = {
     "読み取れず、何を指しているか特定できないもの。",
 }
 
-# CATEGORY_RECHECK_CHOICES専用の境界判断指針。BOUNDARY_GUIDANCEの「1(poi)の
-# サブカテゴリ判定基準」「境界事例」段落と趣旨は同じだが、そちらは"1(poi)"
+# CATEGORY_RECHECK_CHOICES専用の境界判断指針。BOUNDARY_GUIDANCE_POI_SUBTYPE_RULE/
+# BOUNDARY_GUIDANCE_BRAND_VS_UNIQUEと趣旨は同じだが、そちらは"1(poi)"
 # "2(brand_poi)"等このプロンプトとは異なる番号体系への言及を含むため、
 # 数字参照を含まない形に言い換えて独立させている
 # （BRAND_KNOWLEDGE_GUIDANCE_LEVEL3と同じ「文脈に合わせて言い換える」方針）。
@@ -240,7 +240,7 @@ def build_system_prompt_category_recheck() -> str:
     経緯: "category"は定義上「実在する業種を表す一般名詞」なので、正しく判定
     できていればtaxonomyのどれかに（多少大味でも）当てはまるのが本来の姿である。
     つまり"category"×taxonomy unknownという組み合わせは、taxonomyのカバレッジ
-    不足というより、level2（build_system_prompt_level12）が「知らない単語＝
+    不足というより、level2（build_system_prompt_level2_poi）が「知らない単語＝
     実在する業種の一般名詞かもしれない」と誤って安全側に倒した誤判定である
     可能性が高い（実測でタクシー配車ログ中の地域固有の店の愛称・固有名詞が
     "category"に誤分類され、taxonomy側でunknownになるケースが見つかった。
@@ -313,28 +313,41 @@ ADDRESS_SUBTYPE_DESCRIPTIONS: dict[int, str] = {
     5: "番地・号を含む最も細かいレベル。例: \"六本木6丁目10番1号\", \"常盤32-10\"",
 }
 
-# 境界事例の判定指針（1と2、poiとaddressの間で迷うケース）
-BOUNDARY_GUIDANCE = """
+# 境界事例の判定指針（1と2、poiとaddressの間で迷うケース）。
+#
+# 2026-08-31、ai_classification(1階層目)とai_classification_2(2階層目)の判定を
+# build_system_prompt_level1() / build_system_prompt_level2_poi() の2回の呼び出しに
+# 分離した（project memory参照）。実データで、短い(1〜2文字)ひらがな断片や
+# 駅名として有名な地名が、brand_match候補（本来2階層目のpoiサブタイプ判定にしか
+# 関係ない情報）の存在に引っ張られてpoi/brand_poiに誤分類される問題が見つかり、
+# 「候補情報を1階層目の判定に一切見せない」という構造的な対策を取った。これに伴い、
+# 従来1本だった境界指針(BOUNDARY_GUIDANCE)を、1階層目に関係する段落と2階層目
+# （poiサブタイプ・ブランド判定）に関係する段落に分けて、それぞれの呼び出しに
+# 必要な分だけ渡すようにした。
+BOUNDARY_GUIDANCE_PRIORITY = """
 判定の優先順位: 4(unknown)は「本当にどれにも当てはまらない場合」の最終手段であり、
 自信が持てないことを理由に安易に選ばない。固有名詞らしき文字列はまず1(poi)に
 当てはまらないか、数字を伴う地番パターンを含む文字列はまず2(address)に
 当てはまらないかを優先的に検討すること。知らない・聞いたことがない名前だからと
 いって4(unknown)に倒さない。
+"""
 
+BOUNDARY_GUIDANCE_FRAGMENT_DEFAULT = """
 入力途中の断片の既定値: 上記の優先順位にはもう一つ例外がある（2026-08-31追加。
 project memory参照）。このクエリログはリアルタイム検索候補(suggest)APIの記録
 であり、確定した検索語だけでなく、1文字打つごとの入力途中の状態も記録され
 得る。クエリ全体が1〜2文字程度の短い文字列で、表記（ひらがな・カタカナ・漢字・
 ローマ字いずれでも）にかかわらず、それ単体では日本語として完結した単語・
-固有名詞の体をなしていないと判断できる場合は、無理に1(poi)・brand_poi・
-category等に当てはめようとせず、4(unknown)を選んでよい。これは「知らない
-名前だから」という理由でunknownに逃げることとは判断軸が異なる点に注意
-（基準は「モデルがその名前を知っているかどうか」ではなく、「そもそもこの
-文字列が完結した名前・単語としての体裁を成しているかどうか」）。完結した
-固有名詞・地名・普通名詞であれば、短くても未知でもこの例外の対象外（例:
-"仙台"は2文字だが完結した地名なのでaddress。"は"や"ひろ"のような、それ単体
-では意味を成さない断片はunknown）。
+固有名詞の体をなしていないと判断できる場合は、無理に1(poi)に当てはめようとせず、
+4(unknown)を選んでよい。これは「知らない名前だから」という理由でunknownに
+逃げることとは判断軸が異なる点に注意（基準は「モデルがその名前を知っている
+かどうか」ではなく、「そもそもこの文字列が完結した名前・単語としての体裁を
+成しているかどうか」）。完結した固有名詞・地名・普通名詞であれば、短くても
+未知でもこの例外の対象外（例: "仙台"は2文字だが完結した地名なのでaddress。
+"は"や"ひろ"のような、それ単体では意味を成さない断片はunknown）。
+"""
 
+BOUNDARY_GUIDANCE_PLACE_DEFAULT = """
 地名の既定値: 上記の優先順位には例外がある。クエリ全体が都道府県・市区町村・
 大字・有名地域名などの地理的な地名（行政区画・地域の名称）**だけ**で完結して
 おり、施設・建造物・拠点であることを示す語（駅・タワー・城・神社・公園・
@@ -351,17 +364,29 @@ category等に当てはめようとせず、4(unknown)を選んでよい。こ�
 addressが既定）。1(poi)と判断してよいのは、地名の一部を含んでいても、それが
 特定の施設・建造物そのものを指す名称だと判断できる場合（例: "仙台城",
 "軽井沢プリンスホテル", "渋谷駅"）に限る。
+"""
 
-表記正規化: 判定・BRAND_KNOWLEDGE照合を行う前に、クエリがカタカナ・ひらがな・
+# 1階層目（ai_classification）の判定に必要な境界指針。brand_match候補は一切
+# 見せない呼び出し（build_system_prompt_level1）専用。
+BOUNDARY_GUIDANCE_LEVEL1 = (
+    BOUNDARY_GUIDANCE_PRIORITY + BOUNDARY_GUIDANCE_FRAGMENT_DEFAULT + BOUNDARY_GUIDANCE_PLACE_DEFAULT
+)
+
+BOUNDARY_GUIDANCE_NOTATION_NORMALIZE = """
+表記正規化: 判定・ブランド名候補との照合を行う前に、クエリがカタカナ・ひらがな・
 ローマ字（例: "seven eleven"）等の表記ゆれを含んでいないか確認し、該当ブランド・
 施設の標準的な書き表し方（例: "セブンイレブン"）に正規化した上で判定すること。
+"""
 
+BOUNDARY_GUIDANCE_POI_SUBTYPE_RULE = """
 1(poi)のサブカテゴリ判定基準: 同一名称の拠点が複数箇所に展開されている
 （直営店・フランチャイズいずれでもよく、経営形態は無関係。「同名拠点が複数存在する
 かどうか」だけが基準）と判断できる場合は、単独の店名としてクエリに書かれていても
 必ずbrand_poiにする。unique_poiは「その名前を持つ場所が現実には1箇所しか存在
 しない」固有名詞のみに限定すること。
+"""
 
+BOUNDARY_GUIDANCE_BRAND_VS_UNIQUE = """
 境界事例（unique_poiとbrand_poiの判定に迷う場合の指針）: ブランド名の後ろに支店名・
 地名・「店」が付加されているクエリ（例: "ローソン浜松高塚店", "セブンイレブンこまち店",
 "すき家 段原店"）は、ブランド名部分だけで独立した企業として認識できるなら、
@@ -370,32 +395,29 @@ addressが既定）。1(poi)と判断してよいのは、地名の一部を含�
 地域固有の屋号（例: "土居田町ほりうち歯科", "唐津ホテル"）はunique_poiのまま。
 判断軸は接尾辞の種類ではなく、ブランド部分が複数拠点展開している独立した企業か
 どうかの有無。
-
-brand_poi判定には、以下に埋め込んだBRAND_KNOWLEDGE（ブランド名→taxonomyカテゴリの
-参照データ）を積極的に使うこと。ここに載っているブランド名（表記が完全一致する場合に
-限らず、支店名・「店」等が付加された形も含む）はbrand_poiと判定する。
-BRAND_KNOWLEDGEに無いブランドでも、モデル自身の知識で複数拠点展開している
-ブランドだと判断できる場合はbrand_poiにしてよい。
-
-同じブランドが複数の異なるクエリ文字列（支店名付き・省略形など）で登場する場合、
-実行のたびに違う判定にならないよう、判断に迷ったときはBRAND_KNOWLEDGEの値を優先する。
 """
 
-# BOUNDARY_GUIDANCEからBRAND_KNOWLEDGE参照部分（下2段落）を除いたもの。
-# ai_classification_3を判定しない軽量プロンプト（build_system_prompt_level12、
-# 2026-08-26のHaiku/Sonnet 2段階分離で新設）専用。BRAND_KNOWLEDGE(1500件超の辞書)を
-# 埋め込まないため、それを参照する指示文だけ残すと意味不明になるので削っている。
-BOUNDARY_GUIDANCE_LEVEL12 = BOUNDARY_GUIDANCE.rsplit("\n\nbrand_poi判定には、", 1)[0] + "\n"
+# 2階層目のうちpoiサブタイプ（unique_poi/brand_poi/category）の判定に必要な境界
+# 指針。ブランド候補が付随する呼び出し（build_system_prompt_level2_poi）専用。
+# 入力は既に1(poi)と確定済みのクエリだけなので、「地名の既定値」等poi/address間の
+# 判定基準は含めない。
+BOUNDARY_GUIDANCE_LEVEL2_POI = (
+    BOUNDARY_GUIDANCE_NOTATION_NORMALIZE + BOUNDARY_GUIDANCE_POI_SUBTYPE_RULE + BOUNDARY_GUIDANCE_BRAND_VS_UNIQUE
+)
 
 # brand_match.find_candidates()による機械的な文字列部分一致（表記体系をまたぐ
 # カタカナ/ひらがな/ローマ字変換込み。lib/kana_match.py参照）で検出したブランド名
 # 候補を、呼び出し元(classify_unique)が一部のクエリにだけ付随させて渡す場合の
 # 取り扱いを指示する（2026-08-27新設）。BRAND_KNOWLEDGE本体（1500件超）は
-# レベル1/2の軽量プロンプトには埋め込まないが、機械的に絞り込んだ少数の候補
-# だけなら軽量に渡せる。「候補があるのに見ずに自分の知識だけで判断してしまう」
-# ことを防ぐため、出力形式側（この下）で候補ありの要素だけ4要素配列を必須にし、
-# 構造的に候補への言及を強制する（末尾要素を省略した応答はデコード失敗として
-# その1件だけが個別リトライに回る。インデックス方式の詳細はbuild_level12_user_content
+# レベル2(POI)の軽量プロンプトには埋め込まないが、機械的に絞り込んだ少数の候補
+# だけなら軽量に渡せる。2026-08-31、ai_classification自体（poi/address/unknown/
+# semantic_query）の判定にこの候補情報が漏れ出して誤判定を招く問題が見つかった
+# ため、build_system_prompt_level1では一切使わず、build_system_prompt_level2_poi
+# （poiと確定済みのクエリのサブタイプ判定）でのみ使うよう分離した。「候補が
+# あるのに見ずに自分の知識だけで判断してしまう」ことを防ぐため、出力形式側
+# （この下）で候補ありの要素だけ末尾に一致番号を必須にし、構造的に候補への
+# 言及を強制する（末尾要素を省略した応答はデコード失敗としてその1件だけが
+# 個別リトライに回る。インデックス方式の詳細はbuild_indexed_candidates_user_content
 # 参照）。
 BRAND_CANDIDATE_GUIDANCE = """
 一部のクエリには、機械的な文字列部分一致（表記ゆれ・カタカナ/ひらがな/ローマ字の
@@ -513,26 +535,30 @@ ai_classification_3は、ai_classification_2がunique_poi・brand_poi・category
 """
 
 
-def build_system_prompt_level12() -> str:
-    """ai_classification/_2のみを判定する軽量版プロンプト（2026-08-26新設）。
-    taxonomy(285リーフ)・BRAND_KNOWLEDGE(1500件超)を含まないため、
-    build_system_prompt_level3()の重量級プロンプト比で1/10程度のサイズに収まる。
-    ai_classification_3はbuild_system_prompt_level3()で別途判定する
-    （project memory参照: Haikuだとai_classification_3のunknown率が
-    unique_poi/categoryで5割超に達する実測結果を受けての2段階分離）。"""
+def build_system_prompt_level1() -> str:
+    """ai_classification（4カテゴリ）と、addressの場合のみそのサブタイプ
+    （ai_classification_2）を判定する軽量プロンプト（2026-08-31新設。
+    旧build_system_prompt_level12から分離。project memory参照）。
+
+    poiのサブタイプ(unique_poi/brand_poi/category)判定はbuild_system_prompt_
+    level2_poi()に分離し、brand_match候補もそちらでしか渡さない。実データ検証で、
+    短い(1〜2文字)ひらがな断片や駅名として有名な地名が、本来2階層目にしか関係ない
+    候補情報に引っ張られてpoiに誤判定される問題が見つかったための対策
+    （BRAND_CANDIDATE_GUIDANCEの「候補があれば必ず検討する」という構造的強制が、
+    候補を一切見せていないはずのpoi/address/unknown判定にまで漏れ出していた）。
+    taxonomy(285リーフ)・POI_SUBTYPESを含まないため、build_system_prompt_level3()の
+    重量級プロンプト比でさらに小さい。"""
     cat1_lines = "\n".join(
         f"- {n}: {CATEGORIES[n]} — {CATEGORY_DESCRIPTIONS[n]}" for n in sorted(CATEGORIES)
-    )
-    poi_lines = "\n".join(
-        f"  - {n}: {POI_SUBTYPES[n]} — {POI_SUBTYPE_DESCRIPTIONS[n]}" for n in sorted(POI_SUBTYPES)
     )
     address_lines = "\n".join(
         f"  - {n}: {ADDRESS_SUBTYPES[n]} — {ADDRESS_SUBTYPE_DESCRIPTIONS[n]}"
         for n in sorted(ADDRESS_SUBTYPES)
     )
 
-    return f"""あなたは検索クエリの分類器です。与えられた検索クエリの配列を、以下の2階層で分類してください。
-（3階層目のtaxonomyカテゴリ判定は別ステップで行うので、ここでは考えなくてよい）
+    return f"""あなたは検索クエリの分類器です。与えられた検索クエリの配列を分類してください。
+（poiのサブタイプ(unique_poi/brand_poi/category)判定は別ステップで行うので、
+ここではpoiと判定するかどうかまでで良い。addressの場合のみサブタイプまで判定する）
 
 このクエリログは、タクシー配車事業者のオペレーターが電話で乗客から聞いた場所の
 説明を検索APIにクエリ化したものです。乗客本人の入力ではなく、オペレーターが
@@ -544,15 +570,41 @@ def build_system_prompt_level12() -> str:
 
 {SEMANTIC_QUERY_GUIDANCE}
 
-## 第2階層（ai_classification_2）
-- ai_classificationが1(poi)の場合、以下から1つ:
-{poi_lines}
+## 第2階層（ai_classification_2、addressの場合のみ）
 - ai_classificationが2(address)の場合、以下から1つ:
 {address_lines}
-- ai_classificationが3(semantic_query)または4(unknown)の場合: 該当なし（0を返す）
+- ai_classificationが1(poi)・3(semantic_query)・4(unknown)の場合: 該当なし（0を返す）
 
-{BOUNDARY_GUIDANCE_LEVEL12}
+{BOUNDARY_GUIDANCE_LEVEL1}
 {ADDRESS_GUIDANCE}
+
+## 出力形式
+入力配列の各要素は[インデックス, クエリ文字列]という形式です。出力は、入力に
+含まれていた各インデックスについて1つずつ、[インデックス, ai_classification番号,
+ai_classification_2番号(該当なしは0)]という形式の要素を持つJSON配列で返して
+ください（順序は入力と一致させる必要はありません。各インデックスは1回だけ
+登場させてください）。説明文やコードフェンスは一切含めず、JSON配列のみを
+出力してください。入力に含まれる全てのインデックスに対して必ず1件ずつ出力し、
+省略・統合・重複が無いようにしてください。
+例: [[0,1,0], [1,2,3], [2,4,0], [3,2,5]]
+"""
+
+
+def build_system_prompt_level2_poi() -> str:
+    """poiと確定済みのクエリのサブタイプ(ai_classification_2、unique_poi/brand_poi/
+    category)のみを判定するプロンプト（build_system_prompt_level1の後段、2026-08-31
+    新設。project memory参照）。brand_match候補はこの呼び出しでのみ渡す。"""
+    poi_lines = "\n".join(
+        f"  - {n}: {POI_SUBTYPES[n]} — {POI_SUBTYPE_DESCRIPTIONS[n]}" for n in sorted(POI_SUBTYPES)
+    )
+
+    return f"""あなたは検索クエリの分類器です。以下のクエリは全て、既にpoi（現実世界の
+具体的な地点・施設を指す検索）であると確定済みです。それぞれのサブタイプを以下から
+1つ判定してください。
+
+{poi_lines}
+
+{BOUNDARY_GUIDANCE_LEVEL2_POI}
 {BRAND_CANDIDATE_GUIDANCE}
 
 ## 出力形式
@@ -560,14 +612,14 @@ def build_system_prompt_level12() -> str:
 候補配列]という形式です。出力は、入力に含まれていた各インデックスについて1つずつ、
 以下の形式の要素を持つJSON配列で返してください（順序は入力と一致させる必要は
 ありません。各インデックスは1回だけ登場させてください）。
-- 候補配列を伴わない入力要素に対しては、[インデックス, ai_classification番号,
-  ai_classification_2番号(該当なしは0)]という3要素配列
-- 候補配列を伴う入力要素に対しては、[インデックス, ai_classification番号,
-  ai_classification_2番号(該当なしは0), 一致した候補の番号(1始まり。どの候補にも
-  当てはまらない場合は0)]という4要素配列（末尾要素の省略は不可）
+- 候補配列を伴わない入力要素に対しては、[インデックス, ai_classification_2番号]
+  という2要素配列
+- 候補配列を伴う入力要素に対しては、[インデックス, ai_classification_2番号,
+  一致した候補の番号(1始まり。どの候補にも当てはまらない場合は0)]という3要素配列
+  （末尾要素の省略は不可）
 説明文やコードフェンスは一切含めず、JSON配列のみを出力してください。入力に含まれる
 全てのインデックスに対して必ず1件ずつ出力し、省略・統合・重複が無いようにしてください。
-例: [[0,1,2], [1,1,1], [2,2,5], [3,4,0], [4,1,2,1], [5,1,1,0]]
+例: [[0,1], [1,2,1], [2,3,0]]
 """
 
 
@@ -576,7 +628,7 @@ def build_system_prompt_level3() -> str:
     2026-08-27にtaxonomyを285リーフの階層構造から45件のフラットカテゴリに刷新）。
     ai_classification_2がunique_poi/brand_poi/categoryと確定済みの
     (query, サブタイプ)の組だけを入力として受け取る想定（呼び出し元でフィルタ済み）。
-    2026-08-27以降はCLASSIFY_MODEL（Haiku）で呼ぶ（build_system_prompt_level12の
+    2026-08-27以降はCLASSIFY_MODEL（Haiku）で呼ぶ（build_system_prompt_level1の
     docstring参照。旧版はSonnetで呼んでいたが、taxonomyのフラット化とブランド候補
     注入によりHaikuでも精度十分と確認できたため統一した）。
 
@@ -631,7 +683,10 @@ CATEGORY_TAXONOMY（番号→カテゴリ名の対応。出力では番号のみ
 """
 
 
-SYSTEM_PROMPT_LEVEL12 = build_system_prompt_level12()
+SYSTEM_PROMPT_LEVEL1 = build_system_prompt_level1()
+# poiのサブタイプ(unique_poi/brand_poi/category)判定専用（2026-08-31新設、
+# build_system_prompt_level1のdocstring参照）。
+SYSTEM_PROMPT_LEVEL2_POI = build_system_prompt_level2_poi()
 # 2026-08-29、brand_poi用/unique_poi・category用の2本に分けていたプロンプトを
 # 統合（build_system_prompt_level3のdocstring参照）。subtypeを問わず全level3
 # バッチでこの1本を使う。
@@ -697,7 +752,7 @@ SYSTEM_PROMPT_SESSION_COLLAPSE = """あなたは検索クエリのセッショ�
 
 def build_session_collapse_user_content(sessions: list[list[str]]) -> str:
     """ai-collapse-sessionsフェーズの入力JSONを組み立てる。sessionsは各要素が
-    そのセッションの時系列順クエリ文字列配列。build_level12_user_contentと
+    そのセッションの時系列順クエリ文字列配列。build_indexed_candidates_user_contentと
     同じ理由で、各要素の先頭に0始まりのインデックスを付与する。"""
     payload = [[i, queries] for i, queries in enumerate(sessions)]
     return json.dumps(payload, ensure_ascii=False)
@@ -740,8 +795,8 @@ def decode_indexed_session_collapse_responses(
 # 通常のinput tokensの約1.25倍課金)・読み込み(cache_read_input_tokens、約0.1倍課金)
 # 分のコストが実行結果のトークン集計に一切反映されていなかった（project memory
 # 参照。1日分の実行だけで数百円かかり高すぎるという相談を受けての可視化対応）。
-# ai_classify.py/ai_classify_batch.py双方の複数フェーズ（level12/level3/カテゴリ
-# 再判定）にまたがる集計をタプルの要素数を増やさずに扱えるよう、辞書1つを
+# ai_classify.py/ai_classify_batch.py双方の複数フェーズ（level1/level2(POI)/level3/
+# カテゴリ再判定）にまたがる集計をタプルの要素数を増やさずに扱えるよう、辞書1つを
 # 使い回す方式にしている。
 
 
@@ -803,9 +858,10 @@ def encode_leaves(raw_leaves) -> str:
 
 
 def decode_pair(item) -> tuple[str, str]:
-    """build_system_prompt_level12が返す1件分の[c1, c2]を(ai_classification,
-    ai_classification_2)の文字列2つ組に変換する（2026-08-26新設の2段階分離方式で、
-    ai_classification_3を含まない軽量版レスポンス用）。"""
+    """build_system_prompt_level1が返す1件分の[c1, c2]を(ai_classification,
+    ai_classification_2)の文字列2つ組に変換する。addressの場合のみc2が意味を持ち、
+    poiの場合のc2は常に0（サブタイプはbuild_system_prompt_level2_poiで別途判定する
+    ため未確定）で、その場合sub=""になる。"""
     try:
         c1, c2 = item
     except (ValueError, TypeError):
@@ -832,16 +888,18 @@ def decode_pair(item) -> tuple[str, str]:
 CandidateRecord = tuple[str, str, str | None]
 
 
-def build_level12_user_content(queries: list[str], candidates: list[list[str] | None]) -> str:
-    """レベル1/2フェーズの入力JSONを組み立てる。candidatesはqueriesと同じ順序・
-    同じ長さで、各クエリに機械的に検出したブランド候補のリスト（無ければNone）を
-    渡す。各要素の先頭には0始まりのインデックス（queries内の位置）を必ず付与する
-    （2026-08-27新設。従来は入力と出力の「配列位置」だけで対応を取っていたが、
-    LLMが1件飛ばす・1件多く返すなどして配列長がズレると、それだけでバッチ全体を
-    個別リトライに回さざるを得なかった。インデックスを明示することで、
-    どのクエリの応答が欠落したかをピンポイントで特定し、その分だけ個別リトライ
-    できるようにする。project memory参照）。候補が無いクエリは
-    [インデックス, クエリ文字列]、候補があるクエリは
+def build_indexed_candidates_user_content(queries: list[str], candidates: list[list[str] | None]) -> str:
+    """「インデックス付きクエリ＋任意のブランド候補」という入力JSONを組み立てる
+    汎用ビルダー（旧build_level12_user_content。2026-08-31、level1/level2(POI)/
+    カテゴリ再判定の3箇所で共通利用するため改称。level1呼び出し時はcandidatesを
+    全要素None（=候補なし）にして渡す）。candidatesはqueriesと同じ順序・同じ長さで、
+    各クエリに機械的に検出したブランド候補のリスト（無ければNone）を渡す。各要素の
+    先頭には0始まりのインデックス（queries内の位置）を必ず付与する（2026-08-27新設。
+    従来は入力と出力の「配列位置」だけで対応を取っていたが、LLMが1件飛ばす・1件
+    多く返すなどして配列長がズレると、それだけでバッチ全体を個別リトライに回さざるを
+    得なかった。インデックスを明示することで、どのクエリの応答が欠落したかを
+    ピンポイントで特定し、その分だけ個別リトライできるようにする。project memory
+    参照）。候補が無いクエリは[インデックス, クエリ文字列]、候補があるクエリは
     [インデックス, クエリ文字列, 候補配列]という配列にする
     （BRAND_CANDIDATE_GUIDANCE参照）。"""
     if len(queries) != len(candidates):
@@ -855,14 +913,14 @@ def build_level12_user_content(queries: list[str], candidates: list[list[str] | 
 
 def build_level3_user_content(items: list[tuple[str, str]]) -> str:
     """レベル3フェーズ（taxonomyリーフ判定）の入力JSONを組み立てる。itemsは
-    [(query, サブタイプ), ...]。build_level12_user_contentと同じ理由で、各要素の
-    先頭に0始まりのインデックスを付与する。"""
+    [(query, サブタイプ), ...]。build_indexed_candidates_user_contentと同じ理由で、
+    各要素の先頭に0始まりのインデックスを付与する。"""
     payload = [[i, q, sub] for i, (q, sub) in enumerate(items)]
     return json.dumps(payload, ensure_ascii=False)
 
 
 def _decode_candidate_tail(rest: list, candidates: list[str] | None) -> CandidateRecord | None:
-    """decode_indexed_level12_responsesの1件分。restはインデックスを除いた残りの
+    """decode_indexed_level1_responsesの1件分。restはインデックスを除いた残りの
     要素（候補なしなら[c1, c2]、候補ありなら[c1, c2, idx]）。形式が不正・値が
     範囲外の場合はNoneを返し、呼び出し元でこのインデックスを欠落扱いにする。
 
@@ -889,17 +947,18 @@ def _decode_candidate_tail(rest: list, candidates: list[str] | None) -> Candidat
     return c1, c2, matched_brand
 
 
-def decode_indexed_level12_responses(
+def decode_indexed_level1_responses(
     raw_items: list, candidates_list: list[list[str] | None],
 ) -> tuple[list[CandidateRecord | None], set[int]]:
-    """build_system_prompt_level12が返すインデックス付き応答配列
-    （各要素は[idx, c1, c2]または[idx, c1, c2, candidate_idx]）を、
-    candidates_listと同じ順序・同じ長さのCandidateRecordのリストに変換する
-    （2026-08-27新設、要素数ズレ対策のインデックス方式）。範囲外・型不正・
-    重複したインデックス、およびデコードに失敗した要素はその位置をNoneのまま
-    残す。戻り値の2つ目はNoneのまま残った（＝LLM応答から実質的に欠落した）
-    インデックスの集合で、呼び出し元(_run_batches_concurrently)がこの分だけ
-    個別リトライする。"""
+    """build_system_prompt_level1が返すインデックス付き応答配列
+    （各要素は[idx, c1, c2]）を、candidates_listと同じ順序・同じ長さの
+    CandidateRecordのリストに変換する（2026-08-27新設、2026-08-31にlevel1/
+    level2(POI)分離に伴い改称。level1呼び出しは候補を一切渡さないため、
+    candidates_listは常に全要素Noneになる想定だが、_decode_candidate_tailは
+    汎用実装のためそのまま使える）。範囲外・型不正・重複したインデックス、
+    およびデコードに失敗した要素はその位置をNoneのまま残す。戻り値の2つ目は
+    Noneのまま残った（＝LLM応答から実質的に欠落した）インデックスの集合で、
+    呼び出し元(_run_batches_concurrently)がこの分だけ個別リトライする。"""
     n = len(candidates_list)
     records: list[CandidateRecord | None] = [None] * n
     for raw in raw_items:
@@ -909,6 +968,61 @@ def decode_indexed_level12_responses(
         if not isinstance(idx, int) or idx < 0 or idx >= n or records[idx] is not None:
             continue  # 範囲外・型不正・重複インデックスは無視する
         decoded = _decode_candidate_tail(rest, candidates_list[idx])
+        if decoded is not None:
+            records[idx] = decoded
+    missing = {i for i, r in enumerate(records) if r is None}
+    return records, missing
+
+
+def _decode_poi_subtype_tail(rest: list, candidates: list[str] | None) -> CandidateRecord | None:
+    """decode_indexed_level2_poi_responsesの1件分。restはインデックスを除いた残りの
+    要素（候補なしなら[c2]、候補ありなら[c2, idx]）。入力は既にai_classification=
+    "poi"と確定済みのクエリだけなので、返すCandidateRecordの第1要素は常に"poi"
+    固定にする。形式が不正・値が範囲外の場合はNoneを返し、呼び出し元でこの
+    インデックスを欠落扱いにする。
+
+    _decode_candidate_tailと同じ理由（2026-08-30の修正、project memory参照）で、
+    候補あり(candidates is not None)でもlen(rest)==1（候補不一致の番号0を
+    省略したもの）を許容する。"""
+    if candidates is None or len(rest) == 1:
+        if len(rest) != 1:
+            return None
+        c2 = POI_SUBTYPES.get(rest[0], "")
+        if not c2:
+            return None
+        return "poi", c2, None
+
+    if len(rest) != 2:
+        return None
+    c2_num, idx = rest
+    c2 = POI_SUBTYPES.get(c2_num, "")
+    if not c2:
+        return None
+    if not isinstance(idx, int) or idx < 0 or idx > len(candidates):
+        return None
+    matched_brand = candidates[idx - 1] if idx > 0 else None
+    return "poi", c2, matched_brand
+
+
+def decode_indexed_level2_poi_responses(
+    raw_items: list, candidates_list: list[list[str] | None],
+) -> tuple[list[CandidateRecord | None], set[int]]:
+    """build_system_prompt_level2_poiが返すインデックス付き応答配列
+    （各要素は[idx, c2]または[idx, c2, candidate_idx]）を、candidates_listと
+    同じ順序・同じ長さのCandidateRecordのリストに変換する（2026-08-31新設、
+    decode_indexed_level1_responsesと同じインデックス方式）。範囲外・型不正・
+    重複したインデックス、およびデコードに失敗した要素はその位置をNoneのまま
+    残す。戻り値の2つ目はNoneのまま残った（＝LLM応答から実質的に欠落した）
+    インデックスの集合。"""
+    n = len(candidates_list)
+    records: list[CandidateRecord | None] = [None] * n
+    for raw in raw_items:
+        if not isinstance(raw, list) or len(raw) < 2:
+            continue
+        idx, rest = raw[0], raw[1:]
+        if not isinstance(idx, int) or idx < 0 or idx >= n or records[idx] is not None:
+            continue  # 範囲外・型不正・重複インデックスは無視する
+        decoded = _decode_poi_subtype_tail(rest, candidates_list[idx])
         if decoded is not None:
             records[idx] = decoded
     missing = {i for i, r in enumerate(records) if r is None}
@@ -926,7 +1040,7 @@ RecheckRecord = tuple[str, str | None]
 def _decode_recheck_tail(rest: list, candidates: list[str] | None) -> RecheckRecord | None:
     """decode_indexed_recheck_responsesの1件分。restはインデックスを除いた残りの
     要素（候補なしなら[choice_num]、候補ありなら[choice_num, idx]）。_decode_
-    candidate_tailと同じ考え方だが、level12のc1/c2ペアではなくCATEGORY_RECHECK_
+    candidate_tailと同じ考え方だが、level1のc1/c2ペアではなくCATEGORY_RECHECK_
     CHOICESの単一選択肢を復元する。形式が不正・値が範囲外の場合はNoneを返し、
     呼び出し元でこのインデックスを欠落扱いにする。"""
     if candidates is None:
@@ -955,7 +1069,7 @@ def decode_indexed_recheck_responses(
     """build_system_prompt_category_recheckが返すインデックス付き応答配列
     （各要素は[idx, choice_num]または[idx, choice_num, candidate_idx]）を、
     candidates_listと同じ順序・同じ長さのRecheckRecordのリストに変換する
-    （decode_indexed_level12_responsesと同じインデックス方式、2026-08-28新設）。
+    （decode_indexed_level1_responsesと同じインデックス方式、2026-08-28新設）。
     範囲外・型不正・重複したインデックス、およびデコードに失敗した要素は
     その位置をNoneのまま残す。戻り値の2つ目はNoneのまま残った（＝LLM応答から
     実質的に欠落した）インデックスの集合。"""
@@ -975,7 +1089,7 @@ def decode_indexed_recheck_responses(
 
 
 def leaves_for_matched_brand(matched_brand: str | None, ai_classification_2: str) -> str | None:
-    """decode_indexed_level12_responsesが返したmatched_brandが、レベル3(taxonomy)の
+    """decode_indexed_level2_poi_responsesが返したmatched_brandが、レベル3(taxonomy)の
     LLM呼び出しを省略してBRAND_CATEGORY_MAPから直接引ける対象かどうかを判定する。
     対象ならencode_leaves済みの文字列（辞書にリーフが無いブランドはUNKNOWN_LEAF）
     を返し、対象外（候補が無かった/LLMがどの候補にも当てはまらないと判断した/
@@ -1013,7 +1127,7 @@ def decode_indexed_leaf_responses(raw_items: list, n: int) -> tuple[list[str | N
     outputトークン削減のためプロンプト内で明示した「番号: カテゴリ名」列挙の番号
     （1始まり、0は判定不能）の数値配列に変更した。project memory参照）を、長さnの
     リストに変換する
-    （2026-08-27新設、decode_indexed_level12_responsesと同じインデックス方式）。
+    （2026-08-27新設、decode_indexed_level1_responsesと同じインデックス方式）。
     範囲外・型不正・重複したインデックスの要素は無視する。戻り値の2つ目は
     Noneのまま残った（＝LLM応答から実質的に欠落した）インデックスの集合。"""
     records: list[str | None] = [None] * n
