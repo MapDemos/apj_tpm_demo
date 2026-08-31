@@ -595,6 +595,22 @@ def build_analyze_options(page: "MainPage", layout: QVBoxLayout) -> dict:
     }
 
 
+def build_collapse_sessions_options(page: "MainPage", layout: QVBoxLayout) -> dict:
+    # 2026-08-31新設。オプション無しの単純なツールなので、説明文だけ表示する
+    # （project memory参照。lib/session_collapse.py・main.py cmd_collapse_sessions
+    # 参照）。_on_run/_build_argsはkeyが"ai-classify"/"analyze"以外の場合
+    # 特別な処理をしない（args.input_csvのみセットしてfuncを呼ぶ）ため、これで
+    # 動作する。
+    layout.addWidget(
+        _muted_label(
+            "（session_token等のセッションID列を自動検出し、リアルタイム検索候補APIの"
+            "タイピング途中の断片を間引く。列が見つからない場合は入力をそのまま出力する）",
+            wrap=True,
+        )
+    )
+    return {}
+
+
 # (コマンドキー, 表示名, main.pyの関数, オプションビルダー((page, layout)を受け取る))
 # 重複除去(dedup)は2026-08-27にAIによるクエリの分類の前段に自動実行する方式へ変更、
 # プレビュー欄の専用ボタンは廃止した（_on_run参照）。
@@ -602,6 +618,10 @@ def build_analyze_options(page: "MainPage", layout: QVBoxLayout) -> dict:
 TOOLS = [
     ("ai-classify", "🤖  AIによるクエリの分類", cli_main.cmd_ai_classify, build_ai_options),
     ("analyze", "📑  クエリの分析（傾向分析＋HTMLレポート）", cli_main.cmd_analyze, build_analyze_options),
+    (
+        "collapse-sessions", "🧹  セッション内のタイピング途中断片を間引く",
+        cli_main.cmd_collapse_sessions, build_collapse_sessions_options,
+    ),
 ]
 
 
@@ -1182,7 +1202,11 @@ class MainPage(QWidget):
         macOS通知センター経由の通知を出す（2026-08-30新設。project memory参照。
         Dockアイコンへのバッジ付与はPySide6標準機能では実現できずPyObjC等の
         追加依存が必要になるため見送り、通知センター経由のみ実装した）。"""
-        label = {"ai-classify": "AIによるクエリの分類", "analyze": "傾向分析"}.get(self.current_key, self.current_key)
+        label = {
+            "ai-classify": "AIによるクエリの分類",
+            "analyze": "傾向分析",
+            "collapse-sessions": "セッション内断片の間引き",
+        }.get(self.current_key, self.current_key)
         message = f"{label}が完了しました。"
 
         if QSystemTrayIcon.isSystemTrayAvailable():
