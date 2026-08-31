@@ -38,6 +38,7 @@ from lib import classification_common as classification_common_lib
 from lib import column_utils as column_utils_lib
 from lib import count_column as count_column_lib
 from lib import dedup as dedup_lib
+from lib import jp_municipalities as jp_municipalities_lib
 from lib import query_count_column as query_count_column_lib
 from lib import row_filter as row_filter_lib
 from lib.output_utils import current_timestamp, make_output_path
@@ -178,7 +179,23 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
         target_indices = target_indices[: args.max_batches * batch_size]
 
     target_queries = [rows[i].get("query", "") for i in target_indices]
-    unique_count = len(set(target_queries))
+    unique_queries_set = set(target_queries)
+    unique_count = len(unique_queries_set)
+    # 2026-08-31、市区町村名(lib/jp_municipalities.py)に完全一致するクエリは
+    # classify_unique()側の機械判定でAI送信対象から除外される（project memory
+    # 参照）。ログの「AIに送信」件数がその分だけ実態より多く表示されてしまう
+    # ため、ここで同じ判定を再現してメッセージに反映する。
+    municipality_bypass_count = sum(
+        1 for q in unique_queries_set if jp_municipalities_lib.is_bare_municipality_name(q)
+    )
+    ai_send_count = unique_count - municipality_bypass_count
+    if municipality_bypass_count:
+        ai_send_note = (
+            f"{unique_count}件（うち{municipality_bypass_count}件は市区町村名として機械判定、"
+            f"AI送信は{ai_send_count}件）"
+        )
+    else:
+        ai_send_note = f"{unique_count}件をAIに送信"
 
     # 2026-08-30、固定モデル文字列でなくModels APIで最新版を自動解決する
     # （project memory参照。ファミリー(Haiku)自体は固定、バージョンのみ追従）。
@@ -187,7 +204,7 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
     if filter_column:
         print(
             f"絞り込み対象（{filter_column} {args.filter_op} {args.filter_value!r}）: "
-            f"{len(target_indices)}件（全{len(rows)}件中、うちユニークなquery: {unique_count}件をAIに送信）",
+            f"{len(target_indices)}件（全{len(rows)}件中、うちユニークなquery: {ai_send_note}）",
             file=sys.stderr,
         )
 
@@ -275,7 +292,7 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\n処理件数: {len(target_indices)}（全{len(rows)}件中、うちユニークなquery: {unique_count}件をAIに送信）")
+    print(f"\n処理件数: {len(target_indices)}（全{len(rows)}件中、うちユニークなquery: {ai_send_note}）")
     print(f"モデル: {level12_model}（Haikuファミリー固定、バージョンはModels APIで自動解決）")
     if args.batch_api:
         print(f"失敗バッチ数（個別リトライに回した回数）: {failed_ranges}")

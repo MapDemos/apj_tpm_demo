@@ -75,6 +75,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import main as cli_main  # noqa: E402
 from lib import classification_common as classification_common_lib  # noqa: E402
+from lib import jp_municipalities as jp_municipalities_lib  # noqa: E402
 from lib import output_utils as output_utils_lib  # noqa: E402
 from lib import row_filter as row_filter_lib  # noqa: E402
 from lib.output_utils import OUTPUT_DIR  # noqa: E402
@@ -938,6 +939,14 @@ class MainPage(QWidget):
                 QApplication.restoreOverrideCursor()
                 QMessageBox.critical(self, APP_TITLE, f"見積り計算に失敗しました:\n{e}")
                 return
+
+            # 2026-08-31、市区町村名(lib/jp_municipalities.py)に完全一致するクエリは
+            # classify_unique()側の機械判定でAI送信対象から除外される（project
+            # memory参照）。見積りに含めると実際より高いコストを表示してしまうため
+            # ここで差し引く。
+            unique_queries = [
+                q for q in unique_queries if not jp_municipalities_lib.is_bare_municipality_name(q)
+            ]
 
             batch_api = option_getters["batch_api"]()
             batch_size = AI_SETTINGS.batch_size if batch_api else AI_SETTINGS.sync_batch_size
