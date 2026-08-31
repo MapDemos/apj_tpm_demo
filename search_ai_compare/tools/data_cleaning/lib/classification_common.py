@@ -321,6 +321,20 @@ BOUNDARY_GUIDANCE = """
 当てはまらないかを優先的に検討すること。知らない・聞いたことがない名前だからと
 いって4(unknown)に倒さない。
 
+入力途中の断片の既定値: 上記の優先順位にはもう一つ例外がある（2026-08-31追加。
+project memory参照）。このクエリログはリアルタイム検索候補(suggest)APIの記録
+であり、確定した検索語だけでなく、1文字打つごとの入力途中の状態も記録され
+得る。クエリ全体が1〜2文字程度の短い文字列で、表記（ひらがな・カタカナ・漢字・
+ローマ字いずれでも）にかかわらず、それ単体では日本語として完結した単語・
+固有名詞の体をなしていないと判断できる場合は、無理に1(poi)・brand_poi・
+category等に当てはめようとせず、4(unknown)を選んでよい。これは「知らない
+名前だから」という理由でunknownに逃げることとは判断軸が異なる点に注意
+（基準は「モデルがその名前を知っているかどうか」ではなく、「そもそもこの
+文字列が完結した名前・単語としての体裁を成しているかどうか」）。完結した
+固有名詞・地名・普通名詞であれば、短くても未知でもこの例外の対象外（例:
+"仙台"は2文字だが完結した地名なのでaddress。"は"や"ひろ"のような、それ単体
+では意味を成さない断片はunknown）。
+
 地名の既定値: 上記の優先順位には例外がある。クエリ全体が都道府県・市区町村・
 大字・有名地域名などの地理的な地名（行政区画・地域の名称）**だけ**で完結して
 おり、施設・建造物・拠点であることを示す語（駅・タワー・城・神社・公園・
@@ -618,6 +632,99 @@ SYSTEM_PROMPT_LEVEL3 = build_system_prompt_level3()
 # "category"×taxonomy unknownの再判定専用（2026-08-28新設。build_system_prompt_
 # category_recheckのdocstring参照）。
 SYSTEM_PROMPT_CATEGORY_RECHECK = build_system_prompt_category_recheck()
+
+
+# main.py ai-collapse-sessionsサブコマンド専用（2026-08-31新設。project memory
+# 参照）。lib/session_collapse.pyの文字列前方一致ベースの間引きだけでは、
+# IME変換途中（例: "いわきそう"→"いわき荘"）・住所の桁の打ち直し（例:
+# "領家3-10-1"→"領家3-10-13"）・全角半角等の表記ゆれ（例: "民宿　やまと"と
+# "民宿やまと"）で前方一致が崩れ、実質的に同じ検索意図の重複が大量に残ることが
+# 実データで判明した。これらは文字列の機械的な一致だけでは判定できないため、
+# LLMに判断させる。brand_matchの候補ヒント方式とは異なり、こちらは出力を
+# インデックスの配列だけに絞ることで、classify_unique系のインデックス方式
+# デコードと同じ設計（出力スキーマを増やさずcandidate系のデコード非決定性
+# バグを再発させない）を踏襲している。
+SYSTEM_PROMPT_SESSION_COLLAPSE = """あなたは検索クエリのセッションクリーニングツールです。
+
+このデータは、タクシー配車事業者のオペレーターがリアルタイム検索候補(suggest)APIを
+使って場所を検索した際のログです。1文字打つごとに記録される場合があるため、
+同一セッション内に「入力途中の断片」が大量に含まれています。
+
+入力は、セッションごとに時系列順（古い順）に並んだクエリ文字列の配列です。各セッションに
+ついて、以下のパターンに該当する「実質的に同じ検索意図の重複」を1つにまとめてください:
+- IME変換の途中経過（例: "いわきそう"→"いわき荘"のように、変換前のひらがな表記と
+  変換後の漢字表記が両方含まれている）
+- 住所や電話番号の桁を打ち直している途中経過（例: "領家3-10-1"→"領家3-10-13"）
+- 表記ゆれによる重複（全角/半角スペース、ひらがな/カタカナの違いなど。例:
+  "民宿　やまと"と"民宿やまと"）
+- 単なる入力途中の短い断片（例: "は"、"ひろ"のような、それ単体では意味を成さない
+  文字列）
+
+重複と判断したグループの中では、基本的に時系列で一番最後に出てきた、最も完成された
+形の文字列を残してください（変換途中のひらがな表記より変換後の漢字表記、短い断片より
+長く完成された表記を優先する）。
+
+重要: **同一セッション内に、全く別の検索意図（別の地名・別の施設）が複数含まれている
+ことは想定内であり、正常な状態です**（例: "民宿やまと"を検索した後にそれを諦めて
+"河口湖町"を検索し直すセッションでは、"民宿やまと"と"河口湖町"はどちらも別々の検索
+意図なので両方残す）。まとめてよいのは、明らかに同じ対象を指している表記ゆれ・入力
+途中の断片だけであり、少しでも異なる地名・施設を指している可能性がある場合はまとめず
+両方残すこと。
+
+判断に迷う場合は、消さずに残す方を選ぶこと（データを誤って失うことを避けるため）。
+
+## 出力形式
+入力配列の各要素は[セッションインデックス, [クエリ文字列の配列]]です。出力は、入力に
+含まれていた各セッションインデックスについて1つずつ、[セッションインデックス, [残す
+べきクエリの位置番号の配列]]という形式の要素を持つJSON配列で返してください（順序は
+入力と一致させる必要はありません。各セッションインデックスは1回だけ登場させてください）。
+位置番号はそのセッション内のクエリ配列における0始まりの位置を指し、クエリ文字列
+そのものは一切出力に含めないこと。位置番号の配列は、そのセッションに含まれる要素数
+以下で、必ず1つ以上の要素を含むこと（全て削除してよいセッションは無い）。
+説明文やコードフェンスは一切含めず、JSON配列のみを出力してください。入力に含まれる
+全てのセッションインデックスに対して必ず1件ずつ出力し、省略・統合・重複が無いように
+してください。
+例: [[0,[1]], [1,[0,1]], [2,[1,2]]]
+"""
+
+
+def build_session_collapse_user_content(sessions: list[list[str]]) -> str:
+    """ai-collapse-sessionsフェーズの入力JSONを組み立てる。sessionsは各要素が
+    そのセッションの時系列順クエリ文字列配列。build_level12_user_contentと
+    同じ理由で、各要素の先頭に0始まりのインデックスを付与する。"""
+    payload = [[i, queries] for i, queries in enumerate(sessions)]
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def decode_indexed_session_collapse_responses(
+    raw_items: list, sessions: list[list[str]],
+) -> tuple[list[list[int] | None], set[int]]:
+    """SYSTEM_PROMPT_SESSION_COLLAPSEが返すインデックス付き応答配列
+    （各要素は[session_idx, [keep_position, ...]]）を、sessionsと同じ順序・
+    同じ長さのリストに変換する。各要素は「そのセッション内で残すべき0始まりの
+    位置番号」のリスト（昇順・重複無しに正規化済み）。形式が不正・値が範囲外・
+    空配列（全削除は許可しない。モジュールdocstring参照）の場合はNoneのまま
+    残し、呼び出し元がそのセッションを個別リトライ→最終的に失敗すれば「全件
+    残す」にフォールバックする。"""
+    n = len(sessions)
+    records: list[list[int] | None] = [None] * n
+    for raw in raw_items:
+        if not isinstance(raw, list) or len(raw) != 2:
+            continue
+        idx, keep_positions = raw
+        if not isinstance(idx, int) or idx < 0 or idx >= n or records[idx] is not None:
+            continue
+        if not isinstance(keep_positions, list) or not keep_positions:
+            continue
+        session_len = len(sessions[idx])
+        try:
+            normalized = sorted({int(p) for p in keep_positions})
+        except (TypeError, ValueError):
+            continue
+        if any(p < 0 or p >= session_len for p in normalized):
+            continue
+        records[idx] = normalized
+    return records, {i for i, r in enumerate(records) if r is None}
 
 
 # APIレスポンスのusageを集計する共通ヘルパー（2026-08-28新設）。従来は

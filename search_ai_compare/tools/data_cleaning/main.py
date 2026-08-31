@@ -8,6 +8,8 @@ data_cleaning/ のCSVクレンジング・AI分類・傾向分析を1つにま�
   add-query-count        same_query_count列だけを付与する（重複除去はしない、プログラム的カウントのみ、AI不使用）
   collapse-sessions      セッションID列（session_token等、自動検出）内でタイピング途中の断片を間引く
                           （リアルタイム検索候補APIの生ログ対策。dedupの後に使う想定）
+  ai-collapse-sessions   collapse-sessionsの後段。文字列前方一致だけでは間引けない
+                          IME変換途中・住所桁の打ち直し・表記ゆれをHaikuで判定して間引く
   count-column           指定した列の出現回数を集計する（--columnでquery/ai_classification等を指定、デフォルトquery）
   ai-classify             AI分類（本物のAnthropic APIを直接叩く。要ANTHROPIC_API_KEY
                           または--token。モデルはHaiku固定。2026-08-28よりBatches API
@@ -35,6 +37,7 @@ import time
 
 from lib import ai_analyze as ai_analyze_lib
 from lib import ai_classify as ai_classify_lib
+from lib import ai_session_collapse as ai_session_collapse_lib
 from lib import analyze_trends as analyze_trends_lib
 from lib import classification_common as classification_common_lib
 from lib import column_utils as column_utils_lib
@@ -133,6 +136,48 @@ def cmd_collapse_sessions(args: argparse.Namespace) -> None:
     print(f"セッションID列: \"{session_column}\"" + ("（datetime列で順序判定）" if datetime_column else "（元のファイル順で順序判定）"))
     print(f"入力行数: {before}")
     print(f"間引き後の行数: {len(result.kept_rows)}（{result.dropped_count}件削除）")
+    print(f"出力先: {output_path}")
+
+
+def cmd_ai_collapse_sessions(args: argparse.Namespace) -> None:
+    """collapse-sessions（文字列前方一致ベース）の後段。それでもなお2行以上残って
+    いるセッションだけをHaikuに送り、IME変換途中・住所桁の打ち直し・全角半角等の
+    表記ゆれによる重複を間引く（lib/ai_session_collapse.py参照）。セッションID列が
+    見つからない場合は処理をスキップし、入力をそのまま出力する。
+
+    2026-08-31新設、v1はBatches API未対応（同期呼び出しのみ）。効果検証を優先し、
+    ai-classifyと同じ非同期ジョブ基盤への対応は別途判断する。"""
+    fieldnames, rows = session_collapse_lib.read_rows(args.input_csv)
+    before = len(rows)
+
+    session_column = session_collapse_lib.detect_session_column(fieldnames)
+    output_path = make_output_path(args.input_csv, "ai_session_collapsed")
+
+    if session_column is None:
+        print("セッションID列が見つからないため、AIクリーニングをスキップします（入力をそのまま出力）。")
+        session_collapse_lib.write_rows(output_path, fieldnames, rows)
+        print(f"入力行数: {before}")
+        print(f"出力先: {output_path}")
+        return
+
+    datetime_column = "datetime" if "datetime" in fieldnames else None
+    model = classification_common_lib.resolve_model("haiku", api_key=args.token)
+    kept_rows, usage_totals, ai_session_count = ai_session_collapse_lib.clean_rows(
+        rows, session_column, datetime_column=datetime_column,
+        batch_size=args.batch_size, max_workers=args.workers,
+        model=model, api_key=args.token,
+    )
+    session_collapse_lib.write_rows(output_path, fieldnames, kept_rows)
+
+    print(f"セッションID列: \"{session_column}\"")
+    print(f"モデル: {model}（Haikuファミリー固定）")
+    print(f"入力行数: {before}")
+    print(f"文字列ベースの間引き後もなお2行以上残っていたセッション数（AI送信対象）: {ai_session_count}")
+    print(f"最終的な行数: {len(kept_rows)}（{before - len(kept_rows)}件削除）")
+    print(f"input tokens合計 : {usage_totals['input_tokens']}")
+    print(f"output tokens合計: {usage_totals['output_tokens']}")
+    print(f"cache write tokens合計: {usage_totals['cache_creation_input_tokens']}")
+    print(f"cache read tokens合計 : {usage_totals['cache_read_input_tokens']}")
     print(f"出力先: {output_path}")
 
 
@@ -482,6 +527,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("input_csv")
     p.set_defaults(func=cmd_collapse_sessions)
+
+    p = sub.add_parser(
+        "ai-collapse-sessions",
+        help="collapse-sessionsの後段。それでもなお2行以上残っているセッションだけをHaikuに送り、"
+        "IME変換途中・住所桁の打ち直し・全角半角等の表記ゆれによる重複を間引く"
+        "（要ANTHROPIC_API_KEYまたは--token。v1はBatches API未対応・同期呼び出しのみ）",
+    )
+    p.add_argument("input_csv")
+    p.add_argument("--token", default=None, help="ANTHROPIC_API_KEY環境変数の代わりに使うAPIキー")
+    p.add_argument(
+        "--batch-size", type=int, default=30,
+        help="1回のAPI呼び出しに含めるセッション数（デフォルト30。ai-classifyの--sync-batch-size"
+        "と同じ発想だが、単位は「クエリ」ではなく「セッション」）",
+    )
+    p.add_argument("--workers", type=int, default=8, help="並行実行するリクエスト数")
+    p.set_defaults(func=cmd_ai_collapse_sessions)
 
     p = sub.add_parser(
         "count-column",

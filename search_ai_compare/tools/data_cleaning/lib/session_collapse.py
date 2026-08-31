@@ -86,9 +86,27 @@ def collapse_sessions(
         if len(indices) < 2:
             continue
         if has_datetime:
-            # 同時刻(または空値)は元のファイル順(=リスト内での並び)を保つ、
-            # Pythonのsorted()は安定ソートなのでkeyが同じ要素は元の順序を維持する。
-            ordered = sorted(indices, key=lambda i: (rows[i].get(datetime_column) or ""))
+            # 2026-08-31、同一秒に丸められて時刻が同着になるケースのタイブレークを
+            # 修正した（project memory参照）。実データの"岐阜"→"岐阜県"→"岐阜県関"の
+            # 3件が全て同一秒で記録されているセッションで、間引きが機能しないバグが
+            # 見つかった。元の実装は安定ソートで元のファイル順をそのまま維持していたが、
+            # このCSVはファイル全体が新しい→古いの順で並んでいる（実データ検証済み）
+            # ため、同着グループ内も「ファイルで先に出てきた方が実は時系列的に新しい」
+            # という前提に合わせる必要がある。タイブレークを元のインデックスの降順に
+            # することで、ファイルで先に出てきた行（＝真の時系列では新しい）を昇順の
+            # 最後に持ってくる。
+            #
+            # 一時期「同一秒内は前後関係を仮定せず双方向でチェックする」方式も試したが、
+            # 「A(短い)→ABC(打ちすぎ)→AB(打ち直して正解)」のように、時系列の後半で
+            # 短く訂正されるケースで正しいABの方を誤って消してしまう問題が判明し撤回した
+            # （双方向だと「長い方が常に正しい」という扱いになってしまうため）。時系列を
+            # 信用する一方向方式なら、この訂正パターンではAB・ABC両方が残る（ABはABCより
+            # 新しいため誰にも吸収されず、ABCもAB(短すぎて追い越せない)には吸収されない）。
+            # トレードオフとして、「伸ばしてから検索欄を空に近い状態までクリアした」場合に
+            # 残る意味の無い短い断片（例: "岐"）を積極的には除去できなくなるが、これは
+            # ai-classify側（BOUNDARY_GUIDANCE、断片は4(unknown)にしてよいという
+            # ガイダンス）で拾う方針にした。project memory参照。
+            ordered = sorted(indices, key=lambda i: (rows[i].get(datetime_column) or "", -i))
         else:
             ordered = indices
 
@@ -102,6 +120,19 @@ def collapse_sessions(
                 dropped[i] = True
             else:
                 kept_queries.append(q)
+
+    # 2026-08-31、空文字列のqueryは前方一致判定を待たず無条件で削除するように
+    # 追加した（project memory参照）。空文字列は「検索欄をクリアした」ことを
+    # 示すだけで検索意図としての情報を一切持たない。前方一致ルールは「自分より
+    # 後ろの行」だけを見るため、セッションの最後の行がたまたま空文字列だと
+    # （クリア操作がそのセッションの最終イベントだった場合）誰にも吸収されず
+    # 残ってしまう問題が実データで見つかった（実データの多重残存セッションの
+    # 62.8%がこのパターンだった）。
+    for i, row in enumerate(rows):
+        if dropped[i]:
+            continue
+        if not (row.get(query_column) or "").strip():
+            dropped[i] = True
 
     kept_rows = [row for i, row in enumerate(rows) if not dropped[i]]
     return CollapseResult(kept_rows=kept_rows, dropped_count=n - len(kept_rows))
