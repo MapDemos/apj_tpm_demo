@@ -97,6 +97,14 @@ ai-classify  [suffix: classified_analysis_result]
   失敗した場合は中身を1件ずつ個別に再試行し、それでも失敗した行だけ
   others にフォールバックする。
 
+  2026-08-31、"新宿s"や"くやくsy"のような表記の乱れ・タイプミスがあるクエリを
+  安易にunknownへ倒さず、乱れを踏まえた推測でpoi/address/semantic_queryの
+  いずれかに分類するようにした（クエリ文字列自体は書き換えない）。この推測を
+  適用した行には "imperfect_query" 列に "yes" が入る（それ以外は空文字）。
+  search_ai_compare側でこの列を絞り込み条件にすれば、推測に基づく判定だけを
+  目視レビューできる（lib/classification_common.py の
+  BOUNDARY_GUIDANCE_TYPO_DEFAULT参照）。
+
   モデルはHaikuファミリー固定（--model引数は廃止）。2026-08-30、固定モデルID
   文字列でなく、実行のたびにModels APIで最新版を自動選択するように変更した
   （classification_common.resolve_model()。ネットワークエラー等で解決できない

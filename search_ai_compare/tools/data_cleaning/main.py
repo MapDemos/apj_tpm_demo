@@ -344,39 +344,48 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
     # （2026-08-29新設。従来はLLM応答内部でmatched_brandとして持っていたが、
     # taxonomy判定のショートカット判定にしか使わずCSV出力前に捨てていた。
     # project memory参照）。
-    base_columns = ["ai_classification", "ai_classification_2", "ai_classification_3", "ai_classification_2_brand"]
+    # imperfect_query: 表記の乱れ・タイプミス（例:
+    # "新宿s"、"くやくsy"）を踏まえた推測でunknownを回避した行だけ"yes"、
+    # それ以外は空文字（2026-08-31新設。build_system_prompt_level1の
+    # BOUNDARY_GUIDANCE_TYPO_DEFAULT参照。search_ai_compare側でこの列を
+    # フィルタし、推測に基づく判定の妥当性を目視確認できるようにする狙い。
+    # project memory参照）。
+    base_columns = [
+        "ai_classification", "ai_classification_2", "ai_classification_3",
+        "ai_classification_2_brand", "imperfect_query",
+    ]
     has_existing_columns = all(c in fieldnames for c in base_columns)
 
     skipped_due_to_failure = 0
 
     if filter_column and has_existing_columns:
-        # 部分上書きモード（旧ai-retry相当）: マッチした行だけ既存4列を上書き、
+        # 部分上書きモード（旧ai-retry相当）: マッチした行だけ既存5列を上書き、
         # 他の行・他の列はそのまま保持する。ただし、そのqueryの分類がAPI呼び出し失敗に
-        # よるunknownフォールバックだった場合は、既存4列（前回までの正しい分類結果
+        # よるunknownフォールバックだった場合は、既存5列（前回までの正しい分類結果
         # かもしれない値）を破壊しないよう上書きをスキップする（モデルが本当に
         # 「unknown」と判定した場合は通常どおり上書きする）。
-        c1_col, c2_col, c3_col, c4_col = base_columns
+        c1_col, c2_col, c3_col, c4_col, c5_col = base_columns
         out_fieldnames = fieldnames
         for i in target_indices:
             query = rows[i].get("query", "")
             if query in failed_queries:
                 skipped_due_to_failure += 1
                 continue
-            c1, c2, c3, c4 = mapping[query]
-            rows[i][c1_col], rows[i][c2_col], rows[i][c3_col], rows[i][c4_col] = c1, c2, c3, c4
+            c1, c2, c3, c4, c5 = mapping[query]
+            rows[i][c1_col], rows[i][c2_col], rows[i][c3_col], rows[i][c4_col], rows[i][c5_col] = c1, c2, c3, c4, c5
     else:
-        # 全件モード、または絞り込みはあるが4列がまだ無い初回実行。
+        # 全件モード、または絞り込みはあるが5列がまだ無い初回実行。
         # 既にai_classification列が付いた入力（=一度分類済みのCSVを誤って再度渡した場合）
-        # を上書きしないよう、衝突すれば4列まとめて_2,_3...にする
+        # を上書きしないよう、衝突すれば5列まとめて_2,_3...にする
         # （unique_column_nameを列ごとに個別適用すると、"ai_classification_2"という
-        # 正規の列名自体を衝突回避後の名前と誤認識してしまうため、4列専用のヘルパーを使う）。
-        c1_col, c2_col, c3_col, c4_col = column_utils_lib.unique_column_names(fieldnames, base_columns)
-        out_fieldnames = list(fieldnames) + [c1_col, c2_col, c3_col, c4_col]
+        # 正規の列名自体を衝突回避後の名前と誤認識してしまうため、5列専用のヘルパーを使う）。
+        c1_col, c2_col, c3_col, c4_col, c5_col = column_utils_lib.unique_column_names(fieldnames, base_columns)
+        out_fieldnames = list(fieldnames) + [c1_col, c2_col, c3_col, c4_col, c5_col]
         for row in rows:
-            row[c1_col], row[c2_col], row[c3_col], row[c4_col] = "", "", "", ""
+            row[c1_col], row[c2_col], row[c3_col], row[c4_col], row[c5_col] = "", "", "", "", ""
         for i in target_indices:
-            c1, c2, c3, c4 = mapping[rows[i].get("query", "")]
-            rows[i][c1_col], rows[i][c2_col], rows[i][c3_col], rows[i][c4_col] = c1, c2, c3, c4
+            c1, c2, c3, c4, c5 = mapping[rows[i].get("query", "")]
+            rows[i][c1_col], rows[i][c2_col], rows[i][c3_col], rows[i][c4_col], rows[i][c5_col] = c1, c2, c3, c4, c5
 
     # 2026-08-31、Excel等での文字化け対策としてBOM付きUTF-8で出力するようにした
     # （project memory参照）。
@@ -412,7 +421,7 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
     if c1_col != "ai_classification":
         print(
             f"注意: 入力に既に分類済み列があったため "
-            f"\"{c1_col}\"/\"{c2_col}\"/\"{c3_col}\"/\"{c4_col}\" 列として追加しました"
+            f"\"{c1_col}\"/\"{c2_col}\"/\"{c3_col}\"/\"{c4_col}\"/\"{c5_col}\" 列として追加しました"
         )
     print(f"出力先: {output_path}")
 

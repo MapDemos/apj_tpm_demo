@@ -68,10 +68,13 @@ from lib.classification_common import (
     raise_if_cancelled,
 )
 
-Record = tuple[str, str, str, str]  # (ai_classification, ai_classification_2, ai_classification_3, brand)
+Record = tuple[str, str, str, str, str]
+# (ai_classification, ai_classification_2, ai_classification_3, brand, imperfect_query)
 # ai_classification_3は複数リーフを持てる場合、classification_common.LEAF_DELIMITER
 # ("|") で連結した1文字列として入る（classification_common.encode_leaves参照）。
-UNKNOWN_RECORD: Record = ("unknown", "", "", "")
+# imperfect_query: 表記の乱れ・タイプミスを踏まえた推測でunknownを回避した場合
+# "yes"、それ以外は""（2026-08-31新設。project memory参照）。
+UNKNOWN_RECORD: Record = ("unknown", "", "", "", "")
 
 # 2026-08-29、チャンク失敗時の欠落要素リトライを1件ずつの個別呼び出しから
 # このサイズ単位のグループ呼び出しに変更した際の単位（ai_classify_batch.pyと
@@ -145,7 +148,7 @@ def _call_claude_raw(client, system_prompt: str, user_content: str, model: str) 
 
 def call_claude_level1(
     client, items: list[str], model: str,
-) -> tuple[list[tuple[str, str, str | None] | None], dict]:
+) -> tuple[list[tuple[str, str, str | None, bool] | None], dict]:
     """ai_classificationと、addressの場合のみそのサブタイプ(ai_classification_2)を
     判定する（2026-08-31新設。旧call_claude_level12から分離、project memory参照）。
     itemsはクエリ文字列のリスト——brand_match候補は一切見せない（候補情報がpoi/
@@ -430,8 +433,14 @@ def classify_unique(
         return call_claude_level1(client, batch, level12_model)
 
     triples, level1_totals, failed_idx1 = _run_batches_concurrently(
-        unique_queries, batch_size, max_workers, call_level1, ("unknown", "", None), "レベル1分類",
+        unique_queries, batch_size, max_workers, call_level1, ("unknown", "", None, False), "レベル1分類",
     )
+    # imperfect_query（表記の乱れを踏まえた推測でunknownを回避したか）はlevel1でしか
+    # 判定しないため、以降のフェーズがtriples[i]を上書きしても失われないよう、
+    # ここで別配列に退避した上でtriplesを従来通りの3要素（CandidateRecord）に戻す
+    # （2026-08-31新設。project memory参照）。
+    imperfect_flags = [bool(t[3]) for t in triples]
+    triples = [(t[0], t[1], t[2]) for t in triples]
     usage_totals = new_usage_totals()
     add_usage(usage_totals, level1_totals)
     failed_queries: set[str] = {unique_queries[i] for i in failed_idx1}
@@ -573,7 +582,9 @@ def classify_unique(
     records: list[Record] = []
     for i, (c1, c2, matched) in enumerate(triples):
         if i in broken_indices:
-            records.append(("unknown", "", "", ""))
+            # 最終的にunknownへ戻された行はai_classification自体で判別できるため、
+            # imperfect_queryは立てない（下記のimperfect_flags参照）。
+            records.append(("unknown", "", "", "", ""))
             continue
         c3 = leaf_by_index.get(i, "") if c2 in POI_SUBTYPE_VALUES else ""
         # brand_poiの場合のみブランド名を出力する（matched_brandはunique_poiに
@@ -582,9 +593,11 @@ def classify_unique(
         # ないため対象外。leaves_for_matched_brandの判定基準と揃える。2026-08-29
         # 新設、project memory参照）。
         brand = matched if c2 == "brand_poi" and matched else ""
-        records.append((c1, c2, c3, brand))
+        imperfect = "yes" if imperfect_flags[i] else ""
+        records.append((c1, c2, c3, brand, imperfect))
 
     mapping = dict(zip(unique_queries, records))
     for q in municipality_matches:
-        mapping[q] = ("address", "place", "", "")
+        # Python側の決定的マッチなのでimperfect_query（LLMの推測に基づく判断）は対象外。
+        mapping[q] = ("address", "place", "", "", "")
     return mapping, usage_totals, failed_queries

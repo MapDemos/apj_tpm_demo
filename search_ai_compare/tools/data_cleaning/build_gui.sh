@@ -29,7 +29,10 @@ pip install --quiet --upgrade pip
 # anthropicはmain.pyのANTHROPIC_PINと同じ範囲でpinする（1.0.0でMessages.create()の
 # temperature引数が削除される等の破壊的変更があり、無指定だとビルドのたびに
 # 違うバージョンが混入して同じバグを踏み直すため。2026-08-27発覚）。
-pip install --quiet pyinstaller "anthropic>=0.122,<1" PySide6
+# pykakasiはanalyzeのHTMLレポート（ローマ字読みの推定、lib/report_i18n.py）用。
+# jaconv非依存で辞書データを自パッケージ内(pykakasi/data)に持つため、PyInstaller側で
+# --collect-data pykakasiを付けないとデータファイルが同梱されない点に注意。
+pip install --quiet pyinstaller "anthropic>=0.122,<1" PySide6 pykakasi
 
 rm -rf build dist
 
@@ -49,6 +52,7 @@ pyinstaller --noconfirm --windowed \
     --name "Octopus" \
     --osx-bundle-identifier "com.mapbox.octopus" \
     --copy-metadata anthropic \
+    --collect-data pykakasi \
     --add-data "${CATEGORY_AND_BRAND_DIR}:category_and_brand" \
     gui_app.py
 

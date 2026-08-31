@@ -43,6 +43,7 @@ from collections import Counter, defaultdict
 from lib.classification_common import CATEGORIES
 from lib.jp_prefectures import PREFECTURES as JP_PREFECTURES
 from lib.output_utils import make_output_path, current_timestamp
+from lib.report_i18n import to_romaji, taxonomy_display_suffix, brand_display_suffix
 
 # 2026-08-31、必須列をquery/ai_classificationのみに縮小した。他の列
 # （datetime/bbox/proximity/poi_category/poi_category_exclusions/near/
@@ -547,26 +548,25 @@ def render_proximity_prefecture_section(proximity_data: dict) -> str:
     rated = [
         (name, romaji, counts[name], (counts[name] / total * 100) if total else 0.0)
         for name, _, _, romaji in JP_PREFECTURES
+        if counts[name] > 0
     ]
-
-    rows_html = "".join(
-        f"""<div class="hbar-row">
-              <div class="hbar-label">{esc(name)} ({esc(romaji)})</div>
-              <div class="hbar-track"><div class="hbar-fill" style="width:{rate:.1f}%"></div></div>
-              <div class="hbar-value">{rate:.1f}%</div>
-            </div>"""
-        for name, romaji, count, rate in rated
-        if count > 0
-    )
 
     no_prox = proximity_data["no_proximity"]
     no_prox_rate = (no_prox / total * 100) if total else 0.0
 
-    table_rows = "".join(
-        f"<tr><td>{esc(name)} ({esc(romaji)})</td><td class='num'>{count}</td><td class='num'>{rate:.1f}%</td></tr>"
-        for name, romaji, count, rate in rated
-    )
-    table_rows += f"<tr><td>(no proximity)</td><td class='num'>{no_prox}</td><td class='num'>{no_prox_rate:.1f}%</td></tr>"
+    columns = _split_into_columns(rated)
+    num_cols = len(columns) if rated else 1
+
+    def render_rows(chunk: list) -> str:
+        return "".join(
+            f"""<div class="hbar-row hbar-row-flat">
+                  <div class="hbar-label" title="{esc(name)} ({esc(romaji)})">{esc(name)} ({esc(romaji)})</div>
+                  <div class="hbar-value">{count} ({rate:.1f}%)</div>
+                </div>"""
+            for name, romaji, count, rate in chunk
+        )
+
+    chart_columns_html = "".join(f'<div class="hbar-col">{render_rows(chunk)}</div>' for chunk in columns)
 
     return f"""
     <section>
@@ -575,18 +575,9 @@ def render_proximity_prefecture_section(proximity_data: dict) -> str:
         Japan's 47 prefectural representative points (straight-line distance;
         approximate, not an exact boundary lookup). {no_prox} of {total} queries
         had no usable proximity ({no_prox_rate:.1f}%).</p>
-      <div class="hbar-chart hbar-chart-scroll">
-        {rows_html}
+      <div class="hbar-chart hbar-chart-grid" style="--breakdown-cols:{num_cols}">
+        {chart_columns_html if rated else '<p class="muted">No data available.</p>'}
       </div>
-      <details class="card">
-        <summary>Show data table</summary>
-        <div class="table-scroll">
-          <table class="data-table">
-            <thead><tr><th>prefecture</th><th class="num">count</th><th class="num">rate_pct</th></tr></thead>
-            <tbody>{table_rows}</tbody>
-          </table>
-        </div>
-      </details>
     </section>"""
 
 
@@ -599,22 +590,36 @@ def render_top_queries_section(
     overall_insight = insights.get("top_queries_overall") if insights else None
     by_category_insights = (insights.get("top_queries_by_category") or {}) if insights else {}
 
+    def query_label(query: str) -> str:
+        romaji = to_romaji(query)
+        return f"{esc(query)} <span class='muted'>({esc(romaji)})</span>" if romaji else esc(query)
+
     blocks = []
     for category in order:
         items = top_queries.get(category, [])
-        rows_html = "\n".join(
-            f'<tr><td class="rank">{rank}</td><td>{esc(query)}</td><td class="num">{count}</td></tr>'
-            for rank, (query, count) in enumerate(items, start=1)
-        )
+        ranked = list(enumerate(items, start=1))
+        columns = _split_into_columns(ranked)
+        num_cols = len(columns) if ranked else 1
+
+        def render_table(chunk: list) -> str:
+            rows_html = "\n".join(
+                f'<tr><td class="rank">{rank}</td><td>{query_label(query)}</td><td class="num">{count}</td></tr>'
+                for rank, (query, count) in chunk
+            )
+            return f"""<table class="data-table">
+                <thead><tr><th>#</th><th>query</th><th class="num">count</th></tr></thead>
+                <tbody>{rows_html if rows_html else '<tr><td colspan="3" class="muted">No data</td></tr>'}</tbody>
+              </table>"""
+
+        table_columns_html = "".join(f'<div class="hbar-col">{render_table(chunk)}</div>' for chunk in columns)
         blocks.append(f"""
         <details class="card" {"open" if category == order[0] else ""}>
           <summary><span class="cat-dot" style="background:var(--cat-{esc(category)})"></span>{esc(category)}
             <span class="muted">({len(items)} queries)</span></summary>
           {render_ai_insight(by_category_insights.get(category))}
-          <table class="data-table">
-            <thead><tr><th>#</th><th>query</th><th class="num">count</th></tr></thead>
-            <tbody>{rows_html if rows_html else '<tr><td colspan="3" class="muted">No data</td></tr>'}</tbody>
-          </table>
+          <div class="data-table-grid" style="--breakdown-cols:{num_cols}">
+            {table_columns_html if items else '<p class="muted">No data available.</p>'}
+          </div>
         </details>""")
     return f"""
     <section>
@@ -742,7 +747,9 @@ def _split_into_columns(items: list, max_cols: int = MAX_BREAKDOWN_COLUMNS) -> l
     return chunks
 
 
-def _render_breakdown_block(heading_html: str, subtitle: str, breakdown: dict) -> str:
+def _render_breakdown_block(
+    heading_html: str, subtitle: str, breakdown: dict, label_suffix_fn=None
+) -> str:
     """compute_classification_breakdown/compute_poi_taxonomy_breakdown/
     compute_address_structure_breakdown/compute_brand_breakdownの共通レンダラー。
     件数とパーセントを横棒グラフ＋データテーブルで見せる
@@ -752,59 +759,51 @@ def _render_breakdown_block(heading_html: str, subtitle: str, breakdown: dict) -
     にも、複数ブロックを1つの<section>にまとめる（Iのようにサブタイプごとに
     h3見出しで並べる）にも流用できる。
 
-    2026-08-29、項目数が多いと縦に長くなり見づらいとの指摘のため、棒グラフ・
-    データテーブルの両方を最大MAX_BREAKDOWN_COLUMNS列の段組みにした
-    （_split_into_columns参照。項目数が列数未満ならその数の列になる）。"""
-    total = breakdown["total"]
+    2026-08-29、項目数が多いと縦に長くなり見づらいとの指摘のため、最大
+    MAX_BREAKDOWN_COLUMNS列の段組みにした（_split_into_columns参照。項目数が
+    列数未満ならその数の列になる）。2026-08-31、横棒グラフ（バー）がラベルの
+    表示幅を圧迫するとの指摘のため、バーを廃止して件数(割合%)のみの表示に
+    変更した。ラベルが省略された場合でもtitle属性でホバー時に全文を見られる
+    ようにしている。バー・データテーブルが別々に情報を持っていたのが
+    バー廃止により完全に重複するため、"Show data table"のdetailsごと削除した
+    （project memory参照）。
+    label_suffix_fnを渡すと、各labelの後ろに"(戻り値)"の形で追記する
+    （I. Taxonomy/K. Brandの英訳・ローマ字併記用。Noneを返した項目には
+    何も付けない）。"""
     items = breakdown["items"]
     columns = _split_into_columns(items)
     num_cols = len(columns) if items else 1
 
+    def display_label(label: str) -> str:
+        suffix = label_suffix_fn(label) if label_suffix_fn else None
+        return f"{esc(label)} ({esc(suffix)})" if suffix else esc(label)
+
     def render_rows(chunk: list) -> str:
         return "".join(
-            f"""<div class="hbar-row">
-                  <div class="hbar-label">{esc(item["label"])}</div>
-                  <div class="hbar-track"><div class="hbar-fill" style="width:{item["pct"]:.1f}%"></div></div>
+            f"""<div class="hbar-row hbar-row-flat">
+                  <div class="hbar-label" title="{display_label(item["label"])}">{display_label(item["label"])}</div>
                   <div class="hbar-value">{item["count"]} ({item["pct"]:.1f}%)</div>
                 </div>"""
             for item in chunk
         )
 
-    def render_table_rows(chunk: list) -> str:
-        return "".join(
-            f"<tr><td>{esc(item['label'])}</td><td class='num'>{item['count']}</td>"
-            f"<td class='num'>{total}</td><td class='num'>{item['pct']:.1f}%</td></tr>"
-            for item in chunk
-        )
-
     chart_columns_html = "".join(f'<div class="hbar-col">{render_rows(chunk)}</div>' for chunk in columns)
-    table_columns_html = "".join(
-        f"""<table class="data-table">
-              <thead><tr><th>label</th><th class="num">count</th><th class="num">total</th><th class="num">pct</th></tr></thead>
-              <tbody>{render_table_rows(chunk)}</tbody>
-            </table>"""
-        for chunk in columns
-    )
 
     return f"""
       {heading_html}
       <p class="muted">{esc(subtitle)}</p>
       <div class="hbar-chart hbar-chart-grid" style="--breakdown-cols:{num_cols}">
         {chart_columns_html if items else '<p class="muted">No data available.</p>'}
-      </div>
-      <details class="card">
-        <summary>Show data table</summary>
-        <div class="data-table-grid" style="--breakdown-cols:{num_cols}">
-          {table_columns_html if items else ''}
-        </div>
-      </details>"""
+      </div>"""
 
 
-def _render_breakdown_section(section_id: str, title: str, subtitle: str, breakdown: dict) -> str:
-    """_render_breakdown_blockを<section>+h2見出しで包む、H/J向けの単一ブロック版。"""
+def _render_breakdown_section(
+    section_id: str, title: str, subtitle: str, breakdown: dict, label_suffix_fn=None
+) -> str:
+    """_render_breakdown_blockを<section>+h2見出しで包む、H/J/K向けの単一ブロック版。"""
     return f"""
     <section id="{section_id}">
-      {_render_breakdown_block(f"<h2>{esc(title)}</h2>", subtitle, breakdown)}
+      {_render_breakdown_block(f"<h2>{esc(title)}</h2>", subtitle, breakdown, label_suffix_fn)}
     </section>"""
 
 
@@ -827,7 +826,10 @@ def render_poi_taxonomy_section(poi_taxonomy_breakdown: dict[str, dict]) -> str:
 
     blocks = "".join(
         _render_breakdown_block(
-            f"<h3>{esc(subtype)}</h3>", subtitle_by_subtype[subtype], poi_taxonomy_breakdown[subtype]
+            f"<h3>{esc(subtype)}</h3>",
+            subtitle_by_subtype[subtype],
+            poi_taxonomy_breakdown[subtype],
+            taxonomy_display_suffix,
         )
         for subtype in POI_SUBTYPES.values()
         if subtype in poi_taxonomy_breakdown
@@ -1151,7 +1153,12 @@ def render_html_report(
   .hbar-track {{ flex: 1; height: 10px; background: var(--gridline); border-radius: 4px; overflow: hidden; }}
   .hbar-fill {{ height: 100%; background: var(--series-1, #2a78d6); border-radius: 4px; }}
   .hbar-value {{ width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }}
-  .hbar-chart-scroll {{ max-height: 480px; overflow-y: auto; }}
+
+  /* 2026-08-31、バー(hbar-track/hbar-fill)を使わずラベル+件数(割合%)だけを
+     並べる行（C/H/I/K）。バーが無い分ラベルに幅を回し、省略された全文は
+     hbar-label側のtitle属性でホバー時に見せる（project memory参照）。 */
+  .hbar-row-flat .hbar-label {{ width: auto; flex: 1; }}
+  .hbar-row-flat .hbar-value {{ width: auto; flex: 0 0 auto; margin-left: 8px; }}
 
   /* 2026-08-29、H/I/J/K内訳セクションの棒グラフ・データテーブルを最大4列の
      段組みにする（project memory参照。項目数が多いと縦に長くて見づらいとの
@@ -1202,6 +1209,7 @@ def render_html_report(
       "Rows classified as brand_poi only, broken down by the matched brand name "
       "(ai_classification_2_brand) as a count and share of the brand_poi total.",
       brand_breakdown,
+      brand_display_suffix,
   ) if brand_breakdown else ""}
 </main>
 </body>

@@ -347,29 +347,59 @@ project memory参照）。このクエリログはリアルタイム検索候補
 "は"や"ひろ"のような、それ単体では意味を成さない断片はunknown）。
 """
 
+BOUNDARY_GUIDANCE_TYPO_DEFAULT = """
+表記の乱れ・タイプミスの既定値: 上記の「入力途中の断片」の既定値とは別の
+ケースを扱う（2026-08-31追加。project memory参照）。クエリ全体としては最後まで
+入力し終えているが、末尾やクエリ中に紛れ込んだ余分な1文字（例: "新宿s"の末尾の
+"s"）、脱字・誤字（例: "くやくsy"は「くやくしょ（区役所）」の入力ミスと推測
+できる）など、表記面の乱れが1箇所程度あるだけのケースが該当する。このような
+乱れがあっても、乱れを取り除けば元の語が何を指していたかを一定の確信度で
+推測できる場合は、無理にunknownへ逃げず、推測できた語が本来当てはまるはずの
+カテゴリ（1(poi)・2(address)・3(semantic_query)のいずれか）を選ぶこと。目的は
+「ユーザーが何を探そうとしていたかを知ること」であり、クエリ文字列自体を
+書き換えて出力する必要はない（分類先を判断する際の思考材料として使うだけで
+よい）。ただし、乱れを取り除いても複数の解釈が同程度に有力で1つに絞れない
+場合や、そもそも何を指そうとしていたのか見当がつかないほど崩れている場合は、
+無理に推測せず4(unknown)のままにする——4(unknown)が「本当にどれにも当てはま
+らない場合」の最終手段であるという位置づけは変わらない。
+この既定値は「入力途中の断片」の既定値と判断軸が異なる点に注意: 断片は
+文字数が短く、そもそも語の体裁自体を成していない（入力の途中で切れている）
+ケースを指す。表記の乱れは、語の体裁自体は最後まで入力されているが、一部が
+誤字・脱字・余分な文字で壊れているケースを指す。
+この既定値を適用して4(unknown)を回避した場合は、後述のimperfect_queryを
+1にすること（下記「出力形式」参照）。
+"""
+
 BOUNDARY_GUIDANCE_PLACE_DEFAULT = """
-地名の既定値: 上記の優先順位には例外がある。クエリ全体が都道府県・市区町村・
-大字・有名地域名などの地理的な地名（行政区画・地域の名称）**だけ**で完結して
-おり、施設・建造物・拠点であることを示す語（駅・タワー・城・神社・公園・
-ホテル・店等）を伴っていない場合は、1(poi)より先に2(address)を検討すること。
-この判定はクエリの表記（漢字・ひらがな・カタカナいずれでも）にかかわらず
-同じ基準で行う。都市・観光地としての知名度の高さは1(poi)と判断する根拠には
-ならない（例: "仙台", "鹿児島", "軽井沢", "苫小牧"のような、それ単体では
-地名以外の意味を持たない文字列はaddressが既定）。同じ地名を持つ駅・停留所が
-実在し、駅名として広く知られていることも同様にpoiと判断する根拠にはならない
-——「その地名の駅が存在すると知っていること」と「ユーザーが駅施設そのものを
-検索していること」は別問題であり、クエリ文字列自体に「駅」等の施設語が
-含まれない限り地名としての解釈を優先する（例: "渋谷", "蒲田", "下北沢",
-"用賀"のような、著名な駅がある地域名も、クエリに"駅"が付いていなければ
-addressが既定）。1(poi)と判断してよいのは、地名の一部を含んでいても、それが
-特定の施設・建造物そのものを指す名称だと判断できる場合（例: "仙台城",
-"軽井沢プリンスホテル", "渋谷駅"）に限る。
+地名の既定値（手順化）: 上記の優先順位には例外がある。クエリを分類する前に、
+必ず次の2ステップを機械的に実行すること（2026-08-31、恵比寿・梅田のような、
+駅名としての連想が地名としての解釈より強く働きやすい地名で実際に誤判定が
+確認されたため、抽象的な注意書きから具体的な手順に書き直した。project
+memory参照）。
+ステップ1: クエリ文字列そのものに、施設・建造物・拠点であることを明示する語
+（例: 駅・空港・港・タワー・城・神社・寺・公園・ホテル・店・センター・ビル等）が
+含まれているかを確認する。
+ステップ2: 含まれていない場合、クエリ全体が都道府県・市区町村・大字・地域名・
+繁華街名などの地理的な地名"だけ"で完結しているなら、1(poi)を検討する前に必ず
+2(address)を選ぶ。この判定は、その地名が駅名・繁華街としてどれほど有名か、
+モデル自身がその地名を「〜駅」「〜繁華街」として真っ先に連想するかどうかとは
+無関係に機械的に適用すること——「クエリ文字列に施設語が実際に書かれているか」
+だけが唯一の基準であり、地名の知名度・連想の強さを判断材料に含めてはならない
+（例: "梅田"は日常会話でほぼ「梅田駅」を指すことが多いが、クエリ自体に"駅"の
+文字が無い限りこの手順ではaddressになる。恵比寿・梅田・渋谷・蒲田・下北沢・
+用賀・仙台・鹿児島・軽井沢・苫小牧はいずれもこの例に該当する）。
+1(poi)と判断してよいのは、地名の一部を含んでいても、それが特定の施設・建造物
+そのものを指す名称だと判断できる場合（例: "仙台城", "軽井沢プリンスホテル",
+"渋谷駅"）に限る。
 """
 
 # 1階層目（ai_classification）の判定に必要な境界指針。brand_match候補は一切
 # 見せない呼び出し（build_system_prompt_level1）専用。
 BOUNDARY_GUIDANCE_LEVEL1 = (
-    BOUNDARY_GUIDANCE_PRIORITY + BOUNDARY_GUIDANCE_FRAGMENT_DEFAULT + BOUNDARY_GUIDANCE_PLACE_DEFAULT
+    BOUNDARY_GUIDANCE_PRIORITY
+    + BOUNDARY_GUIDANCE_FRAGMENT_DEFAULT
+    + BOUNDARY_GUIDANCE_TYPO_DEFAULT
+    + BOUNDARY_GUIDANCE_PLACE_DEFAULT
 )
 
 BOUNDARY_GUIDANCE_NOTATION_NORMALIZE = """
@@ -547,7 +577,16 @@ def build_system_prompt_level1() -> str:
     （BRAND_CANDIDATE_GUIDANCEの「候補があれば必ず検討する」という構造的強制が、
     候補を一切見せていないはずのpoi/address/unknown判定にまで漏れ出していた）。
     taxonomy(285リーフ)・POI_SUBTYPESを含まないため、build_system_prompt_level3()の
-    重量級プロンプト比でさらに小さい。"""
+    重量級プロンプト比でさらに小さい。
+
+    2026-08-31、表記の乱れ・タイプミス（BOUNDARY_GUIDANCE_TYPO_DEFAULT参照）を
+    理由に安易にunknownへ倒さないようにする指針と、それを適用したかどうかを
+    示すimperfect_query（0/1）を出力に追加した。ユーザーが何を探そうとして
+    いたかを推測できる限りunknownを避けたいという要望に対し、クエリ文字列
+    自体は書き換えず（架空の語を作らない）、分類先の判断材料としてのみ乱れを
+    考慮する設計にしている。imperfect_query=1の行は、後段でこの推測が正しい
+    前提でPOI/住所検索を実行することになるため、search_ai_compare側で目視
+    レビュー対象として絞り込めるようにする狙いがある（project memory参照）。"""
     cat1_lines = "\n".join(
         f"- {n}: {CATEGORIES[n]} — {CATEGORY_DESCRIPTIONS[n]}" for n in sorted(CATEGORIES)
     )
@@ -578,15 +617,20 @@ def build_system_prompt_level1() -> str:
 {BOUNDARY_GUIDANCE_LEVEL1}
 {ADDRESS_GUIDANCE}
 
+## imperfect_query（表記の乱れを回避してunknownを免れたかどうか）
+上記「表記の乱れ・タイプミスの既定値」を適用し、乱れを踏まえた推測によって
+4(unknown)を回避した場合は1、それ以外（そもそも乱れが無かった場合、または
+乱れがあり4(unknown)のままにした場合）は常に0にしてください。
+
 ## 出力形式
 入力配列の各要素は[インデックス, クエリ文字列]という形式です。出力は、入力に
 含まれていた各インデックスについて1つずつ、[インデックス, ai_classification番号,
-ai_classification_2番号(該当なしは0)]という形式の要素を持つJSON配列で返して
-ください（順序は入力と一致させる必要はありません。各インデックスは1回だけ
-登場させてください）。説明文やコードフェンスは一切含めず、JSON配列のみを
-出力してください。入力に含まれる全てのインデックスに対して必ず1件ずつ出力し、
-省略・統合・重複が無いようにしてください。
-例: [[0,1,0], [1,2,3], [2,4,0], [3,2,5]]
+ai_classification_2番号(該当なしは0), imperfect_query(0または1)]という形式の
+要素を持つJSON配列で返してください（順序は入力と一致させる必要はありません。
+各インデックスは1回だけ登場させてください）。説明文やコードフェンスは一切
+含めず、JSON配列のみを出力してください。入力に含まれる全てのインデックスに
+対して必ず1件ずつ出力し、省略・統合・重複が無いようにしてください。
+例: [[0,1,0,0], [1,2,3,1], [2,4,0,0], [3,2,5,0]]
 """
 
 
@@ -887,6 +931,12 @@ def decode_pair(item) -> tuple[str, str]:
 # 該当なし/候補自体が無かった場合はNone。
 CandidateRecord = tuple[str, str, str | None]
 
+# decode_indexed_level1_responses専用のレコード型（2026-08-31新設）。level1呼び出しは
+# 候補を一切渡さない（matched_brandは常にNone）ため実質CandidateRecordのサブセットだが、
+# 末尾にimperfect_query（BOUNDARY_GUIDANCE_TYPO_DEFAULTを適用してunknownを回避したか
+# どうか）を持つ点がlevel2(POI)向けのCandidateRecordと異なるため別名で定義する。
+Level1Record = tuple[str, str, str | None, bool]
+
 
 def build_indexed_candidates_user_content(queries: list[str], candidates: list[list[str] | None]) -> str:
     """「インデックス付きクエリ＋任意のブランド候補」という入力JSONを組み立てる
@@ -919,10 +969,11 @@ def build_level3_user_content(items: list[tuple[str, str]]) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
-def _decode_candidate_tail(rest: list, candidates: list[str] | None) -> CandidateRecord | None:
+def _decode_candidate_tail(rest: list, candidates: list[str] | None) -> Level1Record | None:
     """decode_indexed_level1_responsesの1件分。restはインデックスを除いた残りの
-    要素（候補なしなら[c1, c2]、候補ありなら[c1, c2, idx]）。形式が不正・値が
-    範囲外の場合はNoneを返し、呼び出し元でこのインデックスを欠落扱いにする。
+    要素（候補なしなら[c1, c2]または[c1, c2, imperfect]、候補ありなら[c1, c2, idx]）。
+    形式が不正・値が範囲外の場合はNoneを返し、呼び出し元でこのインデックスを
+    欠落扱いにする。
 
     2026-08-30、候補あり(candidates is not None)でもlen(rest)==2を許容するように
     変更した（project memory参照）。実API検証で、モデルが「候補はどれも不一致」と
@@ -930,12 +981,24 @@ def _decode_candidate_tail(rest: list, candidates: list[str] | None) -> Candidat
     従来はlen(rest)!=3を機械的に欠落扱いにしていたため、正しい判断（brand_poi
     ではないという結論）まで個別リトライ→再失敗→unknownとして握りつぶされていた。
     候補ありでもc1/c2の2要素だけ返ってきた場合は「候補不一致」の省略とみなし、
-    matched_brand=Noneとして復元する。"""
-    if candidates is None or len(rest) == 2:
-        if len(rest) != 2:
+    matched_brand=Noneとして復元する。
+
+    2026-08-31、末尾にimperfect_query（表記の乱れを踏まえた推測でunknownを
+    回避したかどうか、BOUNDARY_GUIDANCE_TYPO_DEFAULT参照）を追加した。level1
+    呼び出しは候補を一切渡さない（candidates is None）ため実際に使われるのは
+    このケースのみで、[c1, c2]（省略時はimperfect=Falseとみなす）または
+    [c1, c2, imperfect]を受け付ける。候補ありパス（現状未使用）はimperfectを
+    常にFalseにする。"""
+    if candidates is None:
+        if len(rest) not in (2, 3):
             return None
+        c1, c2 = decode_pair(rest[:2])
+        imperfect = bool(rest[2]) if len(rest) == 3 else False
+        return c1, c2, None, imperfect
+
+    if len(rest) == 2:
         c1, c2 = decode_pair(rest)
-        return c1, c2, None
+        return c1, c2, None, False
 
     if len(rest) != 3:
         return None
@@ -944,23 +1007,24 @@ def _decode_candidate_tail(rest: list, candidates: list[str] | None) -> Candidat
     if not isinstance(idx, int) or idx < 0 or idx > len(candidates):
         return None
     matched_brand = candidates[idx - 1] if idx > 0 else None
-    return c1, c2, matched_brand
+    return c1, c2, matched_brand, False
 
 
 def decode_indexed_level1_responses(
     raw_items: list, candidates_list: list[list[str] | None],
-) -> tuple[list[CandidateRecord | None], set[int]]:
+) -> tuple[list[Level1Record | None], set[int]]:
     """build_system_prompt_level1が返すインデックス付き応答配列
-    （各要素は[idx, c1, c2]）を、candidates_listと同じ順序・同じ長さの
-    CandidateRecordのリストに変換する（2026-08-27新設、2026-08-31にlevel1/
-    level2(POI)分離に伴い改称。level1呼び出しは候補を一切渡さないため、
-    candidates_listは常に全要素Noneになる想定だが、_decode_candidate_tailは
-    汎用実装のためそのまま使える）。範囲外・型不正・重複したインデックス、
-    およびデコードに失敗した要素はその位置をNoneのまま残す。戻り値の2つ目は
-    Noneのまま残った（＝LLM応答から実質的に欠落した）インデックスの集合で、
-    呼び出し元(_run_batches_concurrently)がこの分だけ個別リトライする。"""
+    （各要素は[idx, c1, c2, imperfect]）を、candidates_listと同じ順序・同じ長さの
+    Level1Recordのリストに変換する（2026-08-27新設、2026-08-31にlevel1/
+    level2(POI)分離に伴い改称、同日imperfect_query追加に伴いLevel1Recordへ改称。
+    level1呼び出しは候補を一切渡さないため、candidates_listは常に全要素Noneに
+    なる想定だが、_decode_candidate_tailは汎用実装のためそのまま使える）。
+    範囲外・型不正・重複したインデックス、およびデコードに失敗した要素は
+    その位置をNoneのまま残す。戻り値の2つ目はNoneのまま残った（＝LLM応答から
+    実質的に欠落した）インデックスの集合で、呼び出し元(_run_batches_concurrently)
+    がこの分だけ個別リトライする。"""
     n = len(candidates_list)
-    records: list[CandidateRecord | None] = [None] * n
+    records: list[Level1Record | None] = [None] * n
     for raw in raw_items:
         if not isinstance(raw, list) or len(raw) < 2:
             continue
