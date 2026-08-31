@@ -6,6 +6,8 @@ data_cleaning/ のCSVクレンジング・AI分類・傾向分析を1つにま�
   dedup                  重複除去（--columns-onlyでquery列のみ抽出版。
                           same_query_count列を自動付与）
   add-query-count        same_query_count列だけを付与する（重複除去はしない、プログラム的カウントのみ、AI不使用）
+  collapse-sessions      セッションID列（session_token等、自動検出）内でタイピング途中の断片を間引く
+                          （リアルタイム検索候補APIの生ログ対策。dedupの後に使う想定）
   count-column           指定した列の出現回数を集計する（--columnでquery/ai_classification等を指定、デフォルトquery）
   ai-classify             AI分類（本物のAnthropic APIを直接叩く。要ANTHROPIC_API_KEY
                           または--token。モデルはHaiku固定。2026-08-28よりBatches API
@@ -41,6 +43,7 @@ from lib import dedup as dedup_lib
 from lib import jp_municipalities as jp_municipalities_lib
 from lib import query_count_column as query_count_column_lib
 from lib import row_filter as row_filter_lib
+from lib import session_collapse as session_collapse_lib
 from lib.output_utils import current_timestamp, make_output_path
 
 # anthropicパッケージのバージョンpin。1.0.0でMessages.create()からtemperature
@@ -101,6 +104,35 @@ def cmd_add_query_count(args: argparse.Namespace) -> None:
     print(f"ユニークなquery数: {len(counts)}")
     if count_column != query_count_column_lib.COLUMN_NAME:
         print(f"注意: 入力に既に \"{query_count_column_lib.COLUMN_NAME}\" 列があったため \"{count_column}\" 列として追加しました")
+    print(f"出力先: {output_path}")
+
+
+def cmd_collapse_sessions(args: argparse.Namespace) -> None:
+    """セッションID列（自動検出）内で、タイピング途中の断片（後続に自分自身を
+    先頭に含むより長いqueryが存在する行）を間引く（lib/session_collapse.py参照）。
+    セッションID列が見つからない場合は処理をスキップし、入力をそのまま出力する。"""
+    fieldnames, rows = session_collapse_lib.read_rows(args.input_csv)
+    before = len(rows)
+
+    session_column = session_collapse_lib.detect_session_column(fieldnames)
+    output_path = make_output_path(args.input_csv, "session_collapsed")
+
+    if session_column is None:
+        print("セッションID列が見つからないため、間引きをスキップします（入力をそのまま出力）。")
+        session_collapse_lib.write_rows(output_path, fieldnames, rows)
+        print(f"入力行数: {before}")
+        print(f"出力先: {output_path}")
+        return
+
+    datetime_column = "datetime" if "datetime" in fieldnames else None
+    result = session_collapse_lib.collapse_sessions(
+        rows, session_column, datetime_column=datetime_column,
+    )
+    session_collapse_lib.write_rows(output_path, fieldnames, result.kept_rows)
+
+    print(f"セッションID列: \"{session_column}\"" + ("（datetime列で順序判定）" if datetime_column else "（元のファイル順で順序判定）"))
+    print(f"入力行数: {before}")
+    print(f"間引き後の行数: {len(result.kept_rows)}（{result.dropped_count}件削除）")
     print(f"出力先: {output_path}")
 
 
@@ -442,6 +474,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("input_csv")
     p.set_defaults(func=cmd_add_query_count)
+
+    p = sub.add_parser(
+        "collapse-sessions",
+        help="セッションID列（session_token等、自動検出）内でタイピング途中の断片を間引く"
+        "（dedupの後に使う想定。セッションID列が無ければ入力をそのまま出力）",
+    )
+    p.add_argument("input_csv")
+    p.set_defaults(func=cmd_collapse_sessions)
 
     p = sub.add_parser(
         "count-column",
