@@ -41,11 +41,12 @@ import math
 import os
 import re
 import sys
+import tempfile
 import threading
 import time
 
-from PySide6.QtCore import Qt, QObject, Signal
-from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtCore import Qt, QObject, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -57,6 +58,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -78,6 +80,7 @@ from lib import classification_common as classification_common_lib  # noqa: E402
 from lib import jp_municipalities as jp_municipalities_lib  # noqa: E402
 from lib import output_utils as output_utils_lib  # noqa: E402
 from lib import row_filter as row_filter_lib  # noqa: E402
+from lib import session_collapse as session_collapse_lib  # noqa: E402
 from lib.output_utils import OUTPUT_DIR  # noqa: E402
 
 # lib/output_utils.pyのmake_output_path()は、呼び出し時点で自分のモジュール内の
@@ -97,6 +100,9 @@ COLOR_MUTED = "#8B93A6"
 COLOR_ACCENT = "#4264FB"
 COLOR_ACCENT_HOVER = "#2F4FE0"
 COLOR_ENTRY_BG = "#20242C"
+# トークン欄の構文チェック表示用（2026-08-31新設）。
+COLOR_DANGER = "#F87171"
+COLOR_SUCCESS = "#4FD1C5"
 
 STYLESHEET = f"""
 QWidget {{
@@ -224,6 +230,18 @@ DEFAULT_SYNC_BATCH_SIZE = 300
 DEFAULT_WORKERS = 8
 
 
+# トークン欄のリアルタイム構文チェック用（2026-08-31新設）。空白・全角文字・
+# 半角英数字記号以外の文字が1つでも含まれていれば不正とする（ASCII印字可能文字
+# のうち空白を除いたもの=0x21〜0x7Eのみ許可）。この書式チェックを通った場合のみ、
+# 実際にModels APIを叩いて認証確認まで行う（_start_token_verification参照。
+# 2026-08-31、書式チェックだけでは「トークン確認済み」と言うには不十分との
+# 指摘を受けて追加。project memory参照）。
+_TOKEN_VALID_RE = re.compile(r"^[\x21-\x7e]*$")
+# 入力が止まってから実際にAPIを叩くまでの待ち時間(ms)。キー入力ごとに毎回叩く
+# 無駄を避けるデバウンス。
+_TOKEN_CHECK_DEBOUNCE_MS = 800
+
+
 class AISettings:
     def __init__(self) -> None:
         self.api_key: str = ""
@@ -315,14 +333,40 @@ def estimate_cost(input_tokens: int, output_tokens: int, model_family: str, batc
 
 # 進捗バーの%表示（_update_progress_from_log参照）が拾う進捗ログの形式。
 # 2026-08-30、残り時間の目安を廃止しこちらに置き換えた（project memory参照）。
-# 3パターンをまとめて解析する:
-#   ①Batches API使用時のジョブポーリング行（ai_classify_batch.pyのrun_batch_job。
+# 4パターンをまとめて解析する:
+#   ①Batches API使用時のジョブ作成・再開行（ai_classify_batch.pyのrun_batch_job。
+#     ポーリングの最初のdone=行が来るまで最大POLL_INTERVAL_SECONDS秒、進捗が
+#     前フェーズの値のまま止まって見える問題への対策として2026-08-31追加。
+#     この行だけはdone=を含まないため、②とは別の正規表現で拾ってdone=0として
+#     即座に表示を更新する）
+#   ②Batches API使用時のジョブポーリング行（同run_batch_job。
 #     phase_label付きでdone=N/Mを出すよう変更済み）
-#   ②Batches API不使用時のバッチ完了行（ai_classify.pyの_run_batches_concurrently）
-#   ③個別/グループリトライの進捗行（ai_classify_batch.py/ai_classify.py共通）
+#   ③Batches API不使用時のバッチ完了行（ai_classify.pyの_run_batches_concurrently）
+#   ④個別/グループリトライの進捗行（ai_classify_batch.py/ai_classify.py共通）
+_PROGRESS_JOB_START_RE = re.compile(r"\[(.+?)\] バッチジョブ(?:作成|再開): \S+（(\d+)リクエスト）")
 _PROGRESS_JOB_RE = re.compile(r"\[(.+?)\].*done=(\d+)/(\d+)")
 _PROGRESS_SYNC_RE = re.compile(r"(.+?)中\.\.\. (\d+)/(\d+) バッチ完了")
 _PROGRESS_RETRY_RE = re.compile(r"(.+?): グループリトライ (\d+)/(\d+)グループ完了")
+
+# ai-classifyの実処理フェーズの想定順序（2026-08-31新設。project memory参照:
+# 進捗バーが「今のフェーズ名」しか示さず全体の何合目か分からないという指摘への
+# 対応）。カテゴリ再判定関連の2フェーズ（再判定そのもの・訂正後のtaxonomy
+# 再分類）は対象データがある場合しか実行されないため、表示上は同じ番号
+# （3フェーズ目）にまとめる。レポート生成（--with-report）は別コマンド
+# （main.py内部でcmd_analyzeを呼ぶだけ）で、この進捗ログの形式に乗らないため
+# フェーズ番号には含めない（実行はされるが進捗バーには反映されない既知の制約）。
+_PHASE_SEQUENCE = ["レベル1/2分類", "レベル3分類(taxonomy)", "カテゴリ再判定"]
+_PHASE_ALIASES = {"レベル3再分類(taxonomy、再判定後)": "カテゴリ再判定"}
+
+
+def _phase_index_label(label: str) -> str:
+    """ログのフェーズ名から「n/mフェーズ: 元のラベル」形式の接頭辞付き文字列を
+    作る。既知のフェーズ順序に含まれないラベル（想定外の形式）はそのまま返す。"""
+    normalized = _PHASE_ALIASES.get(label, label)
+    if normalized not in _PHASE_SEQUENCE:
+        return label
+    idx = _PHASE_SEQUENCE.index(normalized) + 1
+    return f"{idx}/{len(_PHASE_SEQUENCE)}フェーズ: {label}"
 
 
 def _load_unique_queries_for_estimate(
@@ -385,6 +429,11 @@ class ThreadSignals(QObject):
 
     log = Signal(str)
     done = Signal(object)  # Exception | None
+    # トークン欄の実API認証確認結果（2026-08-31新設。project memory参照）。
+    # (generation, success, error_message) の組。generationは
+    # MainPage._token_check_generationと比較して、確認中に別の値へ書き換え
+    # られた場合に古い結果を無視するために使う。
+    token_check_done = Signal(int, bool, str)
 
 
 class QueueWriter:
@@ -481,7 +530,9 @@ def build_ai_options(page: "MainPage", layout: QVBoxLayout) -> dict:
     取り出す（_choose_csvがpage.filter_column_comboを見て読み込み時に更新する）。"""
     option_getters: dict[str, object] = {}
 
-    layout.addWidget(_muted_label("絞り込み(任意。指定なしなら全行が対象)", wrap=True))
+    # 2026-08-31、「絞り込み」→「対象をフィルタリング」に改名（project memory参照。
+    # 「絞り込み」だとオプション名として何を指しているか伝わりにくいとの指摘）。
+    layout.addWidget(_muted_label("対象をフィルタリング(任意。指定なしなら全行が対象)", wrap=True))
 
     filter_row = QHBoxLayout()
     layout.addLayout(filter_row)
@@ -540,13 +591,13 @@ def build_ai_options(page: "MainPage", layout: QVBoxLayout) -> dict:
     report_top.addWidget(report_label)
     report_combo = QComboBox()
     report_combo.addItems(["はい", "いいえ"])
-    report_combo.setCurrentText("いいえ")
+    # 2026-08-31、デフォルトを「いいえ」→「はい」に変更（project memory参照）。
+    report_combo.setCurrentText("はい")
     _bound_combo_width(report_combo, min_chars=6)
     report_top.addWidget(report_combo)
     report_top.addStretch(1)
-    report_row.addWidget(
-        _muted_label("（分類完了後に続けてHTMLレポートも生成する。AIコメンタリー無し・上位50件固定）", wrap=True)
-    )
+    # 2026-08-31、「（分類完了後に続けて...）」の補足注記を削除（project memory
+    # 参照。「レポート出力」というラベル自体で意味が伝わるため冗長と判断）。
     option_getters["with_report"] = lambda: report_combo.currentText() == "はい"
 
     # 2026-08-30、「Batches API使用」トグルをヘッダーの⚙設定ダイアログ
@@ -555,12 +606,11 @@ def build_ai_options(page: "MainPage", layout: QVBoxLayout) -> dict:
     # ため）。ここではAI_SETTINGSを読むだけのgetterにする。
     option_getters["batch_api"] = lambda: AI_SETTINGS.batch_api
 
+    # 2026-08-31、モデルの注記はトークン入力欄の下（MainPage._build参照）に一本化
+    # したのでここでは削除。APIキーもヘッダーの⚙設定からトークン入力欄に移動した
+    # ため、この行にあった案内文言はどちらも意味を失っていた。
     layout.addWidget(
-        _muted_label(
-            "（モデル: Haikuファミリー固定（バージョン自動選択）。APIキー・Batches API使用・"
-            "バッチサイズ・並行数はヘッダーの⚙設定を使用）",
-            wrap=True,
-        )
+        _muted_label("（Batches API使用・バッチサイズ・並行数はヘッダーの⚙設定を使用）", wrap=True)
     )
 
     return option_getters
@@ -571,27 +621,15 @@ def build_analyze_options(page: "MainPage", layout: QVBoxLayout) -> dict:
     # 意味が分かりづらいとの指摘のため。_build_argsでargs.top_n=50を直接設定）。
     # 2026-08-29、チェックボックスから「使う/使わない」のドロップダウンに変更
     # （project memory参照。オン/オフが視覚的に紛らわしいとの指摘のため）。
-    ai_commentary_row = QVBoxLayout()
-    layout.addLayout(ai_commentary_row)
-    ai_top = QHBoxLayout()
-    ai_commentary_row.addLayout(ai_top)
-    ai_label = _muted_label("AIコメンタリー")
-    ai_top.addWidget(ai_label)
-    ai_combo = QComboBox()
-    ai_combo.addItems(["使う", "使わない"])
-    ai_combo.setCurrentText("使わない")  # 従来のQCheckBox()のデフォルト（未チェック）を踏襲
-    _bound_combo_width(ai_combo, min_chars=6)
-    ai_top.addWidget(ai_combo)
-    ai_top.addStretch(1)
-    ai_commentary_row.addWidget(
-        _muted_label(
-            "（本物のAnthropic APIでレポートに要約を追加。モデル: Sonnet固定。APIキーはヘッダーの⚙設定を使用）",
-            wrap=True,
-        )
+    # 2026-08-31、選択UI自体を廃止し常時オンに変更した（project memory参照。
+    # 「選べる必要もない」との判断のため。with_ai_commentaryのgetterキー自体は
+    # _on_run/_build_argsとの互換のため残す）。
+    layout.addWidget(
+        _muted_label("（本物のAnthropic APIでレポートに要約を追加。常にオン）", wrap=True)
     )
 
     return {
-        "with_ai_commentary": lambda: ai_combo.currentText() == "使う",
+        "with_ai_commentary": lambda: True,
     }
 
 
@@ -604,7 +642,9 @@ def build_collapse_sessions_options(page: "MainPage", layout: QVBoxLayout) -> di
     layout.addWidget(
         _muted_label(
             "（session_token等のセッションID列を自動検出し、リアルタイム検索候補APIの"
-            "タイピング途中の断片を間引く。列が見つからない場合は入力をそのまま出力する）",
+            "タイピング途中の断片を間引く。列が見つからない場合は入力をそのまま出力する。"
+            "proximity列がある場合、session_tokenが毎リクエスト新規発行されるクライアント"
+            "（LUUP等）の癖にも対応: proximity完全一致＋30秒以内の疑似セッション化を行う）",
             wrap=True,
         )
     )
@@ -633,24 +673,40 @@ class MainPage(QWidget):
         super().__init__(parent)
         self.input_csv: str | None = None
         self.csv_header: list[str] = []
+        # 本ツールが処理対象として使う列名（2026-08-31新設。project memory参照）。
+        # 既定は"query"列があればそれ、無ければ検出できた候補の先頭、どちらも
+        # 無ければNone。プレビュー表のヘッダー右クリックで変更できる
+        # （_on_header_context_menu参照）。"query"以外が選ばれた場合、実行時に
+        # その列を"query"へリネームした一時コピーを作って処理する
+        # （_prepare_effective_input_csv参照）。
+        self.query_column: str | None = None
         self.option_getters: dict[str, object] = {}
         # ai-classifyの絞り込み列ドロップダウン（analyze選択時はNone）。
         # _load_previewが、CSV読み込み時にこれが立っていれば選択肢をヘッダーで更新する。
         self.filter_column_combo: QComboBox | None = None
         self.running = False
         self._cancel_event: threading.Event | None = None
-        self._before_run_files: set[str] = set()
         # 出力フォルダは実行直前にoutput_utils_lib.OUTPUT_DIRへ反映する（_on_run参照）。
         self.output_dir = OUTPUT_DIR
         # 完了通知用のQSystemTrayIcon（_notify_completion参照）。遅延生成する。
         self._tray_icon: QSystemTrayIcon | None = None
 
         self.preview_table: QTableWidget | None = None
-        self.output_preview_table: QTableWidget | None = None
+
+        # トークン欄の実API認証確認用（2026-08-31新設。project memory参照）。
+        # 書式チェックを通った直後にタイマーを(再)始動し、_TOKEN_CHECK_DEBOUNCE_MS
+        # だけ入力が止まったら実際にModels APIを叩いて認証確認する（キー入力ごとに
+        # 毎回叩く無駄を避けるデバウンス）。_token_check_generationは、確認中に
+        # さらに入力が変わった場合に古い結果を無視するための世代カウンタ。
+        self._token_check_generation = 0
+        self._token_check_timer = QTimer(self)
+        self._token_check_timer.setSingleShot(True)
+        self._token_check_timer.timeout.connect(self._start_token_verification)
 
         self.signals = ThreadSignals()
         self.signals.log.connect(self._append_log)
         self.signals.done.connect(self._on_run_finished)
+        self.signals.token_check_done.connect(self._on_token_check_done)
 
         self._build()
 
@@ -671,27 +727,66 @@ class MainPage(QWidget):
         layout = QVBoxLayout(content)
         layout.setContentsMargins(14, 14, 14, 14)
 
-        # ファイルを開く
+        # 2026-08-31、画面構成を3セクションに再編成した（project memory参照）:
+        # 「トークン入力」→「対象ファイルの選択」（ファイルを開く＋プレビュー）→
+        # 「分析の実行」（出力先・ツール選択・オプション・実行・進捗・ログ）。
+        # 旧「出力結果のプレビュー」セクションは廃止した。
+
+        # ---- トークン入力 ----
+        token_body = _section_card(layout, "トークン入力")
+        token_row = QHBoxLayout()
+        token_body.addLayout(token_row)
+        token_row.addWidget(_muted_label("ANTHROPIC_API_KEY"))
+        self.token_edit = QLineEdit(AI_SETTINGS.api_key)
+        self.token_edit.setEchoMode(QLineEdit.Password)
+        self.token_edit.setPlaceholderText("sk-ant-...")
+        self.token_edit.textChanged.connect(self._on_token_changed)
+        token_row.addWidget(self.token_edit, stretch=1)
+
+        self.token_status_label = QLabel("")
+        token_body.addWidget(self.token_status_label)
+        # ai-classify=Haiku固定・analyze=Sonnet固定（バージョンはModels APIで自動
+        # 解決）という情報を、各ツールのオプション欄ではなくここに一本化した
+        # （2026-08-31、project memory参照）。
+        token_body.addWidget(
+            _muted_label(
+                "AIによるクエリの分類はHaikuを使用、レポートはSonnetを使用（バージョンは自動選択）",
+                wrap=True,
+            )
+        )
+        self._on_token_changed(self.token_edit.text())
+
+        # ---- 対象ファイルの選択 ----
+        file_body = _section_card(layout, "対象ファイルの選択")
         file_row = QHBoxLayout()
-        layout.addLayout(file_row)
+        file_body.addLayout(file_row)
         choose_csv_button = QPushButton("📂  ファイルを開く...")
         choose_csv_button.clicked.connect(self._choose_csv)
         file_row.addWidget(choose_csv_button)
         self.file_display = _muted_label("（未選択）", wrap=True)
         file_row.addWidget(self.file_display, stretch=1)
 
-        _divider(layout)
+        _divider(file_body)
 
         # プレビュー（入力CSV）。クエリのクレンジング（重複排除）は2026-08-27より
         # 専用ボタンを廃止し、「AIによるクエリの分類」実行時に自動で前段実行する
         # 方式に変更した（_on_run参照。ログにcmd_dedupの重複除去件数がそのまま出る）。
-        preview_body = _section_card(layout, "プレビュー（列 + 先頭5行）")
+        # 2026-08-31、query対象列のハイライト表示＋列ヘッダー右クリックでの変更に
+        # 対応した（_apply_query_column_highlight/_on_header_context_menu参照）。
+        # プレビュー表専用の子レイアウト（preview_area）を用意し、_show_preview_table
+        # がinsertWidget(0, table)する対象をここに限定する（file_body直下だと
+        # 「ファイルを開く」ボタン行の上にテーブルが挿入されてしまうため）。
+        file_body.addWidget(
+            _muted_label("プレビュー（列 + 先頭5行。query対象列はハイライト表示、列見出しを右クリックで変更）", wrap=True)
+        )
+        preview_area = QVBoxLayout()
+        file_body.addLayout(preview_area)
         self.preview_placeholder = _muted_label("CSVを選択するとここに表示されます")
-        preview_body.addWidget(self.preview_placeholder)
-        self.preview_body = preview_body
+        preview_area.addWidget(self.preview_placeholder)
+        self.preview_body = preview_area
 
-        # 実行設定（出力先 → ツール選択 → オプション → 実行 → 進捗）
-        run_body = _section_card(layout, "実行設定")
+        # ---- 分析の実行（出力先 → ツール選択 → オプション → 実行 → 進捗 → ログ） ----
+        run_body = _section_card(layout, "分析の実行")
 
         output_row = QHBoxLayout()
         run_body.addLayout(output_row)
@@ -772,24 +867,117 @@ class MainPage(QWidget):
         run_body.addWidget(self.progress_label)
         self._progress_phase: str | None = None
 
-        # ログ
-        log_body = _section_card(layout, "ログ")
+        # ログ（2026-08-31、単独カードから「分析の実行」カードの最下部に移動した。
+        # project memory参照。旧「出力結果のプレビュー」カードは廃止した）。
+        _divider(run_body)
+        run_body.addWidget(_muted_label("ログ"))
         self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setMinimumHeight(160)
-        log_body.addWidget(self.log_text)
-
-        # 出力結果のプレビュー（直前の実行で新規に作られたCSVが1件だけならそれを表示）
-        output_preview_body = _section_card(layout, "出力結果のプレビュー")
-        self.output_preview_placeholder = _muted_label("まだ何も実行していません")
-        output_preview_body.addWidget(self.output_preview_placeholder)
-        self.output_preview_body = output_preview_body
+        run_body.addWidget(self.log_text)
 
         layout.addStretch(1)
 
         self._on_select(0)
 
+    # ---------- トークン入力 ----------
+
+    def _on_token_changed(self, text: str) -> None:
+        """トークン入力欄の値が変わるたびに呼ばれる（2026-08-31新設。project
+        memory参照）。AI_SETTINGS.api_keyへの反映と書式チェック（空欄なら無表示、
+        空白・全角等を含むなら即座に赤字「トークン形式が不正です」）を行う。
+        書式チェックを通った場合は「確認中...」を表示し、_TOKEN_CHECK_DEBOUNCE_MS
+        だけ入力が止まったら実際にModels APIで認証確認する
+        （_start_token_verification/_on_token_check_done参照。2026-08-31、
+        書式チェックだけでは「確認済み」と言うには不十分との指摘を受けて追加。
+        キー入力ごとに毎回APIを叩く無駄を避けるため、進行中の確認要求は
+        _token_check_generationをインクリメントして無効化する）。"""
+        AI_SETTINGS.api_key = text
+        self._token_check_generation += 1
+        self._token_check_timer.stop()
+        if not text:
+            self.token_status_label.setText("")
+            return
+        if not _TOKEN_VALID_RE.match(text):
+            self.token_status_label.setText("トークン形式が不正です")
+            self.token_status_label.setStyleSheet(f"color: {COLOR_DANGER};")
+            return
+        self.token_status_label.setText("確認中...")
+        self.token_status_label.setStyleSheet(f"color: {COLOR_MUTED};")
+        self._token_check_timer.start(_TOKEN_CHECK_DEBOUNCE_MS)
+
+    def _start_token_verification(self) -> None:
+        """_token_check_timerのタイムアウトで呼ばれる。現在の入力値でバック
+        グラウンドスレッドからModels APIを叩き、結果をtoken_check_done
+        シグナル経由でGUIスレッドに戻す（_on_token_check_done参照）。"""
+        generation = self._token_check_generation
+        token = self.token_edit.text().strip()
+        if not token:
+            return
+        thread = threading.Thread(
+            target=self._verify_token_thread, args=(generation, token), daemon=True
+        )
+        thread.start()
+
+    def _verify_token_thread(self, generation: int, token: str) -> None:
+        """バックグラウンドスレッドで実行。Models APIを1ページだけ取得して
+        認証が通るか確認する（軽量・課金対象のメッセージ生成は発生しない。
+        classification_common.resolve_model()と同種の呼び出し）。"""
+        try:
+            import anthropic
+
+            client = anthropic.Anthropic(api_key=token)
+            for _ in client.models.list():
+                break  # 1件取得できれば認証成功。全ページ走査する必要は無い。
+            self.signals.token_check_done.emit(generation, True, "")
+        except Exception as e:  # noqa: BLE001 GUIなので落とさず表示する
+            self.signals.token_check_done.emit(generation, False, str(e))
+
+    def _on_token_check_done(self, generation: int, success: bool, error: str) -> None:
+        # 確認中にユーザーがさらに入力を変えていた場合、古い結果は無視する。
+        if generation != self._token_check_generation:
+            return
+        if success:
+            self.token_status_label.setText("トークン確認済み")
+            self.token_status_label.setStyleSheet(f"color: {COLOR_SUCCESS};")
+        else:
+            self.token_status_label.setText(f"認証に失敗しました: {error}")
+            self.token_status_label.setStyleSheet(f"color: {COLOR_DANGER};")
+
     # ---------- ファイル選択・プレビュー ----------
+
+    def _prepare_effective_input_csv(self, path: str) -> str:
+        """self.query_columnが"query"以外の列に設定されている場合、その列を
+        "query"へリネームした一時コピーを作って返す（2026-08-31新設。project
+        memory参照: 本ツールは列名"query"を前提にハードコードされているため）。
+        query_columnが"query"のまま・未設定（None）ならコピーせずpathをそのまま
+        返す。既存に別の"query"列がある場合は"query_original"にリネームして残す
+        （列名の重複を避けるため）。"""
+        if not self.query_column or self.query_column == "query":
+            return path
+
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if header is None or self.query_column not in header:
+                return path
+            rows = list(reader)
+
+        idx = header.index(self.query_column)
+        new_header = list(header)
+        if "query" in new_header and new_header[idx] != "query":
+            q_idx = new_header.index("query")
+            new_header[q_idx] = "query_original"
+        new_header[idx] = "query"
+
+        os.makedirs(self.output_dir, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(suffix="_query_renamed.csv", dir=self.output_dir)
+        os.close(fd)
+        with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(new_header)
+            writer.writerows(rows)
+        return tmp_path
 
     def _choose_csv(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -802,9 +990,8 @@ class MainPage(QWidget):
         self._load_preview(path)
 
     def _build_preview_table(self, path: str) -> tuple[QTableWidget | None, list[str] | None, str | None]:
-        """CSVを読み込んでQTableWidgetを作る共通ロジック（入力プレビュー・出力結果
-        プレビューの両方から使う）。(table, header, エラーメッセージ) を返す
-        （成功時はエラーメッセージがNone）。"""
+        """CSVを読み込んでQTableWidgetを作る共通ロジック。(table, header,
+        エラーメッセージ) を返す（成功時はエラーメッセージがNone）。"""
         try:
             with open(path, newline="", encoding="utf-8-sig") as f:
                 reader = csv.reader(f)
@@ -820,6 +1007,12 @@ class MainPage(QWidget):
         table.setHorizontalHeaderLabels(header)
         table.verticalHeader().setVisible(False)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        # 2026-08-31、列見出しの右クリックでquery対象列を変更できるようにした
+        # （project memory参照）。
+        table.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table.horizontalHeader().customContextMenuRequested.connect(
+            lambda pos, t=table: self._on_header_context_menu(t, pos)
+        )
         for row_i, row in enumerate(sample_rows):
             for col_i, value in enumerate(row):
                 table.setItem(row_i, col_i, QTableWidgetItem(value))
@@ -862,10 +1055,66 @@ class MainPage(QWidget):
             self.filter_column_combo.addItem(row_filter_lib.NO_FILTER_LABEL)
             self.filter_column_combo.addItems(header)
 
+        # query対象列の既定値を決める（2026-08-31新設。project memory参照）:
+        # "query"列があればそれを最優先、無ければ検出できた候補の先頭、
+        # どちらも無ければNone（右クリックで手動選択するまで未設定のまま）。
+        if "query" in header:
+            self.query_column = "query"
+        else:
+            candidates = _detect_query_column_candidates(header)
+            self.query_column = candidates[0] if candidates else None
+        self._apply_query_column_highlight()
+
         self._confirm_query_column(header)
 
-    def _load_output_preview(self, path: str) -> None:
-        self._show_preview_table(self.output_preview_body, "output_preview_table", self.output_preview_placeholder, path)
+    def _apply_query_column_highlight(self) -> None:
+        """プレビュー表のうち、self.query_columnに一致する列をアクセントカラーで
+        ハイライトする（2026-08-31新設）。ヘッダー部分のQTableWidgetItemに
+        setBackground()しても、QHeaderView::sectionのQSSルール（グローバル
+        スタイルシート）に上書きされて見た目に反映されないため、データ行の
+        セル背景をハイライトする方式にしている（ヘッダー文字は太字化だけ試みる。
+        QSS優先度次第で反映されない場合もあるが、データセルの背景色は確実に
+        機能する）。"""
+        if self.preview_table is None:
+            return
+        table = self.preview_table
+        highlight_bg = QColor(COLOR_ACCENT)
+        highlight_fg = QColor("#F5F7FA")
+        default_bg = QColor(COLOR_ENTRY_BG)
+        default_fg = QColor(COLOR_TEXT)
+        for col, name in enumerate(self.csv_header):
+            is_target = name == self.query_column
+            header_item = table.horizontalHeaderItem(col)
+            if header_item is not None:
+                font = header_item.font()
+                font.setBold(is_target)
+                header_item.setFont(font)
+            for row in range(table.rowCount()):
+                cell = table.item(row, col)
+                if cell is None:
+                    continue
+                cell.setBackground(highlight_bg if is_target else default_bg)
+                cell.setForeground(highlight_fg if is_target else default_fg)
+
+    def _on_header_context_menu(self, table: QTableWidget, pos) -> None:
+        """プレビュー表の列見出しを右クリックした際に、その列をquery対象列として
+        使うためのコンテキストメニューを出す（2026-08-31新設。project memory
+        参照）。"""
+        col = table.horizontalHeader().logicalIndexAt(pos)
+        if col < 0 or col >= len(self.csv_header):
+            return
+        column_name = self.csv_header[col]
+        menu = QMenu(self)
+        if column_name == self.query_column:
+            menu.addAction(f"「{column_name}」を使用中").setEnabled(False)
+        else:
+            action = menu.addAction(f"「{column_name}」をqueryとして使う")
+            chosen = menu.exec(table.horizontalHeader().mapToGlobal(pos))
+            if chosen is action:
+                self.query_column = column_name
+                self._apply_query_column_highlight()
+            return
+        menu.exec(table.horizontalHeader().mapToGlobal(pos))
 
     def _confirm_query_column(self, header: list[str]) -> None:
         """本ツールは列名「query」を前提に処理するため、読み込んだ列名の中から
@@ -916,18 +1165,24 @@ class MainPage(QWidget):
             # （2026-08-27、プロキシ経由の呼び出しを廃止したため）。
             if not token and not os.environ.get("ANTHROPIC_API_KEY"):
                 QMessageBox.warning(
-                    self, APP_TITLE, "ヘッダーの⚙設定でANTHROPIC_API_KEYを入力してください。"
+                    self, APP_TITLE, "「トークン入力」でANTHROPIC_API_KEYを入力してください。"
                 )
                 return
         elif key == "analyze":
             with_ai_commentary = self.option_getters["with_ai_commentary"]()
             if with_ai_commentary and not token and not os.environ.get("ANTHROPIC_API_KEY"):
                 QMessageBox.warning(
-                    self, APP_TITLE, "AIコメンタリー使用時はヘッダーの⚙設定でANTHROPIC_API_KEYを入力してください。"
+                    self, APP_TITLE, "AIコメンタリー使用時は「トークン入力」でANTHROPIC_API_KEYを入力してください。"
                 )
                 return
 
-        deduped_input_csv = self.input_csv
+        try:
+            effective_input_csv = self._prepare_effective_input_csv(self.input_csv)
+        except Exception as e:  # noqa: BLE001 GUIなので落とさず表示する
+            QMessageBox.critical(self, APP_TITLE, f"query対象列の適用に失敗しました:\n{e}")
+            return
+
+        deduped_input_csv = effective_input_csv
         if key == "ai-classify":
             # 2026-08-30、実行ボタン押下時に前段の重複排除（cmd_dedup、"周辺クエリの
             # 重複排除"＝近傍窓内の同一query除去）を先に同期実行し、その出力に対して
@@ -938,7 +1193,7 @@ class MainPage(QWidget):
             # _run_in_thread側では二重にdedupしない。
             try:
                 dedup_args = _Args()
-                dedup_args.input_csv = self.input_csv
+                dedup_args.input_csv = effective_input_csv
                 dedup_args.columns_only = False
                 QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
                 deduped_input_csv = cli_main.cmd_dedup(dedup_args)
@@ -983,8 +1238,7 @@ class MainPage(QWidget):
                 return
 
         args = self._build_args(key, self.option_getters)
-        if key == "ai-classify":
-            args.input_csv = deduped_input_csv
+        args.input_csv = deduped_input_csv if key == "ai-classify" else effective_input_csv
 
         # main.pyのcmd_*関数はlib/output_utils.make_output_path()経由で出力先を決めており、
         # make_output_path()は呼び出し時点でoutput_utils_lib.OUTPUT_DIRを参照する。
@@ -999,7 +1253,6 @@ class MainPage(QWidget):
         self._cancel_event = threading.Event()
         args.cancel_event = self._cancel_event
 
-        self._before_run_files = self._snapshot_output_dir()
         self._reset_progress()
         self._set_running(True)
 
@@ -1055,6 +1308,12 @@ class MainPage(QWidget):
             token = AI_SETTINGS.api_key.strip()
             args.token = token or None
 
+        elif key == "collapse-sessions":
+            # 2026-08-31新設。GUIには専用UIを置かず（build_collapse_sessions_options
+            # 参照）、実データ分析に基づくデフォルト値をそのまま使う
+            # （project memory参照。lib/session_collapse.py）。
+            args.fallback_window_seconds = session_collapse_lib.DEFAULT_FALLBACK_TIME_WINDOW_SECONDS
+
         return args
 
     def _run_in_thread(self, key: str, func, args) -> None:
@@ -1096,7 +1355,6 @@ class MainPage(QWidget):
             self._append_log(f"\nエラー: {error}\n")
             QMessageBox.critical(self, APP_TITLE, f"実行中にエラーが発生しました:\n{error}")
             return
-        self._refresh_output_preview(self._before_run_files)
         self._notify_completion()
 
     def _set_running(self, running: bool) -> None:
@@ -1128,25 +1386,41 @@ class MainPage(QWidget):
         self._set_progress_running(False)
 
     def _update_progress_from_log(self, text: str) -> None:
-        """ログに流れる進捗行（_PROGRESS_JOB_RE/_PROGRESS_SYNC_RE/_PROGRESS_RETRY_RE
-        参照）をリアルタイムに解析し、フェーズ名と進捗率(%)を進捗バーに反映する
-        （2026-08-30、残り時間の目安から置き換え。project memory参照）。
-        フェーズが切り替わったら（レベル1/2分類→レベル3分類→カテゴリ再判定、など）
-        表示をリセットする。個別/グループリトライで母数（total）が変わった場合は
-        その時点の母数で%を出し直すため、進捗が後退することもある（意図した挙動）。"""
+        """ログに流れる進捗行（_PROGRESS_JOB_START_RE/_PROGRESS_JOB_RE/
+        _PROGRESS_SYNC_RE/_PROGRESS_RETRY_RE参照）をリアルタイムに解析し、
+        フェーズ名（全体のn/mフェーズ目かも含む）と進捗率(%)を進捗バーに反映する
+        （2026-08-30、残り時間の目安から置き換え。2026-08-31、フェーズ番号表示を
+        追加。project memory参照）。フェーズが切り替わったら
+        （レベル1/2分類→レベル3分類→カテゴリ再判定、など）表示をリセットする。
+        個別/グループリトライで母数（total）が変わった場合はその時点の母数で%を
+        出し直すため、進捗が後退することもある（意図した挙動）。"""
         if self.current_key != "ai-classify":
             return
+
+        # Batches API使用時、ジョブ作成・再開行はdone=を含まないため別扱いにする。
+        # 最初のポーリング行（最大POLL_INTERVAL_SECONDS秒後）まで待たずに、
+        # フェーズが切り替わった瞬間に0%表示へリセットする（project memory参照:
+        # これが無いと前フェーズの%が最大30秒近く表示され続け、進捗が
+        # 止まっているように見えるという指摘があった）。
+        start_m = _PROGRESS_JOB_START_RE.search(text)
+        if start_m:
+            label, total = start_m.group(1).strip(), int(start_m.group(2))
+            self._set_phase_progress(label, 0, total)
+            return
+
         m = _PROGRESS_JOB_RE.search(text) or _PROGRESS_SYNC_RE.search(text) or _PROGRESS_RETRY_RE.search(text)
         if not m:
             return
         label, done, total = m.group(1).strip(), int(m.group(2)), int(m.group(3))
-        if label != self._progress_phase:
-            self._progress_phase = label
+        self._set_phase_progress(label, done, total)
+
+    def _set_phase_progress(self, label: str, done: int, total: int) -> None:
+        self._progress_phase = label
         if total <= 0:
             return
         percent = min(100, round(done / total * 100))
         self.progress.setValue(percent)
-        self.progress_label.setText(f"{label}: {percent}%（{done}/{total}）")
+        self.progress_label.setText(f"{_phase_index_label(label)}: {percent}%（{done}/{total}）")
 
     def _set_progress_running(self, running: bool) -> None:
         # ai-classifyは実際のバッチ完了状況から%を出せるため確定的な進捗バーに
@@ -1170,30 +1444,6 @@ class MainPage(QWidget):
         if chosen:
             self.output_dir = chosen
             self.output_dir_edit.setText(chosen)
-
-    def _snapshot_output_dir(self) -> set[str]:
-        if not os.path.isdir(self.output_dir):
-            return set()
-        return set(os.listdir(self.output_dir))
-
-    def _refresh_output_preview(self, before_files: set[str]) -> None:
-        """直前の実行（dedup/ai-classify/analyze）で出力フォルダに新規作成された
-        ファイルのうち、CSVが1件だけならそれをプレビューする。analyzeのように
-        複数のCSV+HTMLレポートを一度に出力するツールでは、どれを見せるべきか
-        一意に決められないため、その旨を表示するだけにする（何もプレビューしない）。"""
-        new_csvs = sorted(f for f in (self._snapshot_output_dir() - before_files) if f.endswith(".csv"))
-        if len(new_csvs) == 1:
-            self._load_output_preview(os.path.join(self.output_dir, new_csvs[0]))
-        elif len(new_csvs) > 1:
-            if self.output_preview_table is not None:
-                self.output_preview_body.removeWidget(self.output_preview_table)
-                self.output_preview_table.deleteLater()
-                self.output_preview_table = None
-            self.output_preview_placeholder.setText(
-                "複数のCSVが出力されたため、ここではプレビューしません（出力先フォルダをご確認ください）。"
-            )
-            self.output_preview_placeholder.show()
-        # 新規CSVが0件（見積りのみ実行した等）の場合は、直前のプレビューをそのまま残す。
 
     # ---------- 完了通知 ----------
 
@@ -1281,10 +1531,13 @@ class SettingsDialog(QDialog):
     内容はAI_SETTINGSそのものなので、閉じても即座に各ツールの実行に反映される
     （実行時にここを読むだけで、各ツールのオプション欄には表示しない）。
     2026-08-27、モデル選択（ai-classify/analyzeそれぞれのコンボボックス）は
-    ai-classify=Haiku固定・analyze=Sonnet固定にしたため廃止し、APIキー入力のみに
-    縮小した（固定値はclassification_common.CLASSIFY_MODEL/ANALYZE_MODEL）。
+    ai-classify=Haiku固定・analyze=Sonnet固定にしたため廃止した（固定値は
+    classification_common.CLASSIFY_MODEL/ANALYZE_MODEL）。
     2026-08-29、バッチサイズ・並行数もここに移動した（project memory参照。
-    ai-classifyの実行設定欄からは廃止し、ここのAI_SETTINGSを読むだけにした）。"""
+    ai-classifyの実行設定欄からは廃止し、ここのAI_SETTINGSを読むだけにした）。
+    2026-08-31、APIキー入力欄はメイン画面の「トークン入力」セクションに移動した
+    （リアルタイム構文チェック付き。MainPage._on_token_changed参照）ため、
+    ここからは削除した。以降はBatches API使用・バッチサイズ・並行数のみを扱う。"""
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -1299,25 +1552,13 @@ class SettingsDialog(QDialog):
         layout.addWidget(card)
 
         info = _muted_label(
-            "AIのAPIキーをここで一括管理します。\n"
-            "ai-classify / analyze のBatches API・AIコメンタリー使用時は、この設定を使用します。\n"
+            "ai-classify / analyze のBatches API・並行処理に関わる設定です。\n"
+            "APIキーはメイン画面の「トークン入力」で入力してください。\n"
             "（モデルはai-classify: Haikuファミリー固定、analyze: Sonnetファミリー固定。"
             "バージョンは実行のたびにModels APIで最新版を自動選択）",
             wrap=True,
         )
         card_layout.addWidget(info)
-
-        key_row = QHBoxLayout()
-        card_layout.addLayout(key_row)
-        key_label = _muted_label("ANTHROPIC_API_KEY")
-        key_row.addWidget(key_label)
-        self.key_entry = QLineEdit(AI_SETTINGS.api_key)
-        self.key_entry.setEchoMode(QLineEdit.Password)
-        # 入力欄が空のときに、期待する形式をグレーのプレースホルダーで示す
-        # （実際のキー本体は表示しない。Qtのplaceholder文字はPasswordモードでも
-        # マスクされず通常表示される）。
-        self.key_entry.setPlaceholderText("sk-ant-...")
-        key_row.addWidget(self.key_entry, stretch=1)
 
         # 2026-08-30、ai-classifyの実行設定欄にあった「Batches API使用」トグルを
         # ここに移動した（project memory参照。コストへの影響が大きい割に毎回
@@ -1375,10 +1616,7 @@ class SettingsDialog(QDialog):
         button_row.addWidget(save_button)
         card_layout.addLayout(button_row)
 
-        self.key_entry.setFocus()
-
     def _save_and_close(self) -> None:
-        AI_SETTINGS.api_key = self.key_entry.text()
         AI_SETTINGS.batch_api = self.batch_api_combo.currentText() == "使う"
         AI_SETTINGS.batch_size = self.batch_size_spin.value()
         AI_SETTINGS.sync_batch_size = self.sync_batch_size_spin.value()

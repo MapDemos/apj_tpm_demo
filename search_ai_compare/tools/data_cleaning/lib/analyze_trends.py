@@ -44,10 +44,13 @@ from lib.classification_common import CATEGORIES
 from lib.jp_prefectures import PREFECTURES as JP_PREFECTURES
 from lib.output_utils import make_output_path, current_timestamp
 
-REQUIRED_COLUMNS = [
-    "query", "ai_classification", "datetime",
-    "bbox", "proximity", "poi_category", "poi_category_exclusions", "near", "navigation_profile",
-]
+# 2026-08-31、必須列をquery/ai_classificationのみに縮小した。他の列
+# （datetime/bbox/proximity/poi_category/poi_category_exclusions/near/
+# navigation_profile）は無くても分析自体は動かせるようにし、それぞれの列を
+# 使うセクション（A/B/C/E/F）だけをmain.py cmd_analyzeが個別に判定してスキップ
+# する（project memory参照。以前は1列でも欠けるとread_rows()がここで例外を
+# 投げ、レポート全体が生成できなかった）。
+REQUIRED_COLUMNS = ["query", "ai_classification"]
 
 # C(パラメータ利用率)の対象列
 USAGE_COLUMNS = ["bbox", "proximity", "poi_category", "poi_category_exclusions", "near", "navigation_profile"]
@@ -222,11 +225,16 @@ def compute_daily_category(rows: list[dict]) -> dict[str, dict[str, int]]:
 
 # --- F. パラメータ利用率 ----------------------------------------------------
 
-def compute_column_usage(rows: list[dict]) -> dict:
-    """カテゴリ別には分けず、全行を通した単純なパラメータ利用率を集計する。"""
-    counts = {col: 0 for col in USAGE_COLUMNS}
+def compute_column_usage(rows: list[dict], columns: list[str] | None = None) -> dict:
+    """カテゴリ別には分けず、全行を通した単純なパラメータ利用率を集計する。
+    columns省略時はUSAGE_COLUMNS全件が対象。2026-08-31、呼び出し元(main.py
+    cmd_analyze)がCSVに実在する列だけに絞って渡せるようにcolumns引数を追加した
+    （project memory参照。列自体が無いのに0%と表示すると「使われていない」と
+    「そもそも計測対象外」が区別できず誤解を招くため、無い列は集計に含めない）。"""
+    target_columns = columns if columns is not None else USAGE_COLUMNS
+    counts = {col: 0 for col in target_columns}
     for row in rows:
-        for col in USAGE_COLUMNS:
+        for col in target_columns:
             if (row.get(col) or "").strip():
                 counts[col] += 1
     return {"total": len(rows), "counts": counts}
@@ -374,86 +382,11 @@ def compute_long_tail_by_scope(rows: list[dict], order: list[str]) -> dict[str, 
     return result
 
 
-# --- CSV出力 ---------------------------------------------------------------
-
-def write_daily_volume_csv(path: str, daily_volume: dict[str, int]) -> None:
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["date", "count"])
-        for date in sorted(daily_volume.keys()):
-            writer.writerow([date, daily_volume[date]])
-
-
-def write_hourly_volume_csv(path: str, hourly_volume: dict) -> None:
-    counts = hourly_volume["counts"]
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["hour_jst", "count"])
-        for h in range(24):
-            writer.writerow([f"{h:02d}", counts[h]])
-        if hourly_volume["unknown"]:
-            writer.writerow(["unknown", hourly_volume["unknown"]])
-
-
-def write_proximity_prefecture_csv(path: str, proximity_data: dict) -> None:
-    total = proximity_data["total"]
-    counts = proximity_data["counts"]
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["prefecture", "prefecture_romaji", "count", "rate_pct"])
-        for name, _, _, romaji in JP_PREFECTURES:
-            count = counts[name]
-            rate = f"{count / total * 100:.1f}%" if total else "0.0%"
-            writer.writerow([name, romaji, count, rate])
-        no_prox = proximity_data["no_proximity"]
-        rate = f"{no_prox / total * 100:.1f}%" if total else "0.0%"
-        writer.writerow(["(no proximity)", "", no_prox, rate])
-
-
-def write_top_queries_csv(path: str, top_queries: dict[str, list[tuple[str, int]]], order: list[str]) -> None:
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["ai_classification", "rank", "query", "count"])
-        for category in order:
-            for rank, (query, count) in enumerate(top_queries.get(category, []), start=1):
-                writer.writerow([category, rank, query, count])
-
-
-def write_daily_category_csv(path: str, daily: dict[str, dict[str, int]], order: list[str]) -> None:
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["date", "ai_classification", "count", "ratio"])
-        for date in sorted(daily.keys()):
-            day_total = sum(daily[date].values())
-            for category in order:
-                count = daily[date].get(category, 0)
-                ratio = f"{count / day_total * 100:.1f}%" if day_total else "0.0%"
-                writer.writerow([date, category, count, ratio])
-
-
-def write_column_usage_csv(path: str, usage: dict) -> None:
-    total = usage["total"]
-    counts = usage["counts"]
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["parameter", "count", "total", "rate_pct"])
-        for col in USAGE_COLUMNS:
-            count = counts[col]
-            rate = f"{count / total * 100:.1f}%" if total else "0.0%"
-            writer.writerow([col, count, total, rate])
-
-
-def write_long_tail_csv(path: str, long_tail: dict[str, dict], order: list[str]) -> None:
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["scope", "bucket", "unique_query_count", "total_count", "volume_pct"])
-        for scope in [ALL_CATEGORIES_SCOPE] + order:
-            data = long_tail.get(scope)
-            if not data:
-                continue
-            for label, _, _ in LONG_TAIL_BUCKETS:
-                b = data["buckets"][label]
-                writer.writerow([scope, label, b["unique_queries"], b["volume"], f"{b['volume_pct']:.1f}%"])
+# 2026-08-31、各集計のCSV出力（write_daily_volume_csv/write_hourly_volume_csv/
+# write_proximity_prefecture_csv/write_top_queries_csv/write_daily_category_csv/
+# write_column_usage_csv/write_long_tail_csv）は廃止した。main.py cmd_analyzeが
+# HTMLレポートのみを出力する方式に変更したため（project memory参照。
+# 「レポート出力はhtmlだけでOK」との指示）。
 
 
 # --- HTMLレポート ------------------------------------------------------------
@@ -913,7 +846,9 @@ def render_column_usage_section(usage: dict, insight: str | None = None) -> str:
     total = usage["total"]
     counts = usage["counts"]
 
-    rated = [(col, counts[col], (counts[col] / total * 100) if total else 0.0) for col in USAGE_COLUMNS]
+    # write_column_usage_csvと同じ理由でUSAGE_COLUMNSの定数ではなくcounts自体の
+    # キーでループする（2026-08-31、project memory参照）。
+    rated = [(col, counts[col], (counts[col] / total * 100) if total else 0.0) for col in counts]
     rated.sort(key=lambda t: -t[2])
 
     rows_html = "".join(
@@ -1247,8 +1182,8 @@ def render_html_report(
   {render_hourly_volume_section(hourly_volume) if hourly_volume else ""}
   {render_proximity_prefecture_section(proximity_data) if proximity_data else ""}
   {render_top_queries_section(top_queries, order, top_n, insights=insights)}
-  {render_daily_category_section(daily, order, insight=insights.get("daily_trend") if insights else None)}
-  {render_column_usage_section(usage, insight=insights.get("column_usage") if insights else None)}
+  {render_daily_category_section(daily, order, insight=insights.get("daily_trend") if insights else None) if daily else ""}
+  {render_column_usage_section(usage, insight=insights.get("column_usage") if insights else None) if usage.get("counts") else ""}
   {render_long_tail_section(long_tail, order, insight=insights.get("long_tail") if insights else None) if long_tail else ""}
   {_render_breakdown_section(
       "classification-breakdown", "H. Classification Breakdown",

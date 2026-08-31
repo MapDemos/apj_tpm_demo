@@ -425,10 +425,20 @@ def cmd_ai_classify(args: argparse.Namespace) -> None:
     # どちらから呼ばれてもcmd_analyzeがargs.xxxで属性アクセスできればよいため。
     if getattr(args, "with_report", False):
         print("\n=== レポート出力（analyze）を続けて実行します ===")
+        # 2026-08-31、AIコメンタリーは常にオンに変更した（project memory参照。
+        # 「選べる必要もない」との判断のため。analyze単体実行時のデフォルトと揃える）。
         analyze_args = argparse.Namespace(
-            input_csv=output_path, top_n=50, with_ai_commentary=False, token=args.token,
+            input_csv=output_path, top_n=50, with_ai_commentary=True, token=args.token,
         )
         cmd_analyze(analyze_args)
+
+
+def _skip_section(label: str, missing_columns: list[str]) -> None:
+    """必要な列がCSVに無いレポートセクションをスキップする際のログ出力
+    （2026-08-31新設。project memory参照: 以前は必要列が1つでも欠けると
+    analyze_trends.read_rows()がここに来る前に例外で全体を落としていたが、
+    query/ai_classification以外は列単位でスキップできるようにした）。"""
+    print(f"{label}: 対象がないためスキップします（列が見つかりません: {', '.join(missing_columns)}）")
 
 
 def cmd_analyze(args: argparse.Namespace) -> None:
@@ -439,33 +449,43 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     order = analyze_trends_lib.category_order(seen_categories)
 
     top_queries = analyze_trends_lib.compute_top_queries(rows, args.top_n)
-    daily = analyze_trends_lib.compute_daily_category(rows)
-    usage = analyze_trends_lib.compute_column_usage(rows)
     long_tail = analyze_trends_lib.compute_long_tail_by_scope(rows, order)
-    daily_volume = analyze_trends_lib.compute_daily_volume(rows)
-    hourly_volume = analyze_trends_lib.compute_hourly_volume(rows)
-    proximity_data = analyze_trends_lib.compute_proximity_by_prefecture(rows)
     classification_breakdown = analyze_trends_lib.compute_classification_breakdown(rows, order)
     poi_taxonomy_breakdown = analyze_trends_lib.compute_poi_taxonomy_breakdown(rows)
     address_structure_breakdown = analyze_trends_lib.compute_address_structure_breakdown(rows)
     brand_breakdown = analyze_trends_lib.compute_brand_breakdown(rows)
 
-    ts = current_timestamp()
-    top_queries_path = make_output_path(args.input_csv, "trend_top_queries_result", timestamp=ts)
-    daily_path = make_output_path(args.input_csv, "trend_daily_category_result", timestamp=ts)
-    usage_path = make_output_path(args.input_csv, "trend_column_usage_result", timestamp=ts)
-    long_tail_path = make_output_path(args.input_csv, "trend_long_tail_result", timestamp=ts)
-    daily_volume_path = make_output_path(args.input_csv, "trend_daily_volume_result", timestamp=ts)
-    hourly_volume_path = make_output_path(args.input_csv, "trend_hourly_volume_result", timestamp=ts)
-    proximity_path = make_output_path(args.input_csv, "trend_proximity_prefecture_result", timestamp=ts)
+    # A/B/E: datetime列が無ければ日付起点の集計（日別クエリ量・時間帯別クエリ量・
+    # 日別カテゴリ比率推移）をまとめてスキップする。
+    has_datetime = "datetime" in fieldnames
+    if has_datetime:
+        daily = analyze_trends_lib.compute_daily_category(rows)
+        daily_volume = analyze_trends_lib.compute_daily_volume(rows)
+        hourly_volume = analyze_trends_lib.compute_hourly_volume(rows)
+    else:
+        for label in ("A. 日別クエリ量", "B. 時間帯別クエリ量", "E. 日別カテゴリ比率推移"):
+            _skip_section(label, ["datetime"])
+        daily, daily_volume, hourly_volume = {}, None, None
 
-    analyze_trends_lib.write_top_queries_csv(top_queries_path, top_queries, order)
-    analyze_trends_lib.write_daily_category_csv(daily_path, daily, order)
-    analyze_trends_lib.write_column_usage_csv(usage_path, usage)
-    analyze_trends_lib.write_long_tail_csv(long_tail_path, long_tail, order)
-    analyze_trends_lib.write_daily_volume_csv(daily_volume_path, daily_volume)
-    analyze_trends_lib.write_hourly_volume_csv(hourly_volume_path, hourly_volume)
-    analyze_trends_lib.write_proximity_prefecture_csv(proximity_path, proximity_data)
+    # C: proximity列が無ければ都道府県別proximity分布をスキップする。
+    has_proximity = "proximity" in fieldnames
+    if has_proximity:
+        proximity_data = analyze_trends_lib.compute_proximity_by_prefecture(rows)
+    else:
+        _skip_section("C. 都道府県別proximity分布", ["proximity"])
+        proximity_data = None
+
+    # F: パラメータ利用率はUSAGE_COLUMNSのうちCSVに実在する列だけを対象にする
+    # （無い列は0%ではなく「対象外」として表から除く。project memory参照）。
+    usage_columns_present = [c for c in analyze_trends_lib.USAGE_COLUMNS if c in fieldnames]
+    usage_columns_missing = [c for c in analyze_trends_lib.USAGE_COLUMNS if c not in fieldnames]
+    if usage_columns_missing:
+        _skip_section("F. パラメータ利用率（一部項目）", usage_columns_missing)
+    usage = analyze_trends_lib.compute_column_usage(rows, columns=usage_columns_present)
+
+    ts = current_timestamp()
+    # 2026-08-31、各集計のCSV出力を廃止し、HTMLレポートのみを出力するように変更した
+    # （project memory参照。「レポート出力はhtmlだけでOK」との指示）。
 
     # --with-ai-commentary指定時のみ、集計結果(summary_payload)をAIに渡してコメンタリーを
     # 生成する。元CSVの生データ（行そのもの・query全件）は渡さない。
@@ -504,16 +524,8 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     if args.with_ai_commentary:
         status = "生成成功" if ai_commentary else "生成失敗（レポートには含まれません）"
         print(f"AIコメンタリー: {status}（モデル: {ai_model}）")
-    print("出力先:")
-    print(f"  {top_queries_path}")
-    print(f"  {daily_path}")
-    print(f"  {usage_path}")
-    print(f"  {long_tail_path}")
-    print(f"  {daily_volume_path}")
-    print(f"  {hourly_volume_path}")
-    print(f"  {proximity_path}")
     report_label = "HTMLレポート（AIコメンタリー込み）" if ai_commentary else "HTMLレポート"
-    print(f"  {report_path}  ← {report_label}")
+    print(f"出力先: {report_path}  ← {report_label}")
 
 
 def build_parser() -> argparse.ArgumentParser:
