@@ -37,6 +37,7 @@ import csv
 import html
 import math
 import sys
+import urllib.parse
 from collections import Counter, defaultdict
 
 from lib.classification_common import CATEGORIES
@@ -159,8 +160,11 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def parse_proximity(raw: str) -> tuple[float, float] | None:
-    """proximity列（"lng,lat"形式、Mapboxの座標順規約）をパースする。失敗時はNone。"""
-    parts = (raw or "").strip().split(",")
+    """proximity列（"lng,lat"形式、Mapboxの座標順規約）をパースする。失敗時はNone。
+    生ログ由来のファイルはこの値がURLパーセントエンコードされたまま
+    （カンマが%2C等）のことがあるため、unquoteしてから分割する
+    （project memory参照。デコード不要な素の値に対しても無害）。"""
+    parts = urllib.parse.unquote(raw or "").strip().split(",")
     if len(parts) != 2:
         return None
     try:
