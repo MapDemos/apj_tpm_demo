@@ -53,5 +53,10 @@
     "title": "latlng_simplification",
     "description": "緯度経度を丸めるとマーカー位置・住所がどうズレるか確認するツール",
     "path": "./latlng_simplification/"
+  },
+  {
+    "title": "poi_density",
+    "description": "MapboxのPOIラベル密度(filterrank)をスライダーでリアルタイム調整するデモ",
+    "path": "./poi_density/"
   }
 ]

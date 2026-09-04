@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>POI Label Density Demo</title>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet" />
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #1a1a1a; }
+  #map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+
+  #panel {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 10;
+    background: rgba(30,30,30,0.92);
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 14px 18px;
+    color: #ddd;
+    width: 300px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  #panel h1 {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0 0 10px 0;
+    color: #fff;
+    letter-spacing: 0.02em;
+  }
+  #panel .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+  }
+  #panel .label {
+    font-size: 11px;
+    color: #999;
+  }
+  #panel .value {
+    font-size: 13px;
+    font-weight: 600;
+    color: #4db8ff;
+  }
+  #density-slider {
+    width: 100%;
+    margin: 8px 0 4px 0;
+    accent-color: #4db8ff;
+  }
+  #tick-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: #666;
+    padding: 0 2px;
+    margin-bottom: 10px;
+  }
+  #overlap-checkboxes {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+  #overlap-checkboxes label {
+    font-size: 11px;
+    color: #ccc;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+  }
+  #overlap-checkboxes input {
+    accent-color: #4db8ff;
+  }
+  #debug {
+    font-size: 10px;
+    color: #777;
+    border-top: 1px solid #3a3a3a;
+    padding-top: 8px;
+    line-height: 1.5;
+  }
+  #debug span { color: #bbb; }
+
+  #token-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    background: #1a1a1a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #token-box {
+    background: #242424;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 24px 28px;
+    width: 360px;
+    color: #ddd;
+  }
+  #token-box h2 { font-size: 14px; margin: 0 0 12px 0; color: #fff; }
+  #token-box input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #ddd;
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
+  #token-box button {
+    width: 100%;
+    padding: 8px 0;
+    background: #4db8ff;
+    border: none;
+    border-radius: 4px;
+    color: #111;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #token-box p { font-size: 10px; color: #888; margin: 0 0 10px 0; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="panel">
+  <h1>POI Label Density</h1>
+  <div class="row">
+    <span class="label">Density</span>
+    <span class="value" id="density-value">2</span>
+  </div>
+  <input type="range" id="density-slider" min="0" max="5" step="1" value="2" />
+  <div id="tick-labels">
+    <span>0</span>
+    <span>1</span>
+    <span>2</span>
+    <span>3</span>
+    <span>4</span>
+    <span>5</span>
+  </div>
+  <div id="overlap-checkboxes">
+    <label><input type="checkbox" id="cb-text-allow-overlap" /> text-allow-overlap</label>
+    <label><input type="checkbox" id="cb-icon-allow-overlap" /> icon-allow-overlap</label>
+    <label><input type="checkbox" id="cb-text-ignore-placement" /> text-ignore-placement</label>
+  </div>
+  <div id="debug">
+    filterrank &le; <span id="debug-filterrank">-</span> (+zoom step)<br />
+    zoom: <span id="debug-zoom">-</span>
+  </div>
+</div>
+
+<div id="token-overlay">
+  <div id="token-box">
+    <h2>Mapbox Access Token</h2>
+    <p>本ツール(search_ai_compare)で使っているトークンを流用できます。保存するとローカルに残ります。</p>
+    <input type="text" id="token-input" placeholder="pk.xxxxxxxx..." />
+    <button id="token-start">Start</button>
+  </div>
+</div>
+
+<script>
+// Reused from search_ai_compare/app.js
+const LS_MBTOKEN = 'apc_mapbox_token'; // same key as search_ai_compare, so a token saved there is picked up here too
+const PRESET_MAPBOX_TOKEN = "pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw";
+const MAPBOX_STYLE = 'mapbox://styles/10da032y/cmp29b79d001601so7q6d07ls';
+
+function isPk(t) { return typeof t === 'string' && t.startsWith('pk.'); }
+
+const tokenOverlay = document.getElementById('token-overlay');
+const tokenInput = document.getElementById('token-input');
+tokenInput.value = localStorage.getItem(LS_MBTOKEN) ?? (isPk(PRESET_MAPBOX_TOKEN) ? PRESET_MAPBOX_TOKEN : '');
+
+document.getElementById('token-start').addEventListener('click', () => {
+  const token = tokenInput.value.trim();
+  if (!isPk(token)) { alert('pk. で始まる有効なMapboxトークンを入力してください'); return; }
+  localStorage.setItem(LS_MBTOKEN, token);
+  tokenOverlay.style.display = 'none';
+  initMap(token);
+});
+
+let map = null;
+
+// Workaround for a style-authoring bug in cmp29b79d001601so7q6d07ls: some layers'
+// icon-image expressions pass a bare {"params": {...}} object where the spec requires
+// ["literal", {...}], which Mapbox GL JS rejects at style-parse time ("Bare objects
+// invalid" / "Secondary image variant is not a string") -- before 'load' ever fires,
+// so patching via setLayoutProperty after load is too late. Instead we fetch the style
+// JSON ourselves, strip the broken variant arg, and hand the map the pre-fixed object.
+function fixBrokenIconImageExpressions(styleJson) {
+  styleJson.layers.forEach((l) => {
+    const iconImage = l.layout && l.layout['icon-image'];
+    if (Array.isArray(iconImage) && iconImage[0] === 'image' && typeof iconImage[2] === 'object' && iconImage[2] !== null && !Array.isArray(iconImage[2])) {
+      l.layout['icon-image'] = ['image', iconImage[1]];
+    }
+  });
+  return styleJson;
+}
+
+function updateZoomDisplay() {
+  if (!map) return;
+  document.getElementById('debug-zoom').textContent = map.getZoom().toFixed(2);
+}
+
+async function initMap(token) {
+  mapboxgl.accessToken = token;
+
+  const styleUrl = MAPBOX_STYLE.replace('mapbox://styles/', 'https://api.mapbox.com/styles/v1/') + `?access_token=${token}`;
+  const res = await fetch(styleUrl);
+  const styleJson = fixBrokenIconImageExpressions(await res.json());
+
+  map = new mapboxgl.Map({
+    container: 'map',
+    style: styleJson,
+    center: [139.7671, 35.6812], // Tokyo Station
+    zoom: 15,
+  });
+  map.on('load', () => {
+    map.resize();
+    captureOriginalPoiFilters();
+    applyPoiDensity(2);
+    updateZoomDisplay();
+  });
+  map.on('zoom', updateZoomDisplay);
+}
+
+// The style's own poi-label filter is not just filterrank -- it also has a pitch/
+// distance-from-center clause that hides labels far from screen center when tilted.
+// setFilter() replaces a layer's filter wholesale, so naively overwriting it would
+// silently drop that clause. Capture each layer's non-filterrank clauses once, up
+// front, so applyPoiDensity can rebuild the filter with only the filterrank clause
+// swapped out and everything else preserved.
+let originalNonFilterrankClauses = {};
+
+function captureOriginalPoiFilters() {
+  map.getStyle().layers
+    .filter(l => l.type === 'symbol' && /poi/i.test(l.id))
+    .forEach((l) => {
+      const original = l.filter ? JSON.parse(JSON.stringify(l.filter)) : ['all'];
+      const clauses = original[0] === 'all' ? original.slice(1) : [original];
+      originalNonFilterrankClauses[l.id] = clauses.filter((clause) => {
+        return !(Array.isArray(clause) && clause[0] === '<=' &&
+          Array.isArray(clause[1]) && clause[1][0] === 'get' && clause[1][1] === 'filterrank');
+      });
+    });
+}
+
+// Per Mapbox Streets v8 docs, filterrank is an integer field with only 6 possible values
+// (0-5: "filterrank<=1" for the most prominent labels only, up to "filterrank<=5" to show
+// as many as possible). A fractional threshold has no effect beyond its floor -- filterrank
+// <= 2.9 passes exactly the same features as <= 2.0, since there's no such thing as a
+// filterrank of 2.5 in the data -- so the slider is an integer 0-5 matching the real range,
+// and its value *is* the filterrank threshold directly (no interpolation needed). The three
+// overlap properties are broken out into independent checkboxes (default off, i.e. Mapbox's
+// normal label-decluttering behavior).
+function applyPoiDensity(filterrankBase) {
+  // Update the debug readout immediately, regardless of map/tile load state below --
+  // otherwise it lags behind slider drags because setFilter makes isStyleLoaded() go
+  // false while tiles reload, so the callback that updates this text gets deferred to
+  // 'idle' and stacks up out of order.
+  document.getElementById('debug-filterrank').textContent = filterrankBase;
+
+  if (!map) return;
+  if (!map.isStyleLoaded()) {
+    map.once('idle', () => applyPoiDensity(filterrankBase));
+    return;
+  }
+
+  const poiLayers = map.getStyle().layers
+    .filter(l => l.type === 'symbol' && /poi/i.test(l.id))
+    .map(l => l.id);
+
+  if (poiLayers.length === 0) {
+    console.warn('[POI density] No POI layers found in current style');
+    return;
+  }
+
+  poiLayers.forEach((layerId) => {
+    try {
+      const filterrankClause = ['<=',
+        ['coalesce', ['get', 'filterrank'], 0],
+        ['+', ['step', ['zoom'], 0, 16, 1, 17, 2], filterrankBase],
+      ];
+      const otherClauses = originalNonFilterrankClauses[layerId] || [];
+      map.setFilter(layerId, ['all', filterrankClause, ...otherClauses]);
+    } catch (e) { /* ignore */ }
+  });
+
+  applyOverlapCheckboxes();
+}
+
+function applyOverlapCheckboxes() {
+  if (!map || !map.isStyleLoaded()) return;
+
+  const poiLayers = map.getStyle().layers
+    .filter(l => l.type === 'symbol' && /poi/i.test(l.id))
+    .map(l => l.id);
+
+  const textAllowOverlap = document.getElementById('cb-text-allow-overlap').checked;
+  const iconAllowOverlap = document.getElementById('cb-icon-allow-overlap').checked;
+  const textIgnorePlacement = document.getElementById('cb-text-ignore-placement').checked;
+
+  poiLayers.forEach((layerId) => {
+    try { map.setLayoutProperty(layerId, 'text-allow-overlap', textAllowOverlap); } catch (e) {}
+    try { map.setLayoutProperty(layerId, 'icon-allow-overlap', iconAllowOverlap); } catch (e) {}
+    try { map.setLayoutProperty(layerId, 'text-ignore-placement', textIgnorePlacement); } catch (e) {}
+  });
+}
+
+const slider = document.getElementById('density-slider');
+const valueLabel = document.getElementById('density-value');
+slider.addEventListener('input', (e) => {
+  const filterrankBase = Number(e.target.value);
+  valueLabel.textContent = filterrankBase;
+  applyPoiDensity(filterrankBase);
+});
+
+['cb-text-allow-overlap', 'cb-icon-allow-overlap', 'cb-text-ignore-placement'].forEach((id) => {
+  document.getElementById(id).addEventListener('change', applyOverlapCheckboxes);
+});
+
+if (isPk(tokenInput.value)) {
+  // Auto-start if a valid token is already present, same convenience as picking it up from localStorage.
+}
+</script>
+
+</body>
+</html>
