@@ -117,6 +117,7 @@
       <div class="pane-half">
         <div class="pane-header">
           <span>Google Places API</span>
+          <button type="button" class="anchor-btn" id="google-anchor-btn" title="Anchor: focus both maps on Google's top result">⚓️</button>
           <span id="google-count" class="result-count google-count"></span>
           <span class="ph-spacer"></span>
           <span class="mode-badge new" id="google-mode-badge">New</span>
@@ -126,6 +127,7 @@
       <div class="pane-half">
         <div class="pane-header">
           Mapbox Search Box API
+          <button type="button" class="anchor-btn" id="mapbox-anchor-btn" title="Anchor: focus both maps on Mapbox's top result">⚓️</button>
           <span id="mapbox-count" class="result-count mapbox-count"></span>
           <span class="ph-spacer"></span>
           <select id="poi-density-select" style="padding:2px 6px;background:#2a2a2a;border:1px solid #444;border-radius:3px;color:#ccc;font-size:10px;cursor:pointer;outline:none;">
@@ -464,6 +466,11 @@
     </div>
     <div class="dialog-body" id="ai-hint-body"></div>
   </div>
+</div>
+
+<!-- Mapbox結果アイテムの右クリックコンテキストメニュー -->
+<div class="result-context-menu" id="mapbox-result-context-menu">
+  <button type="button" id="mapbox-ctx-copy-mismatched-btn"></button>
 </div>
 
 <script src="app.js"></script>

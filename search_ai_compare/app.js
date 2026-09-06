@@ -326,7 +326,7 @@ const DEFAULT_GOOGLE_PARAMS_LEGACY = {
 const DEFAULT_MAPBOX_PARAMS = {
   language: 'ja', country: 'jp',
   proximity: { lng: DEFAULT_LNG, lat: DEFAULT_LAT },
-  limit: 10, types: [],
+  limit: 30, types: [],
   // navigation_profileはデフォルトなし(none)。フォームで明示的に選択された場合のみ付与
   // bboxはデフォルトなし。BBOXボタンで有効化
 };
@@ -1894,14 +1894,29 @@ function renderGoogleResults(data) {
         <div class="result-address">${r.formatted_address}</div>
         <div class="result-type">${r.types.join(', ')}</div>
       </div>
+      <div class="result-actions">
+        <button type="button" class="result-copy-btn" data-idx="${i}" title="Copy as JSON (add用、name/lat/lon/address)">Copy</button>
+      </div>
     </div>`).join('');
 
   el.querySelectorAll('.result-item').forEach((item, i) => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.result-actions')) return;
       const lat = parseFloat(item.dataset.lat);
       const lng = parseFloat(item.dataset.lng);
       centerMapsTo(lat, lng);
       highlightGoogleMarker(i);
+    });
+  });
+
+  el.querySelectorAll('.result-copy-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const r = data[parseInt(btn.dataset.idx, 10)];
+      navigator.clipboard.writeText(JSON.stringify(googleResultToJsonObj(r), null, 2));
+      const orig = btn.textContent;
+      btn.textContent = '✅';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
     });
   });
 }
@@ -1927,7 +1942,7 @@ function renderMapboxResults(data) {
         <div class="result-type">${[r.feature_type,...(r.poi_category??[])].filter(Boolean).join(' · ')}</div>
       </div>
       <div class="result-actions">
-        <button type="button" class="result-copy-btn" data-idx="${i}" title="Copy name/address/id">Copy</button>
+        <button type="button" class="result-copy-btn" data-idx="${i}" title="Copy as JSON (name/id/lat/lon/tag/external_ids/address)">Copy</button>
         <button type="button" class="result-ask-ai-btn" data-idx="${i}" title="Ask AI to check this result">Ask AI</button>
       </div>
     </div>`).join('');
@@ -1939,6 +1954,10 @@ function renderMapboxResults(data) {
       const lng = parseFloat(item.dataset.lng);
       centerMapsTo(lat, lng);
       highlightMapboxMarker(i);
+    });
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openMapboxResultContextMenu(e.clientX, e.clientY, i, data, duplicateMatchIndexes);
     });
   });
 
@@ -1954,14 +1973,112 @@ function renderMapboxResults(data) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const r = data[parseInt(btn.dataset.idx, 10)];
-      const text = `name:${r.name ?? ''}\naddress:${r.full_address ?? ''}\nid:${r.mapbox_id ?? ''}`;
-      navigator.clipboard.writeText(text);
+      navigator.clipboard.writeText(JSON.stringify(mapboxResultToJsonObj(r), null, 2));
       const orig = btn.textContent;
       btn.textContent = '✅';
       setTimeout(() => { btn.textContent = orig; }, 1500);
     });
   });
 }
+
+// データクレンジング取り込み用JSONの1件分。correct/wrongはこの形(name/id/lat/lon/tag/external_ids/address)、
+// wrongのみ別途change:{old,new}(デフォルト空、人力で埋める)を付与する
+function mapboxResultToJsonObj(r) {
+  return {
+    name: r.name ?? '',
+    id: r.mapbox_id ?? '',
+    lat: r.coordinates?.latitude ?? null,
+    lon: r.coordinates?.longitude ?? null,
+    tag: r.poi_category ?? [],
+    external_ids: r.external_ids ?? {},
+    address: r.full_address ?? '',
+  };
+}
+
+// addエントリ用(Mapbox側に対応POIが無い候補をGoogle側からそのまま持ってくる想定)。
+// Googleにはmapbox_id/poi_category/external_idsの概念が無いのでidは持たせず、tag/external_idsは空のまま
+function googleResultToJsonObj(r) {
+  return {
+    name: r.name ?? '',
+    lat: r.geometry?.location?.lat ?? null,
+    lon: r.geometry?.location?.lng ?? null,
+    tag: [],
+    external_ids: {},
+    address: r.formatted_address ?? '',
+  };
+}
+
+// 「至近」= 実距離(haversine)がNEAR_DUPLICATE_THRESHOLD_KM以内
+const NEAR_DUPLICATE_THRESHOLD_KM = 0.1;
+function isNearCoordWithinThreshold(a, b) {
+  if (!a || !b) return false;
+  const { latitude: latA, longitude: lngA } = a;
+  const { latitude: latB, longitude: lngB } = b;
+  if (![latA, lngA, latB, lngB].every(Number.isFinite)) return false;
+  return haversineDistanceKm(latA, lngA, latB, lngB) <= NEAR_DUPLICATE_THRESHOLD_KM;
+}
+
+// 右クリックしたPOIと「name重複」しているPOIを、右クリックしたPOIに至近(100m以内、同一地点の重複掲載=
+// 正しい候補とみなす)かどうかで Correct POI / Duplicate POI の2グループに分けてまとめてコピーする
+function openMapboxResultContextMenu(x, y, i, data, duplicateMatchIndexes) {
+  const menu = document.getElementById('mapbox-result-context-menu');
+  const btn = document.getElementById('mapbox-ctx-copy-mismatched-btn');
+  const clicked = data[i];
+  const dupIndexes = (duplicateMatchIndexes[i] || []).map(n => n - 1);
+  const nearIndexes = dupIndexes.filter(j => isNearCoordWithinThreshold(clicked.coordinates, data[j].coordinates));
+  const correctIndexes = [i, ...nearIndexes];
+  const duplicateIndexes = dupIndexes.filter(j => !isNearCoordWithinThreshold(clicked.coordinates, data[j].coordinates));
+
+  btn.disabled = dupIndexes.length === 0;
+  btn.textContent = dupIndexes.length
+    ? `Correct POI(${correctIndexes.length}件) / Wrong POI(${duplicateIndexes.length}件) をコピー`
+    : 'name重複するPOIなし';
+  btn.onclick = () => {
+    if (!dupIndexes.length) return;
+    // 手動でchange.old/new記入やadd追加をするので、1行べた書きではなく整形(2スペースインデント)して見やすくする。
+    // 複数件をファイルに貼り足す場合はオブジェクト同士がベタ並びになるが、pyの取り込み側はjson.JSONDecoder().raw_decode()を
+    // ループさせれば整形/カンマの有無に関係なく複数オブジェクトを読み出せる
+    const pair = {
+      correct: correctIndexes.map(j => mapboxResultToJsonObj(data[j])),
+      wrong: duplicateIndexes.map(j => ({ ...mapboxResultToJsonObj(data[j]), change: { old: '', new: '' } })),
+      add: [],
+    };
+    navigator.clipboard.writeText(JSON.stringify(pair, null, 2));
+    clearAllMapboxCopyBadges(); // 前回の右クリック操作のバッジが残って混ざらないよう、毎回リセットしてから今回分だけ付け直す
+    correctIndexes.forEach(j => markMapboxResultCopied(j, 'correct'));
+    duplicateIndexes.forEach(j => markMapboxResultCopied(j, 'wrong'));
+    closeMapboxResultContextMenu();
+  };
+
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  menu.classList.add('open');
+}
+
+function closeMapboxResultContextMenu() {
+  document.getElementById('mapbox-result-context-menu')?.classList.remove('open');
+}
+
+function clearAllMapboxCopyBadges() {
+  document.querySelectorAll('#mapbox-results .result-copy-badge').forEach(b => b.remove());
+}
+
+function markMapboxResultCopied(idx, type) {
+  const item = document.querySelectorAll('#mapbox-results .result-item')[idx];
+  const nameEl = item?.querySelector('.result-name');
+  if (!nameEl) return;
+  let badge = nameEl.querySelector('.result-copy-badge');
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.className = 'result-copy-badge';
+    nameEl.appendChild(badge);
+  }
+  badge.className = `result-copy-badge ${type}`;
+  badge.textContent = type;
+}
+
+document.addEventListener('click', (e) => { if (!e.target.closest('#mapbox-result-context-menu')) closeMapboxResultContextMenu(); });
+document.addEventListener('contextmenu', (e) => { if (!e.target.closest('.result-item')) closeMapboxResultContextMenu(); });
 
 // ============================================================
 // ASK AI (Mapbox結果1件についてPOIの実在/最新性/タグ正確性をAIの世界知識でチェックさせ、
@@ -2640,9 +2757,12 @@ async function doSearch() {
   if (googleMap) googleMap.setCenter({ lat, lng });
   if (mapboxMap) mapboxMap.jumpTo({ center: [lng, lat] });
 
-  const googleDisplay = buildGoogleQueryDisplay(query), mapboxDisplay = buildMapboxQueryDisplay(query);
-  pendingGoogleUrl = googleDisplay; pendingMapboxUrl = mapboxDisplay;
-  queryEditor?.setValue(googleDisplay); queryMapboxEditor?.setValue(mapboxDisplay);
+  function refreshQueryDisplays() {
+    const googleDisplay = buildGoogleQueryDisplay(query), mapboxDisplay = buildMapboxQueryDisplay(query);
+    pendingGoogleUrl = googleDisplay; pendingMapboxUrl = mapboxDisplay;
+    queryEditor?.setValue(googleDisplay); queryMapboxEditor?.setValue(mapboxDisplay);
+  }
+  refreshQueryDisplays();
 
   const label = document.getElementById('query-google-label');
   if (label) label.textContent = `Google Places API (${googleApiMode === 'new' ? 'New' : 'Legacy'})`;
@@ -2650,7 +2770,24 @@ async function doSearch() {
   highlightedMapboxMarker = null;
   setLoading('google'); setLoading('mapbox');
 
-  const [gRes, mRes] = await Promise.allSettled([searchGoogle(query), searchMapbox(query)]);
+  // アンカーON時は、アンカー側を先に呼んでTop resultの座標をもう片方のproximity/locationとして使ってから呼ぶ
+  // (両方offの通常時は従来通り並列実行)
+  let gRes, mRes;
+  if (anchorMode === 'google') {
+    gRes = await toSettled(searchGoogle(query));
+    if (searchGen !== searchGeneration) return;
+    applyAnchorToOther('google', gRes);
+    refreshQueryDisplays();
+    mRes = await toSettled(searchMapbox(query));
+  } else if (anchorMode === 'mapbox') {
+    mRes = await toSettled(searchMapbox(query));
+    if (searchGen !== searchGeneration) return;
+    applyAnchorToOther('mapbox', mRes);
+    refreshQueryDisplays();
+    gRes = await toSettled(searchGoogle(query));
+  } else {
+    [gRes, mRes] = await Promise.allSettled([searchGoogle(query), searchMapbox(query)]);
+  }
 
   // 待っている間に、より新しいdoSearch()呼び出しが発行されていたら、この結果は古いので画面には一切反映しない
   if (searchGen !== searchGeneration) return;
@@ -3187,6 +3324,9 @@ function initCsvMappingDialog() {
   });
 }
 
+// CSV等から%エンコード済みの値が入ってくることがあるため、壊れたシーケンスは元の値のまま安全にデコードする
+function decodeUriSafe(s) { try { return decodeURIComponent(s); } catch { return s; } }
+
 // ---- CSV行 → state反映 ----
 function applyRoleValue(target, role, val) {
   switch (role) {
@@ -3205,9 +3345,11 @@ function applyRoleValue(target, role, val) {
     case 'bbox':      target.bbox = val; break;
     case 'bbox(lat)': target.bboxLat = parseFloat(val); break;
     case 'bbox(lng)': target.bboxLng = parseFloat(val); break;
-    case 'types':   target.types = val.split(',').map(s => s.trim()).filter(Boolean); break;
-    case 'poi_category':           target.poi_category = val.split(',').map(s => s.trim()).filter(Boolean); break;
-    case 'poi_category_exclusion': target.poi_category_exclusion = val.split(',').map(s => s.trim()).filter(Boolean); break;
+    // CSV等から%エンコード済みの値が入ってくることがある(例: "poi%2Ccategory"が1トークンのまま残りカンマで分割されない)ため、
+    // split前にデコードしてからカンマで分割する(壊れたシーケンスは元の値のまま)
+    case 'types':                   target.types = decodeUriSafe(val).split(',').map(s => s.trim()).filter(Boolean); break;
+    case 'poi_category':           target.poi_category = decodeUriSafe(val).split(',').map(s => s.trim()).filter(Boolean); break;
+    case 'poi_category_exclusion': target.poi_category_exclusion = decodeUriSafe(val).split(',').map(s => s.trim()).filter(Boolean); break;
     case 'limit':   target.limit = parseInt(val, 10); break;
     case 'language':target.language = val; break;
     case 'country': target.country = val; break;
@@ -3267,7 +3409,7 @@ function applyCsvRowToState(resolved) {
   if (!manualMapboxFields.has('poi_category_exclusion')) {
     if (mb.poi_category_exclusion) state.mapboxParams.poi_category_exclusion = mb.poi_category_exclusion; else delete state.mapboxParams.poi_category_exclusion;
   }
-  if (!manualMapboxFields.has('limit')) state.mapboxParams.limit = (mb.limit != null && !isNaN(mb.limit)) ? mb.limit : 10;
+  if (!manualMapboxFields.has('limit')) state.mapboxParams.limit = (mb.limit != null && !isNaN(mb.limit)) ? mb.limit : 30;
   if (!manualMapboxFields.has('language')) state.mapboxParams.language = mb.language || 'ja';
   if (!manualMapboxFields.has('country'))  state.mapboxParams.country  = mb.country  || 'jp';
   if (!manualMapboxFields.has('near')) {
@@ -3604,6 +3746,20 @@ function centerMapsTo(lat, lng) {
 function fitResultsBounds() {
   isSyncing = true; // fitBounds由来の idle/moveend で相互同期が発火しないようにする
 
+  // アンカーON時は、独立fitではなくアンカー側のTop resultへ両マップを合わせる
+  if (anchorMode !== 'off') {
+    const anchorResults = anchorMode === 'google' ? googleRawResults : mapboxRawResults;
+    if (anchorResults.length) {
+      const top = anchorResults[0];
+      const lat = anchorMode === 'google' ? top.geometry.location.lat : top.coordinates.latitude;
+      const lng = anchorMode === 'google' ? top.geometry.location.lng : top.coordinates.longitude;
+      if (googleMap) { googleMap.setCenter({ lat, lng }); googleMap.setZoom(17); }
+      if (mapboxMap) mapboxMap.jumpTo({ center: [lng, lat], zoom: 17 });
+      setTimeout(() => { isSyncing = false; }, 400);
+      return;
+    }
+  }
+
   if (googleMap && googleRawResults.length) {
     if (googleRawResults.length === 1) {
       googleMap.setCenter({ lat: googleRawResults[0].geometry.location.lat, lng: googleRawResults[0].geometry.location.lng });
@@ -3783,6 +3939,49 @@ function toggleBbox() {
   drawMapboxBbox();
   updateBboxBtn();
 }
+
+// ============================================================
+// ANCHOR TOGGLE
+// ============================================================
+// 'off' | 'google' | 'mapbox'。両方onは無く、片方onにするともう片方は自動でoffになる
+let anchorMode = 'off';
+
+function updateAnchorBtns() {
+  document.getElementById('google-anchor-btn').classList.toggle('active', anchorMode === 'google');
+  document.getElementById('mapbox-anchor-btn').classList.toggle('active', anchorMode === 'mapbox');
+}
+
+function toggleAnchor(source) {
+  anchorMode = anchorMode === source ? 'off' : source;
+  updateAnchorBtns();
+  fitResultsBounds();
+}
+
+// Promise.allSettledの1件版(アンカー時はGoogle/Mapboxを逐次実行するため、既存の.status/.value/.reason判定コードを
+// そのまま使えるように同じ形の結果オブジェクトを返す)
+async function toSettled(promise) {
+  try { return { status: 'fulfilled', value: await promise }; }
+  catch (reason) { return { status: 'rejected', reason }; }
+}
+
+// アンカー側の検索結果のTop resultの座標を、もう片方(非アンカー側)のproximity/locationにセットする。
+// アンカー側がエラー/0件の場合は基準点が無いので何もしない(もう片方は直前の値のまま検索する)
+function applyAnchorToOther(anchorSource, anchorRes) {
+  if (anchorRes.status !== 'fulfilled' || anchorRes.value?.error || !anchorRes.value?.length) return;
+  const top = anchorRes.value[0];
+  if (anchorSource === 'google') {
+    const { lat, lng } = top.geometry.location;
+    state.mapboxParams.proximity = { lng, lat };
+    refreshParamUI('mapbox');
+  } else {
+    const { latitude: lat, longitude: lng } = top.coordinates;
+    setLocationToState(lat, lng);
+    refreshParamUI('google');
+  }
+}
+
+document.getElementById('google-anchor-btn').addEventListener('click', () => toggleAnchor('google'));
+document.getElementById('mapbox-anchor-btn').addEventListener('click', () => toggleAnchor('mapbox'));
 
 // ============================================================
 // MARKER HIGHLIGHT
