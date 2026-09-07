@@ -75,6 +75,16 @@
   #overlap-checkboxes input {
     accent-color: #4db8ff;
   }
+  #zoom-pattern-select {
+    width: 100%;
+    padding: 4px 6px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #ccc;
+    font-size: 11px;
+    margin-bottom: 10px;
+  }
   #debug {
     font-size: 10px;
     color: #777;
@@ -151,8 +161,16 @@
     <label><input type="checkbox" id="cb-icon-allow-overlap" /> icon-allow-overlap</label>
     <label><input type="checkbox" id="cb-text-ignore-placement" /> text-ignore-placement</label>
   </div>
+  <div class="row">
+    <span class="label">Zoom breakpoints</span>
+  </div>
+  <select id="zoom-pattern-select">
+    <option value="16" selected>Standard (16 / 17)</option>
+    <option value="15">Early-1 (15 / 17)</option>
+    <option value="14">Early-2 (14 / 17)</option>
+  </select>
   <div id="debug">
-    filterrank &le; <span id="debug-filterrank">-</span> (+zoom step)<br />
+    filterrank &le; <span id="debug-filterrank">-</span> (+zoom step: <span id="debug-z1">16</span>/17)<br />
     zoom: <span id="debug-zoom">-</span>
   </div>
 </div>
@@ -219,7 +237,7 @@ async function initMap(token) {
   map = new mapboxgl.Map({
     container: 'map',
     style: styleJson,
-    center: [139.7671, 35.6812], // Tokyo Station
+    center: [134.5548, 34.0703], // Tokushima Station
     zoom: 15,
   });
   map.on('load', () => {
@@ -260,7 +278,16 @@ function captureOriginalPoiFilters() {
 // and its value *is* the filterrank threshold directly (no interpolation needed). The three
 // overlap properties are broken out into independent checkboxes (default off, i.e. Mapbox's
 // normal label-decluttering behavior).
+//
+// currentZ1 is the first zoom breakpoint of the step expression (the point where the bonus
+// goes 0 -> 1). The second breakpoint (bonus 1 -> 2) stays fixed at 17 in every pattern --
+// only how early the first bump kicks in varies (Standard=16, Early-1=15, Early-2=14).
+let currentZ1 = 16;
+let currentFilterrankBase = 2;
+
 function applyPoiDensity(filterrankBase) {
+  currentFilterrankBase = filterrankBase;
+
   // Update the debug readout immediately, regardless of map/tile load state below --
   // otherwise it lags behind slider drags because setFilter makes isStyleLoaded() go
   // false while tiles reload, so the callback that updates this text gets deferred to
@@ -286,7 +313,7 @@ function applyPoiDensity(filterrankBase) {
     try {
       const filterrankClause = ['<=',
         ['coalesce', ['get', 'filterrank'], 0],
-        ['+', ['step', ['zoom'], 0, 16, 1, 17, 2], filterrankBase],
+        ['+', ['step', ['zoom'], 0, currentZ1, 1, 17, 2], filterrankBase],
       ];
       const otherClauses = originalNonFilterrankClauses[layerId] || [];
       map.setFilter(layerId, ['all', filterrankClause, ...otherClauses]);
@@ -324,6 +351,12 @@ slider.addEventListener('input', (e) => {
 
 ['cb-text-allow-overlap', 'cb-icon-allow-overlap', 'cb-text-ignore-placement'].forEach((id) => {
   document.getElementById(id).addEventListener('change', applyOverlapCheckboxes);
+});
+
+document.getElementById('zoom-pattern-select').addEventListener('change', (e) => {
+  currentZ1 = Number(e.target.value);
+  document.getElementById('debug-z1').textContent = currentZ1;
+  applyPoiDensity(currentFilterrankBase);
 });
 
 if (isPk(tokenInput.value)) {
