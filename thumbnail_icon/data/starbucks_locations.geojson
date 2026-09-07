@@ -1,0 +1,875 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 茅場町店",
+        "address": "東京都中央区日本橋茅場町1-12-2",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7807428,
+          35.6794244
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 日本橋高島屋S.C.店",
+        "address": "東京都中央区日本橋2-5-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7742989,
+          35.6812961
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 日本橋高島屋S.C.5階店",
+        "address": "東京都中央区日本橋2-5-1日本橋高島屋S.C. 新館5階",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.773292,
+          35.681419
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 日本橋スルガビル店",
+        "address": "東京都中央区日本橋室町1-7-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7749125,
+          35.6848542
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 人形町店",
+        "address": "東京都中央区日本橋人形町3-6-7",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7814675,
+          35.6869597
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー コレド室町2店",
+        "address": "東京都中央区日本橋室町2-3-1コレド室町2 地下1階",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.774831,
+          35.6869
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー日本橋本町店",
+        "address": "東京都中央区日本橋本町2-4-5",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.77528611130185,
+          35.68718888892067
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 東京ミッドタウン八重洲店",
+        "address": "東京都中央区八重洲2-2-1東京ミッドタウン八重洲",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.768798,
+          35.679344
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒーグランスタ八重洲店",
+        "address": "東京都千代田区丸の内1-9-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.76809999995763,
+          35.68006388876173
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒーJR東京駅日本橋口店",
+        "address": "東京都千代田区丸の内1-9-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.76887499994703,
+          35.68304722256131
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー コレド室町テラス店",
+        "address": "東京都中央区日本橋室町3-2-1コレド室町テラス 地下1階",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.772542,
+          35.687798
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 東京ステーションシティ サピアタワー店",
+        "address": "東京都千代田区丸の内1-7-12",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7684853,
+          35.6838375
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー グランスタ東京店",
+        "address": "東京都千代田区丸の内1-9-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7667883,
+          35.6818322
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 東京駅八重洲北口 東京ギフトパレット店",
+        "address": "東京都千代田区丸の内1-9-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7667883,
+          35.6818322
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー グランスタ丸の内店",
+        "address": "東京都千代田区丸の内1-9-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7667744,
+          35.6817878
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー JR東海 東京駅新幹線南ラチ内店",
+        "address": "東京都千代田区丸の内1-9-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7667744,
+          35.6817878
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー丸の内オアゾ店",
+        "address": "東京都千代田区丸の内1-6-4",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7664972220527,
+          35.683516666673945
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 聖路加国際病院店",
+        "address": "東京都中央区明石町9-1聖路加国際病院",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.777058,
+          35.667314
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス リザーブストア 銀座マロニエ通り",
+        "address": "東京都中央区銀座3-7-3",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7675331,
+          35.6722303
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー KITTE丸の内店",
+        "address": "東京都千代田区丸の内2-7-2",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7648772597313,
+          35.679800793103695
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒーティバーナストア銀座マロニエ通り店",
+        "address": "東京都中央区銀座3-7-3",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7675083333254,
+          35.672216666539505
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒーCIRCLES銀座店",
+        "address": "東京都中央区銀座3-7-6",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.76740000002914,
+          35.67203333324856
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 築地駅前店",
+        "address": "東京都中央区築地2-12-8",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7720469,
+          35.6679894
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー マロニエゲート銀座1店",
+        "address": "東京都中央区銀座2-2-14マロニエゲート銀座1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.765379,
+          35.674233
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 大手町プレイス店",
+        "address": "東京都千代田区大手町2-3-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7664522,
+          35.6866761
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー新丸ビル店",
+        "address": "東京都千代田区丸の内1-5-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.76420833375718,
+          35.68222222222222
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 銀座松屋通り店",
+        "address": "東京都中央区銀座3-7-14ESKビル 1F",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.766628,
+          35.671682
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー丸の内ビル店",
+        "address": "東京都千代田区丸の内2-4-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.76380833307903,
+          35.681049999660914
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒーTSUTAYA BOOKSTORE MARUNOUCHI店",
+        "address": "東京都千代田区丸の内2-4-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.76380555576748,
+          35.681055555343626
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー丸の内三菱ビル店",
+        "address": "東京都千代田区丸の内2-5-2",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.76360833379957,
+          35.679863888422645
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 麹町店",
+        "address": "東京都千代田区麹町3-2-5",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7390322,
+          35.6843033
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 上智大学 四谷キャンパス店",
+        "address": "東京都千代田区麹町6-1-18",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7324328,
+          35.6845975
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 東京ガーデンテラス紀尾井町店",
+        "address": "東京都千代田区紀尾井町1-2東京ガーデンテラス紀尾井町",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.736859,
+          35.679105
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 市ヶ谷駅前店",
+        "address": "東京都千代田区五番町2市ヶ谷ストア 2F",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.735674,
+          35.691167
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー アトレ四谷店",
+        "address": "東京都新宿区四谷1-5-25アトレ四谷",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.730135,
+          35.686178
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 赤坂見附店",
+        "address": "東京都港区赤坂3-21-20",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7356356,
+          35.6772067
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 赤坂プルデンシャルタワー店",
+        "address": "東京都千代田区永田町2-13-10プルデンシャルタワー",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.738544,
+          35.676074
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 山王パークタワー店",
+        "address": "東京都千代田区永田町2-11-1山王パークタワー",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.740251,
+          35.673274
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 赤坂Bizタワー店",
+        "address": "東京都港区赤坂5-3-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7364803,
+          35.6732239
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 赤坂溜池タワー店",
+        "address": "東京都港区赤坂2-17-1赤坂溜池タワー",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.739241,
+          35.671259
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 四谷3丁目店",
+        "address": "東京都新宿区四谷2-14-4",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7234281,
+          35.6876025
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス 赤坂インターシティAIR店",
+        "address": "東京都港区赤坂1-8-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7426897,
+          35.6698598
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 霞ダイニング店",
+        "address": "東京都千代田区霞が関3-2-5霞が関ビルディング",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.747011,
+          35.670868
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 北の丸スクエア店",
+        "address": "東京都千代田区九段北1-13-12北の丸スクエア",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.751111,
+          35.695655
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 飯田橋サクラテラス店",
+        "address": "東京都千代田区富士見2-10-2",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7437758,
+          35.699035
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 飯田橋サクラテラス2階店",
+        "address": "東京都千代田区富士見2-10-2",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7437758,
+          35.699035
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 九段下店",
+        "address": "東京都千代田区九段北1-2-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7521808,
+          35.6958328
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 飯田橋メトロピア店",
+        "address": "東京都新宿区神楽坂1-13",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7423508,
+          35.7003322
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー アトレ信濃町店",
+        "address": "東京都新宿区信濃町34アトレ信濃町",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.719703,
+          35.680116
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 虎ノ門駅前店",
+        "address": "東京都港区虎ノ門1-1-23",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7501625,
+          35.6704053
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 青山ビルヂング店",
+        "address": "東京都港区北青山1-2-3",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7236342,
+          35.6730347
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 虎ノ門2丁目タワー店",
+        "address": "東京都港区虎ノ門2-3-17虎ノ門2-タワー",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.746516,
+          35.668532
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 飯田橋軽子坂店",
+        "address": "東京都新宿区揚場町2-1",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7428786,
+          35.7019264
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 飯田橋メトロピア店",
+        "address": "東京都新宿区神楽坂1-13南北線飯田橋駅構内",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.743897,
+          35.701983
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 日比谷シティ店",
+        "address": "東京都千代田区内幸町2-2-3",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7543539,
+          35.6703969
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 飯田橋アイガーデンテラス店",
+        "address": "東京都千代田区飯田橋3-10-9アイガーデンテラス",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.750311,
+          35.70108
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックスコーヒー 水道橋後楽森ビル店",
+        "address": "東京都文京区後楽1-4-14",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.7495083,
+          35.7035542
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "スターバックス コーヒー 東京ドームシティ ミーツポート店",
+        "address": "東京都文京区後楽1-3-61東京ドームシティミーツポート1階",
+        "images": ["./data/images/starbucks.png"]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          139.754825,
+          35.702986
+        ]
+      }
+    }
+  ]
+}

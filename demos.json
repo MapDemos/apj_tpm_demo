@@ -58,5 +58,10 @@
     "title": "poi_density",
     "description": "MapboxのPOIラベル密度(filterrank)をスライダーでリアルタイム調整するデモ",
     "path": "./poi_density/"
+  },
+  {
+    "title": "thumbnail_icon",
+    "description": "店舗写真をピン型フレームに合成表示するMapboxデモ",
+    "path": "./thumbnail_icon/"
   }
 ]

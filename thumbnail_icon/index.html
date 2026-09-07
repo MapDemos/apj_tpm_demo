@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>サムネイル付きピンデモ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map"></div>
+
+<div id="panel">
+  <div class="panel-row">
+    <label for="countSlider">表示する店舗数：<span id="countLabel">10</span></label>
+  </div>
+  <div class="panel-row">
+    <input type="range" id="countSlider" min="0" max="10" step="1" value="10">
+    <input type="number" id="countInput" min="0" max="10" step="1" value="10">
+  </div>
+  <div class="panel-row">
+    <button id="resetButton">東京駅へ戻る</button>
+  </div>
+</div>
+
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
