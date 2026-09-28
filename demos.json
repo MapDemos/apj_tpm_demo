@@ -63,5 +63,10 @@
     "title": "thumbnail_icon",
     "description": "店舗写真をピン型フレームに合成表示するMapboxデモ",
     "path": "./thumbnail_icon/"
+  },
+  {
+    "title": "poi_density_side_by_side",
+    "description": "POIラベル密度(filterrank)を左右2画面で見比べる比較ツール（ビュー同期）",
+    "path": "./poi_density/side_by_side_comparison_tool/"
   }
 ]
