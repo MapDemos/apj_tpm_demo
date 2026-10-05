@@ -4,7 +4,13 @@
  * ========================================================================= */
 
 const API_BASE = 'https://api.mapbox.com/styles/v1';
+const SEARCH_BASE = 'https://api.mapbox.com/search/searchbox/v1';
 const TOKEN_KEY = 'mbx_static_sandbox_token';
+
+/* Search Box は日本語 / 日本固定（type は指定しない） */
+const SB_LANGUAGE = 'ja';
+const SB_COUNTRY = 'jp';
+const SB_LIMIT = 10;
 
 const $ = (id) => document.getElementById(id);
 
@@ -48,6 +54,15 @@ const el = {
   canvasArea: $('canvasArea'),
   placeholder: $('placeholder'),
   img: $('img'),
+
+  sbOpen: $('sbOpen'),
+  sbModal: $('sbModal'),
+  sbQuery: $('sbQuery'),
+  sbProximity: $('sbProximity'),
+  sbResults: $('sbResults'),
+  sbErr: $('sbErr'),
+  sbCancel: $('sbCancel'),
+  sbSession: $('sbSession'),
 
   parseModal: $('parseModal'),
   parseInput: $('parseInput'),
@@ -456,6 +471,202 @@ function syncAddlayerBody() {
   refresh();
 }
 
+/* ------------------------------------------------- Search Box (suggest) */
+
+let sbSessionToken = null;
+let sbSeq = 0;            // 競合するレスポンスを捨てるための世代カウンタ
+let sbTimer = null;
+
+function newSessionToken() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'sess-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function sbProximityValue() {
+  if (!el.sbProximity.checked) return null;
+  const lon = num(el.lon), lat = num(el.lat);
+  if (lon === null || lat === null) return null;
+  return `${lon},${lat}`;
+}
+
+/** 2点間のおおよその距離(m) — 候補の近さを表示するためだけに使う */
+function roughDistance(lon1, lat1, lon2, lat2) {
+  const R = 6371000;
+  const toRad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toRad;
+  const dLon = (lon2 - lon1) * toRad;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function sbMessage(cls, text) {
+  el.sbResults.innerHTML = '';
+  const p = document.createElement('p');
+  p.className = cls;
+  p.textContent = text;
+  el.sbResults.appendChild(p);
+}
+
+function sbError(msg) {
+  el.sbErr.textContent = msg;
+  el.sbErr.classList.remove('is-hidden');
+}
+
+function sbOpenModal() {
+  sbSessionToken = newSessionToken();
+  el.sbSession.textContent = `session_token: ${sbSessionToken}`;
+  el.sbErr.classList.add('is-hidden');
+  el.sbQuery.value = '';
+  sbMessage('sb-empty', 'キーワードを入力すると候補を表示します');
+  el.sbModal.classList.remove('is-hidden');
+  el.sbQuery.focus();
+}
+
+function sbCloseModal() {
+  clearTimeout(sbTimer);
+  sbSeq++;
+  el.sbModal.classList.add('is-hidden');
+}
+
+async function sbSuggest() {
+  const q = el.sbQuery.value.trim();
+  const seq = ++sbSeq;
+
+  if (!q) {
+    sbMessage('sb-empty', 'キーワードを入力すると候補を表示します');
+    return;
+  }
+
+  const token = el.token.value.trim();
+  if (!token) {
+    sbError('アクセストークンが未入力です（ヘッダーの Access token 欄）。');
+    return;
+  }
+  el.sbErr.classList.add('is-hidden');
+  sbMessage('sb-loading', '検索中…');
+
+  const params = new URLSearchParams({
+    q,
+    language: SB_LANGUAGE,
+    country: SB_COUNTRY,
+    limit: String(SB_LIMIT),
+    session_token: sbSessionToken,
+    access_token: token,
+  });
+  const prox = sbProximityValue();
+  if (prox) params.set('proximity', prox);
+
+  try {
+    const res = await fetch(`${SEARCH_BASE}/suggest?${params}`);
+    if (seq !== sbSeq) return;                      // 新しい入力に追い抜かれた
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      sbError(`suggest 失敗: HTTP ${res.status} ${res.statusText} ${body.slice(0, 200)}`);
+      sbMessage('sb-empty', '—');
+      return;
+    }
+    const json = await res.json();
+    if (seq !== sbSeq) return;
+    sbRender(json.suggestions || [], prox);
+  } catch (e) {
+    if (seq !== sbSeq) return;
+    sbError(`suggest 失敗: ${e.message}`);
+    sbMessage('sb-empty', '—');
+  }
+}
+
+function sbRender(suggestions, prox) {
+  if (!suggestions.length) {
+    sbMessage('sb-empty', '候補が見つかりませんでした');
+    return;
+  }
+
+  const [pLon, pLat] = prox ? prox.split(',').map(Number) : [null, null];
+
+  el.sbResults.innerHTML = '';
+  suggestions.forEach((s) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'sb-item';
+
+    const name = document.createElement('span');
+    name.className = 'sb-name';
+    name.textContent = s.name_preferred || s.name || '(no name)';
+    item.appendChild(name);
+
+    const addr = document.createElement('span');
+    addr.className = 'sb-addr';
+    addr.textContent = s.full_address || s.place_formatted || '';
+    item.appendChild(addr);
+
+    const badges = document.createElement('span');
+    badges.className = 'sb-badges';
+    const tags = [];
+    if (s.feature_type) tags.push(s.feature_type);
+    if (s.poi_category && s.poi_category.length) tags.push(s.poi_category.slice(0, 3).join(' / '));
+    if (s.distance != null) {
+      tags.push(`${Math.round(s.distance)} m`);
+    } else if (pLon !== null && s.coordinates) {
+      tags.push(`${Math.round(roughDistance(pLon, pLat, s.coordinates.longitude, s.coordinates.latitude))} m`);
+    }
+    tags.forEach((t, i) => {
+      const b = document.createElement('span');
+      b.className = 'sb-badge' + (/\d+ m$/.test(t) && i === tags.length - 1 ? ' sb-badge--dist' : '');
+      b.textContent = t;
+      badges.appendChild(b);
+    });
+    if (tags.length) item.appendChild(badges);
+
+    item.addEventListener('click', () => sbRetrieve(s, item));
+    el.sbResults.appendChild(item);
+  });
+}
+
+/** suggest の候補は座標を持たないので retrieve で確定させる */
+async function sbRetrieve(suggestion, item) {
+  const token = el.token.value.trim();
+  if (!suggestion.mapbox_id) {
+    sbError('この候補に mapbox_id がないため retrieve できません。');
+    return;
+  }
+
+  item.classList.add('is-busy');
+  el.sbErr.classList.add('is-hidden');
+
+  const params = new URLSearchParams({
+    language: SB_LANGUAGE,
+    session_token: sbSessionToken,
+    access_token: token,
+  });
+
+  try {
+    const res = await fetch(`${SEARCH_BASE}/retrieve/${encodeURIComponent(suggestion.mapbox_id)}?${params}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      sbError(`retrieve 失敗: HTTP ${res.status} ${res.statusText} ${body.slice(0, 200)}`);
+      return;
+    }
+    const json = await res.json();
+    const feature = (json.features || [])[0];
+    const coords = feature && feature.geometry && feature.geometry.coordinates;
+    if (!coords) {
+      sbError('retrieve のレスポンスに座標が含まれていません。');
+      return;
+    }
+
+    el.lon.value = coords[0];
+    el.lat.value = coords[1];
+    sbCloseModal();
+    refresh();
+    toast(`Lon/Lat をセット: ${feature.properties?.name || suggestion.name || ''}`);
+  } catch (e) {
+    sbError(`retrieve 失敗: ${e.message}`);
+  } finally {
+    item.classList.remove('is-busy');
+  }
+}
+
 /* ------------------------------------------------------------------ token */
 
 function saveToken() {
@@ -568,6 +779,23 @@ function wire() {
     a.remove();
   });
 
+  /* Search Box 検索ダイアログ */
+  el.sbOpen.addEventListener('click', sbOpenModal);
+  el.sbCancel.addEventListener('click', sbCloseModal);
+  el.sbModal.addEventListener('click', (e) => {
+    if (e.target === el.sbModal) sbCloseModal();
+  });
+  el.sbQuery.addEventListener('input', () => {
+    clearTimeout(sbTimer);
+    sbTimer = setTimeout(sbSuggest, 300);
+  });
+  el.sbQuery.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); clearTimeout(sbTimer); sbSuggest(); }
+  });
+  el.sbProximity.addEventListener('change', () => {
+    if (el.sbQuery.value.trim()) sbSuggest();
+  });
+
   /* URL 読み込みダイアログ */
   el.parseBtn.addEventListener('click', () => {
     el.parseErr.classList.add('is-hidden');
@@ -593,7 +821,10 @@ function wire() {
   /* ⌘/Ctrl + Enter で実行 */
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); run(); }
-    if (e.key === 'Escape') el.parseModal.classList.add('is-hidden');
+    if (e.key === 'Escape') {
+      el.parseModal.classList.add('is-hidden');
+      if (!el.sbModal.classList.contains('is-hidden')) sbCloseModal();
+    }
   });
 }
 

@@ -284,6 +284,7 @@ select {
 .btn--sm { padding: 6px 11px; font-size: 11px; }
 .btn--icon { padding: 7px 10px; font-size: 11px; font-weight: 500; }
 .btn.is-busy { opacity: .6; pointer-events: none; }
+.btn--block { display: block; width: 100%; margin-bottom: 12px; }
 
 /* -------------------------------------------------------------- segmented */
 
@@ -592,9 +593,106 @@ select {
 }
 .modal-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+
+/* ------------------------------------------------- search box ダイアログ */
+
+.modal-card--search { max-width: 560px; }
+
+.modal-tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  background: var(--bg-3);
+  border-radius: 3px;
+  padding: 1px 6px;
+  margin-left: 5px;
+}
+
+#sbQuery { font-family: var(--sans); font-size: 14px; padding: 10px 12px; }
+
+.sb-prox { margin-top: 10px; }
+
+.sb-results {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  height: 300px;
+  overflow-y: auto;
+}
+
+.sb-empty, .sb-loading {
+  margin: 0;
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--ink-4);
+}
+
+.sb-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--bg);
+  border: 0;
+  border-bottom: 1px solid var(--line-2);
+  padding: 10px 13px;
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: background .1s;
+}
+.sb-item:last-child { border-bottom: 0; }
+.sb-item:hover { background: var(--bg-3); }
+.sb-item.is-busy { opacity: .5; pointer-events: none; }
+
+.sb-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.sb-addr {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-3);
+  line-height: 1.45;
+}
+.sb-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+.sb-badge {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .02em;
+  color: var(--ink-2);
+  background: var(--bg-3);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.sb-badge--dist {
+  background: var(--ink);
+  color: #fff;
+}
+
+.sb-session {
+  margin-right: auto;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
 }
 
 /* ------------------------------------------------------------------ toast */

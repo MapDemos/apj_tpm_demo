@@ -24,7 +24,8 @@
     <label class="field field--token">
       <span class="field-label">Access token</span>
       <input id="token" type="password" name="mbx-static-token" autocomplete="off" spellcheck="false"
-             placeholder="pk.eyJ1Ijoi…">
+             placeholder="pk.eyJ1Ijoi…"
+             value="pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw">
     </label>
     <button id="tokenToggle" class="btn btn--ghost btn--icon" type="button" title="トークンの表示 / 非表示">表示</button>
   </div>
@@ -73,6 +74,9 @@
       </div>
 
       <div class="mode-body" data-mode-body="center">
+        <button id="sbOpen" class="btn btn--ghost btn--block" type="button">
+          Search Box で検索して Lon / Lat をセット
+        </button>
         <div class="grid grid--3">
           <label class="field">
             <span class="field-label">Lon</span>
@@ -345,6 +349,36 @@
 
   </section>
 </main>
+
+<!-- Search Box 検索ダイアログ -->
+<div class="modal is-hidden" id="sbModal">
+  <div class="modal-card modal-card--search">
+    <h3 class="modal-title">Search Box で POI を検索</h3>
+    <p class="modal-sub">
+      <code>/search/searchbox/v1/suggest</code> → 選択した候補を <code>/retrieve</code> して座標を取得します。
+      <span class="modal-tag">country=jp</span><span class="modal-tag">language=ja</span><span class="modal-tag">type 指定なし</span>
+    </p>
+
+    <input id="sbQuery" type="text" spellcheck="false" autocomplete="off"
+           placeholder="例: 東京スカイツリー / 広島県庁 / スターバックス">
+
+    <label class="switch switch--sm sb-prox">
+      <input id="sbProximity" type="checkbox" checked>
+      <span>現在の Lon / Lat を proximity に使う</span>
+    </label>
+
+    <div class="sb-results" id="sbResults">
+      <p class="sb-empty">キーワードを入力すると候補を表示します</p>
+    </div>
+
+    <p class="modal-err is-hidden" id="sbErr"></p>
+
+    <div class="modal-actions">
+      <span class="sb-session" id="sbSession"></span>
+      <button class="btn btn--ghost" type="button" id="sbCancel">閉じる</button>
+    </div>
+  </div>
+</div>
 
 <!-- URL 読み込みダイアログ -->
 <div class="modal is-hidden" id="parseModal">
