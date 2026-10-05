@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Static Images API Sandbox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="appbar">
+  <div class="brand">
+    <span class="brand-mark"></span>
+    <div class="brand-text">
+      <h1>Static Images API</h1>
+      <p>Sandbox</p>
+    </div>
+  </div>
+
+  <div class="appbar-fields">
+    <label class="field field--token">
+      <span class="field-label">Access token</span>
+      <input id="token" type="password" name="mbx-static-token" autocomplete="off" spellcheck="false"
+             placeholder="pk.eyJ1Ijoi…">
+    </label>
+    <button id="tokenToggle" class="btn btn--ghost btn--icon" type="button" title="トークンの表示 / 非表示">表示</button>
+  </div>
+
+  <div class="appbar-actions">
+    <button id="parseBtn" class="btn btn--ghost" type="button">URLを読み込む</button>
+    <button id="runBtn" class="btn btn--primary" type="button">
+      <span class="btn-label">実行</span>
+    </button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ============ 設定パネル ============ -->
+  <aside class="panel" id="panel">
+
+    <section class="group">
+      <h2 class="group-title">Style</h2>
+      <div class="grid grid--2">
+        <label class="field">
+          <span class="field-label">Owner (username)</span>
+          <input id="owner" type="text" spellcheck="false" value="10da032y">
+        </label>
+        <label class="field">
+          <span class="field-label">Style ID</span>
+          <input id="styleId" type="text" spellcheck="false" value="cmsa0wo85004u01su9njn7g3y">
+        </label>
+      </div>
+      <div class="chips">
+        <span class="chips-label">プリセット</span>
+        <button class="chip" type="button" data-style="mapbox/streets-v12">streets-v12</button>
+        <button class="chip" type="button" data-style="mapbox/light-v11">light-v11</button>
+        <button class="chip" type="button" data-style="mapbox/dark-v11">dark-v11</button>
+        <button class="chip" type="button" data-style="mapbox/satellite-streets-v12">satellite-streets</button>
+        <button class="chip" type="button" data-style="10da032y/cmsa0wo85004u01su9njn7g3y">default (custom)</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2 class="group-title">Camera</h2>
+      <div class="seg" id="posMode">
+        <button class="seg-btn is-active" type="button" data-mode="center">center / zoom</button>
+        <button class="seg-btn" type="button" data-mode="bbox">bbox</button>
+        <button class="seg-btn" type="button" data-mode="auto">auto</button>
+      </div>
+
+      <div class="mode-body" data-mode-body="center">
+        <div class="grid grid--3">
+          <label class="field">
+            <span class="field-label">Lon</span>
+            <input id="lon" type="number" step="any" value="132.1183125">
+          </label>
+          <label class="field">
+            <span class="field-label">Lat</span>
+            <input id="lat" type="number" step="any" value="34.9076145">
+          </label>
+          <label class="field">
+            <span class="field-label">Zoom</span>
+            <input id="zoom" type="number" step="any" min="0" max="22" value="5">
+          </label>
+        </div>
+        <div class="grid grid--2">
+          <label class="field">
+            <span class="field-label">Bearing <em>任意 0–360</em></span>
+            <input id="bearing" type="number" step="any" placeholder="0">
+          </label>
+          <label class="field">
+            <span class="field-label">Pitch <em>任意 0–60</em></span>
+            <input id="pitch" type="number" step="any" placeholder="0">
+          </label>
+        </div>
+      </div>
+
+      <div class="mode-body is-hidden" data-mode-body="bbox">
+        <div class="grid grid--4">
+          <label class="field">
+            <span class="field-label">minLon</span>
+            <input id="bboxW" type="number" step="any" value="130.5">
+          </label>
+          <label class="field">
+            <span class="field-label">minLat</span>
+            <input id="bboxS" type="number" step="any" value="33.8">
+          </label>
+          <label class="field">
+            <span class="field-label">maxLon</span>
+            <input id="bboxE" type="number" step="any" value="133.8">
+          </label>
+          <label class="field">
+            <span class="field-label">maxLat</span>
+            <input id="bboxN" type="number" step="any" value="36.0">
+          </label>
+        </div>
+      </div>
+
+      <div class="mode-body is-hidden" data-mode-body="auto">
+        <p class="note">
+          <code>auto</code> はオーバーレイ（GeoJSON / marker / path）の範囲に自動フィットするモードです。
+          <strong>addlayer だけでは範囲を計算できない</strong>ため、Overlay セクションに GeoJSON などを指定してください。
+        </p>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2 class="group-title">Image</h2>
+      <div class="grid grid--3">
+        <label class="field">
+          <span class="field-label">Width</span>
+          <input id="width" type="number" min="1" max="1280" value="800">
+        </label>
+        <label class="field">
+          <span class="field-label">Height</span>
+          <input id="height" type="number" min="1" max="1280" value="600">
+        </label>
+        <label class="field">
+          <span class="field-label">Retina</span>
+          <select id="retina">
+            <option value="1">1x</option>
+            <option value="2" selected>@2x</option>
+          </select>
+        </label>
+      </div>
+      <div class="chips">
+        <span class="chips-label">サイズ</span>
+        <button class="chip" type="button" data-size="800x600">800×600</button>
+        <button class="chip" type="button" data-size="1280x1280">1280×1280</button>
+        <button class="chip" type="button" data-size="1200x630">1200×630</button>
+        <button class="chip" type="button" data-size="600x600">600×600</button>
+        <button class="chip" type="button" data-size="400x300">400×300</button>
+      </div>
+      <p class="hint" id="sizeHint"></p>
+    </section>
+
+    <section class="group">
+      <h2 class="group-title">
+        Add layer
+        <label class="switch">
+          <input id="addlayerOn" type="checkbox" checked>
+          <span>有効</span>
+        </label>
+      </h2>
+
+      <div id="addlayerBody">
+        <div class="seg seg--sm" id="layerMode">
+          <button class="seg-btn is-active" type="button" data-lmode="form">フォーム</button>
+          <button class="seg-btn" type="button" data-lmode="raw">生JSON</button>
+        </div>
+
+        <div class="mode-body" data-lmode-body="form">
+          <label class="field">
+            <span class="field-label">Layer id</span>
+            <input id="layerId" type="text" spellcheck="false" value="test-rain-layer-5-filtered">
+          </label>
+          <div class="grid grid--2">
+            <label class="field">
+              <span class="field-label">Layer type</span>
+              <select id="layerType">
+                <option value="fill" selected>fill</option>
+                <option value="line">line</option>
+                <option value="circle">circle</option>
+                <option value="symbol">symbol</option>
+                <option value="fill-extrusion">fill-extrusion</option>
+                <option value="heatmap">heatmap</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Source type</span>
+              <select id="srcType">
+                <option value="vector" selected>vector</option>
+                <option value="raster">raster</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">
+            <span class="field-label">Tileset <em>mapbox://owner.tileset</em></span>
+            <input id="tileset" type="text" spellcheck="false" value="mapbox://kenji-shima.weather">
+          </label>
+          <div class="grid grid--2">
+            <label class="field">
+              <span class="field-label">source-layer</span>
+              <input id="sourceLayer" type="text" spellcheck="false" value="5">
+            </label>
+            <label class="field">
+              <span class="field-label">filter <em>JSON / 空欄可</em></span>
+              <input id="layerFilter" type="text" spellcheck="false" value='[">","val",1]'>
+            </label>
+          </div>
+          <label class="field">
+            <span class="field-label">paint <em>JSON</em></span>
+            <textarea id="layerPaint" rows="4" spellcheck="false">{ "fill-color": "#0099ff", "fill-opacity": 0.6 }</textarea>
+          </label>
+          <div class="chips">
+            <span class="chips-label">タイルセット</span>
+            <button class="chip" type="button" data-tileset="mapbox://kenji-shima.weather|5">weather / 5</button>
+            <button class="chip" type="button" data-tileset="mapbox://kenji-shima.weather|10">weather / 10</button>
+            <button class="chip" type="button" data-tileset="mapbox://kenji-shima.weather|20">weather / 20</button>
+          </div>
+        </div>
+
+        <div class="mode-body is-hidden" data-lmode-body="raw">
+          <label class="field">
+            <span class="field-label">addlayer <em>Mapbox Style Spec の layer オブジェクト</em></span>
+            <textarea id="layerRaw" rows="14" spellcheck="false"></textarea>
+          </label>
+          <p class="hint">生JSONモードのときは、この内容がそのまま <code>addlayer</code> に送られます。</p>
+        </div>
+
+        <label class="field">
+          <span class="field-label">before_layer <em>任意 / このレイヤーの下に挿入</em></span>
+          <input id="beforeLayer" type="text" spellcheck="false" placeholder="例: waterway-label">
+        </label>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2 class="group-title">Set filter</h2>
+      <div class="grid grid--2">
+        <label class="field">
+          <span class="field-label">layer_id <em>既存レイヤー</em></span>
+          <input id="filterLayerId" type="text" spellcheck="false" placeholder="例: poi-label">
+        </label>
+        <label class="field">
+          <span class="field-label">setfilter <em>JSON</em></span>
+          <input id="setFilter" type="text" spellcheck="false" placeholder='[">=","filterrank",3]'>
+        </label>
+      </div>
+      <p class="hint"><code>setfilter</code> は <code>layer_id</code> とセットで指定します。</p>
+    </section>
+
+    <section class="group">
+      <h2 class="group-title">Overlay <em class="group-note">任意</em></h2>
+      <label class="field">
+        <span class="field-label">overlay パス <em>geojson(…) / pin-s-…(lon,lat) / path-…</em></span>
+        <textarea id="overlay" rows="3" spellcheck="false" placeholder="pin-s-a+000(132.12,34.91)"></textarea>
+      </label>
+      <div class="chips">
+        <span class="chips-label">例</span>
+        <button class="chip" type="button" data-overlay="pin-s-a+111(132.1183125,34.9076145)">pin</button>
+        <button class="chip" type="button" data-overlay='geojson({"type":"Point","coordinates":[132.1183125,34.9076145]})'>geojson point</button>
+        <button class="chip" type="button" data-overlay="">クリア</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2 class="group-title">Options</h2>
+      <div class="grid grid--2">
+        <label class="field">
+          <span class="field-label">attribution</span>
+          <select id="attribution">
+            <option value="">(default)</option>
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">logo</span>
+          <select id="logo">
+            <option value="">(default)</option>
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </label>
+      </div>
+      <label class="field">
+        <span class="field-label">padding <em>top,right,bottom,left or 単一値</em></span>
+        <input id="padding" type="text" spellcheck="false" placeholder="例: 50 / 20,30,20,30">
+      </label>
+    </section>
+
+  </aside>
+
+  <!-- ============ プレビュー ============ -->
+  <section class="stage">
+
+    <div class="urlbar">
+      <div class="urlbar-head">
+        <span class="urlbar-title">Request URL</span>
+        <label class="switch switch--sm">
+          <input id="showToken" type="checkbox">
+          <span>トークンを表示</span>
+        </label>
+        <div class="urlbar-actions">
+          <button id="copyUrl" class="btn btn--ghost btn--sm" type="button">URLをコピー</button>
+          <button id="openUrl" class="btn btn--ghost btn--sm" type="button">新しいタブで開く</button>
+        </div>
+      </div>
+      <code id="urlOut" class="urlbar-code"></code>
+      <p id="urlWarn" class="urlbar-warn is-hidden"></p>
+    </div>
+
+    <div class="viewer">
+      <div class="viewer-toolbar">
+        <div class="meta" id="meta">
+          <span class="meta-item"><span class="meta-k">解像度</span><span class="meta-v" id="mPx">—</span></span>
+          <span class="meta-item"><span class="meta-k">指定サイズ</span><span class="meta-v" id="mReq">—</span></span>
+          <span class="meta-item"><span class="meta-k">容量</span><span class="meta-v" id="mSize">—</span></span>
+          <span class="meta-item"><span class="meta-k">形式</span><span class="meta-v" id="mType">—</span></span>
+          <span class="meta-item"><span class="meta-k">応答</span><span class="meta-v" id="mTime">—</span></span>
+        </div>
+        <div class="viewer-actions">
+          <div class="seg seg--sm" id="fitMode">
+            <button class="seg-btn is-active" type="button" data-fit="fit">画面に合わせる</button>
+            <button class="seg-btn" type="button" data-fit="actual">実寸 (1:1)</button>
+          </div>
+          <button id="downloadBtn" class="btn btn--primary btn--sm" type="button" disabled>ダウンロード</button>
+        </div>
+      </div>
+
+      <div class="canvasArea" id="canvasArea">
+        <div class="placeholder" id="placeholder">
+          <div class="placeholder-mark"></div>
+          <p class="placeholder-title">まだ画像はありません</p>
+          <p class="placeholder-sub">アクセストークンを入れて <strong>実行</strong> を押してください</p>
+        </div>
+        <img id="img" class="is-hidden" alt="Static Images API response">
+      </div>
+    </div>
+
+  </section>
+</main>
+
+<!-- URL 読み込みダイアログ -->
+<div class="modal is-hidden" id="parseModal">
+  <div class="modal-card">
+    <h3 class="modal-title">URL を読み込む</h3>
+    <p class="modal-sub">Static Images API の URL を貼り付けると、各設定欄に展開します。</p>
+    <textarea id="parseInput" rows="8" spellcheck="false" placeholder="https://api.mapbox.com/styles/v1/…/static/…"></textarea>
+    <p class="modal-err is-hidden" id="parseErr"></p>
+    <div class="modal-actions">
+      <button class="btn btn--ghost" type="button" id="parseCancel">キャンセル</button>
+      <button class="btn btn--primary" type="button" id="parseApply">読み込む</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast is-hidden" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
