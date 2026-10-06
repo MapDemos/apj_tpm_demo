@@ -279,6 +279,11 @@
         <button class="chip" type="button" data-overlay='geojson({"type":"Point","coordinates":[132.1183125,34.9076145]})'>geojson point</button>
         <button class="chip" type="button" data-overlay="">クリア</button>
       </div>
+      <p class="hint">
+        overlay を変更すると、含まれる全座標の bbox 中心を Camera の <code>Lon</code> / <code>Lat</code> に自動セットします
+        （<code>pin-*</code> / <code>url-*</code> / <code>geojson(…)</code> / <code>path-*</code> のエンコード済みポリラインに対応）。
+        セット後に <code>Lon</code> / <code>Lat</code> を手で変えても overlay 側は追従しません。
+      </p>
     </section>
 
     <section class="group">

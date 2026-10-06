@@ -161,6 +161,152 @@ function seedRawFromForm() {
   }
 }
 
+/* ------------------------------------------- overlay → 中心点（片方向シード） */
+
+/**
+ * Google encoded polyline（Static Images API の path が使う形式）をデコードする。
+ * 戻り値は [lon, lat] の配列。
+ */
+function decodePolyline(str, precision = 5) {
+  const factor = Math.pow(10, precision);
+  const coords = [];
+  let index = 0, lat = 0, lng = 0;
+
+  const readValue = () => {
+    let result = 0, shift = 0, b;
+    do {
+      if (index >= str.length) throw new Error('polyline が途中で終わっています');
+      b = str.charCodeAt(index++) - 63;
+      if (b < 0 || b > 63) throw new Error('polyline に不正な文字があります');
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    return (result & 1) ? ~(result >> 1) : (result >> 1);
+  };
+
+  while (index < str.length) {
+    lat += readValue();
+    lng += readValue();
+    coords.push([lng / factor, lat / factor]);
+  }
+  return coords;
+}
+
+/** overlay 文字列をトップレベルのカンマで分割する（括弧 / 波括弧 / 文字列の中は無視） */
+function splitOverlays(s) {
+  const out = [];
+  let depth = 0, inStr = false, esc = false, buf = '';
+  for (const ch of s) {
+    if (inStr) {
+      buf += ch;
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; buf += ch; continue; }
+    if (ch === '(' || ch === '{' || ch === '[') depth++;
+    if (ch === ')' || ch === '}' || ch === ']') depth--;
+    if (ch === ',' && depth === 0) { out.push(buf); buf = ''; continue; }
+    buf += ch;
+  }
+  out.push(buf);
+  return out.map((v) => v.trim()).filter(Boolean);
+}
+
+/** `name(...)` の括弧の中身を返す */
+function parenBody(s) {
+  const open = s.indexOf('(');
+  const close = s.lastIndexOf(')');
+  if (open < 0 || close < open) return null;
+  return s.slice(open + 1, close);
+}
+
+/** GeoJSON を再帰的にたどって [lon, lat] を集める（bbox や properties の数値は拾わない） */
+function collectGeoJSONCoords(node, out) {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    if (node.length >= 2 && typeof node[0] === 'number' && typeof node[1] === 'number') {
+      out.push([node[0], node[1]]);
+    } else {
+      node.forEach((n) => collectGeoJSONCoords(n, out));
+    }
+    return;
+  }
+  ['coordinates', 'geometry', 'geometries', 'features'].forEach((k) => {
+    if (k in node) collectGeoJSONCoords(node[k], out);
+  });
+}
+
+/** overlay 文字列に含まれる全座標を [lon, lat] の配列で返す */
+function collectOverlayCoords(overlayText) {
+  const coords = [];
+  for (const part of splitOverlays(overlayText)) {
+    const body = parenBody(part);
+    if (body === null) continue;
+
+    if (/^geojson\s*\(/i.test(part)) {
+      let json = body;
+      if (json.includes('%')) { try { json = decodeURIComponent(json); } catch (_) { /* そのまま */ } }
+      try {
+        collectGeoJSONCoords(JSON.parse(json), coords);
+      } catch (_) { /* 不正な GeoJSON は無視 */ }
+      continue;
+    }
+
+    if (/^path[-(]/i.test(part)) {
+      let poly = body;
+      if (poly.includes('%')) { try { poly = decodeURIComponent(poly); } catch (_) { /* そのまま */ } }
+      try {
+        coords.push(...decodePolyline(poly));
+      } catch (_) { /* 壊れた polyline は無視 */ }
+      continue;
+    }
+
+    /* pin-s / pin-l / url-… はいずれも末尾が (lon,lat) */
+    const m = /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/.exec(body);
+    if (m) coords.push([Number(m[1]), Number(m[2])]);
+  }
+  return coords.filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat));
+}
+
+/** overlay の全座標の bbox 中心を返す。座標が取れなければ null */
+function overlayCenter(overlayText) {
+  const coords = collectOverlayCoords(overlayText);
+  if (!coords.length) return null;
+  const lons = coords.map((c) => c[0]);
+  const lats = coords.map((c) => c[1]);
+  const round = (n) => Number(n.toFixed(7));
+  return {
+    lon: round((Math.min(...lons) + Math.max(...lons)) / 2),
+    lat: round((Math.min(...lats) + Math.max(...lats)) / 2),
+    count: coords.length,
+  };
+}
+
+let lastSeededOverlay = null;
+
+/**
+ * overlay の中心を Lon / Lat にシードする（片方向）。
+ * セット後に Lon / Lat を手で変えても overlay 側は追従しない。
+ */
+function seedCenterFromOverlay() {
+  const text = el.overlay.value.trim();
+  if (text === lastSeededOverlay) return;
+  lastSeededOverlay = text;
+  if (!text) return;
+
+  const c = overlayCenter(text);
+  if (!c) { toast('overlay から座標を読み取れませんでした'); return; }
+
+  el.lon.value = c.lon;
+  el.lat.value = c.lat;
+  refresh();
+  toast(c.count > 1
+    ? `overlay ${c.count} 点の中心 ${c.lon}, ${c.lat} をセットしました`
+    : `overlay の座標 ${c.lon}, ${c.lat} をセットしました`);
+}
+
 /* ------------------------------------------------------------- URL 組立 */
 
 function buildRequest() {
@@ -395,8 +541,9 @@ function parseUrl(input) {
     setPosMode('center');
   }
 
-  /* overlay */
+  /* overlay（URL 側の position を優先するので、ここでは中心点をシードしない） */
   el.overlay.value = overlay;
+  lastSeededOverlay = overlay;
 
   /* query params */
   const q = u.searchParams;
@@ -700,6 +847,9 @@ function wire() {
 
   el.showToken.addEventListener('change', refresh);
 
+  /* overlay を変更したら、その中心を Lon / Lat にシード（片方向） */
+  el.overlay.addEventListener('change', seedCenterFromOverlay);
+
   /* モード切替 */
   el.posMode.addEventListener('click', (e) => {
     const btn = e.target.closest('.seg-btn');
@@ -733,6 +883,7 @@ function wire() {
   document.querySelectorAll('.chip[data-overlay]').forEach((c) => c.addEventListener('click', () => {
     el.overlay.value = c.dataset.overlay;
     refresh();
+    seedCenterFromOverlay();
   }));
 
   /* 実行 / コピー / 開く */
