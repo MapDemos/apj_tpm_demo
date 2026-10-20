@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Simple Map ― 検索 & 降水情報</title>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.34.0-rc.1/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.34.0-rc.1/mapbox-gl.js"></script>
+<style>
+  :root {
+    --green-900: #064e3b;
+    --green-800: #065f46;
+    --green-700: #15803d;
+    --green-600: #16a34a;
+    --green-500: #22c55e;
+    --green-200: #bbf7d0;
+    --green-100: #dcfce7;
+    --mint: #f0fdf5;
+    --white: #ffffff;
+    --shadow: 0 8px 28px rgba(6, 78, 59, 0.18);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", -apple-system,
+      BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--mint);
+  }
+
+  #map {
+    position: absolute;
+    inset: 0;
+  }
+
+  /* ===== 検索ボックス (上部) ===== */
+  #search-wrap {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(90vw, 420px);
+    z-index: 5;
+  }
+
+  #search-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--white);
+    border: 1px solid var(--green-200);
+    border-radius: 999px;
+    box-shadow: var(--shadow);
+    padding: 10px 16px;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+
+  #search-box:focus-within {
+    border-color: var(--green-500);
+    box-shadow: 0 8px 28px rgba(22, 163, 74, 0.28);
+  }
+
+  #search-icon {
+    flex: 0 0 auto;
+    color: var(--green-600);
+  }
+
+  #search-input {
+    flex: 1 1 auto;
+    border: none;
+    outline: none;
+    font-size: 15px;
+    color: #14532d;
+    background: transparent;
+  }
+
+  #search-input::placeholder {
+    color: #86b899;
+  }
+
+  #search-clear {
+    flex: 0 0 auto;
+    border: none;
+    background: var(--green-100);
+    color: var(--green-700);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+  }
+
+  #search-clear.visible { display: block; }
+
+  #search-suggestions {
+    margin-top: 8px;
+    background: var(--white);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    display: none;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  #search-suggestions.open { display: block; }
+
+  .suggestion-item {
+    padding: 10px 16px;
+    border-top: 1px solid var(--green-100);
+    cursor: pointer;
+  }
+
+  .suggestion-item:first-child { border-top: none; }
+
+  .suggestion-item:hover,
+  .suggestion-item.active {
+    background: var(--mint);
+  }
+
+  .suggestion-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: #14532d;
+  }
+
+  .suggestion-address {
+    font-size: 12px;
+    color: #4d7c63;
+    margin-top: 2px;
+  }
+
+  /* ===== 降水情報パネル (左下) ===== */
+  #precip-panel {
+    position: absolute;
+    left: 16px;
+    bottom: 16px;
+    z-index: 5;
+    width: 240px;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    border-left: 5px solid var(--green-600);
+    padding: 14px 16px;
+    backdrop-filter: blur(4px);
+  }
+
+  #precip-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--green-800);
+    margin-bottom: 8px;
+  }
+
+  #precip-location-label {
+    color: #14532d;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .precip-row {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 6px 0;
+  }
+
+  .precip-row + .precip-row {
+    border-top: 1px dashed var(--green-200);
+  }
+
+  .precip-row-label {
+    font-size: 11px;
+    color: #4d7c63;
+    letter-spacing: 0.02em;
+  }
+
+  .precip-row-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: #065f46;
+  }
+
+  /* ===== 現在地取得ボタン (右下) ===== */
+  #geolocate-btn {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
+    z-index: 5;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: none;
+    background: var(--green-600);
+    color: var(--white);
+    box-shadow: var(--shadow);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.12s ease;
+  }
+
+  #geolocate-btn:hover { background: var(--green-700); transform: scale(1.06); }
+  #geolocate-btn:active { transform: scale(0.96); }
+
+  #geolocate-btn.loading svg {
+    animation: spin 0.9s linear infinite;
+  }
+
+  #geolocate-btn:disabled {
+    opacity: 0.7;
+    cursor: wait;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .mapboxgl-ctrl-logo { opacity: 0.85; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="search-wrap">
+  <div id="search-box">
+    <svg id="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+      <line x1="21" y1="21" x2="16.65" y2="16.65" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <input id="search-input" type="text" placeholder="場所・住所・施設名で検索" autocomplete="off" spellcheck="false">
+    <button id="search-clear" title="クリア">✕</button>
+  </div>
+  <div id="search-suggestions"></div>
+</div>
+
+<div id="precip-panel">
+  <div id="precip-header">
+    <span>💧</span>
+    <span id="precip-location-label">地図の中心</span>
+  </div>
+  <div class="precip-row">
+    <span class="precip-row-label" id="precip-current-label">現在の降水</span>
+    <span class="precip-row-value" id="precip-current">取得中…</span>
+  </div>
+  <div class="precip-row">
+    <span class="precip-row-label" id="precip-forecast-label">予測</span>
+    <span class="precip-row-value" id="precip-forecast">取得中…</span>
+  </div>
+</div>
+
+<button id="geolocate-btn" title="現在地を取得">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+    <circle cx="12" cy="12" r="3" fill="currentColor"/>
+    <path d="M12 2V5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    <path d="M12 19V22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    <path d="M22 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    <path d="M5 12H2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  </svg>
+</button>
+
+<script>
+  // ===== 設定 =====
+  mapboxgl.accessToken = 'pk.eyJ1IjoiMTBkYTAzMnkiLCJhIjoiY21wYzUxZmc3MDRzaDJxczczb25qbW9reSJ9.xU6N9Srt9xw2U2HZbHubSw';
+
+  const STYLE_URL = 'mapbox://styles/10da032y/cmuwdgj70000401rb6nd09zly';
+  const DEFAULT_CENTER = [139.7671, 35.6812]; // 東京駅
+  const DEFAULT_ZOOM = 13;
+
+  const SEARCH_TYPES = 'place,locality,neighborhood,address,postcode,district,poi';
+  const SEARCH_LANGUAGE = 'ja';
+  const SEARCH_COUNTRY = 'jp';
+
+  const NOWCAST_TILESET = 'mapbox.weather-jp-nowcast';
+  const FORECAST_TILESET = 'mapbox.weather-jp-rain-1-6';
+
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: STYLE_URL,
+    center: DEFAULT_CENTER,
+    zoom: DEFAULT_ZOOM,
+    language: 'ja'
+  });
+
+  let marker = null;
+
+  // ========================================
+  // 降水量/予測情報
+  // ========================================
+  const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+  function unixToShortJST(unixTimestamp) {
+    const d = new Date(unixTimestamp * 1000 + JST_OFFSET_MS);
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mm = String(d.getUTCMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+
+  function getJapaneseDescription(value) {
+    if (value === 0) return '雨なし';
+    if (value < 2) return 'しとしとした雨';
+    if (value < 10) return 'ポツポツ';
+    if (value < 20) return 'ざーざーの雨';
+    if (value < 30) return 'どしゃ降り';
+    if (value < 50) return 'バケツをひっくり返したような雨';
+    if (value < 80) return '滝のような雨';
+    return '息苦しい、恐怖を感じる雨';
+  }
+
+  function findClosestBand(bandIds, targetUnix) {
+    if (!bandIds || bandIds.length === 0) return null;
+    let closest = bandIds[0];
+    let minDiff = Math.abs(targetUnix - closest);
+    for (const b of bandIds) {
+      const diff = Math.abs(targetUnix - b);
+      if (diff < minDiff) { minDiff = diff; closest = b; }
+    }
+    return closest;
+  }
+
+  async function loadTilesetBands(tilesetId) {
+    try {
+      const url = `https://api.mapbox.com/v4/${tilesetId}.json?secure&access_token=${mapboxgl.accessToken}`;
+      const res = await fetch(url);
+      const metadata = await res.json();
+      if (!metadata.raster_layers || metadata.raster_layers.length === 0) return null;
+
+      const layer = metadata.raster_layers[0];
+      const layerName = layer.name || 'precipitation';
+      const rawBands = layer.bands || layer.fields?.bands || [];
+
+      const bandIds = rawBands
+        .map(b => {
+          if (typeof b === 'object' && b.band_id) return parseInt(b.band_id);
+          if (typeof b === 'string' || typeof b === 'number') return parseInt(b);
+          return NaN;
+        })
+        .filter(b => !isNaN(b))
+        .sort((a, b) => a - b);
+
+      return { layerName, bandIds };
+    } catch (error) {
+      console.error(`Error loading ${tilesetId} TileJSON:`, error);
+      return null;
+    }
+  }
+
+  async function queryBandValue(tilesetId, layerName, bandId, lng, lat) {
+    if (bandId == null) return null;
+    try {
+      const url = `https://api.mapbox.com/v4/${tilesetId}/tilequery/${lng},${lat}.json`
+        + `?layers=${layerName}&bands=${bandId}&access_token=${mapboxgl.accessToken}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const feature = data.features && data.features[0];
+      const val = feature?.properties?.val?.[0];
+      return (val === null || val === undefined) ? null : val;
+    } catch (error) {
+      console.error(`Precipitation query error (${tilesetId}):`, error);
+      return null;
+    }
+  }
+
+  let nowcastMeta = null;
+  let forecastMeta = null;
+  const weatherMetaReady = Promise.all([
+    loadTilesetBands(NOWCAST_TILESET),
+    loadTilesetBands(FORECAST_TILESET)
+  ]).then(([nc, fc]) => { nowcastMeta = nc; forecastMeta = fc; });
+
+  const precipCurrentEl = document.getElementById('precip-current');
+  const precipForecastEl = document.getElementById('precip-forecast');
+  const precipCurrentLabelEl = document.getElementById('precip-current-label');
+  const precipForecastLabelEl = document.getElementById('precip-forecast-label');
+  const precipLocationLabelEl = document.getElementById('precip-location-label');
+
+  async function updatePrecipitation(lng, lat) {
+    precipCurrentEl.textContent = '取得中…';
+    precipForecastEl.textContent = '取得中…';
+
+    await weatherMetaReady;
+
+    const nowUnix = Math.floor(Date.now() / 1000);
+
+    if (nowcastMeta && nowcastMeta.bandIds.length > 0) {
+      const band = findClosestBand(nowcastMeta.bandIds, nowUnix);
+      precipCurrentLabelEl.textContent = `現在の降水（${unixToShortJST(band)}時点）`;
+      const value = await queryBandValue(NOWCAST_TILESET, nowcastMeta.layerName, band, lng, lat);
+      precipCurrentEl.textContent = (value === null)
+        ? 'データなし'
+        : `${value.toFixed(1)} mm/h・${getJapaneseDescription(value)}`;
+    } else {
+      precipCurrentEl.textContent = '取得できませんでした';
+    }
+
+    if (forecastMeta && forecastMeta.bandIds.length > 0) {
+      const band = findClosestBand(forecastMeta.bandIds, nowUnix + 3600);
+      precipForecastLabelEl.textContent = `予測（${unixToShortJST(band)}時点）`;
+      const value = await queryBandValue(FORECAST_TILESET, forecastMeta.layerName, band, lng, lat);
+      precipForecastEl.textContent = (value === null)
+        ? 'データなし'
+        : `${value.toFixed(1)} mm/h・${getJapaneseDescription(value)}`;
+    } else {
+      precipForecastEl.textContent = '取得できませんでした';
+    }
+  }
+
+  function flyAndMark(lng, lat, label) {
+    map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 15) });
+
+    if (!marker) {
+      marker = new mapboxgl.Marker({ color: '#16a34a' });
+    }
+    marker.setLngLat([lng, lat]).addTo(map);
+
+    precipLocationLabelEl.textContent = label;
+    updatePrecipitation(lng, lat);
+  }
+
+  map.on('load', () => {
+    updatePrecipitation(DEFAULT_CENTER[0], DEFAULT_CENTER[1]);
+  });
+
+  // ========================================
+  // 現在地取得ボタン
+  // ========================================
+  const geolocateBtn = document.getElementById('geolocate-btn');
+
+  geolocateBtn.addEventListener('click', () => {
+    if (!navigator.geolocation) {
+      alert('このブラウザは位置情報の取得に対応していません。');
+      return;
+    }
+
+    geolocateBtn.disabled = true;
+    geolocateBtn.classList.add('loading');
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { longitude, latitude } = pos.coords;
+        flyAndMark(longitude, latitude, '現在地');
+        geolocateBtn.disabled = false;
+        geolocateBtn.classList.remove('loading');
+      },
+      (err) => {
+        geolocateBtn.disabled = false;
+        geolocateBtn.classList.remove('loading');
+        alert(`現在地を取得できませんでした: ${err.message}`);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+
+  // ========================================
+  // 検索ボックス (Search Box API: suggest / retrieve)
+  // ========================================
+  const searchInput = document.getElementById('search-input');
+  const searchClearBtn = document.getElementById('search-clear');
+  const searchSuggestions = document.getElementById('search-suggestions');
+
+  let sessionToken = null;
+  let currentItems = [];
+  let activeIndex = -1;
+  let debounceTimer = null;
+
+  function ensureSessionToken() {
+    if (!sessionToken) sessionToken = crypto.randomUUID();
+    return sessionToken;
+  }
+
+  function closeSuggestions() {
+    searchSuggestions.classList.remove('open');
+    searchSuggestions.innerHTML = '';
+    currentItems = [];
+    activeIndex = -1;
+  }
+
+  function renderSuggestions(features) {
+    currentItems = features;
+    activeIndex = -1;
+    if (!features.length) { closeSuggestions(); return; }
+
+    searchSuggestions.innerHTML = features.map((f, i) => {
+      const name = f.name || '';
+      const address = f.place_formatted || '';
+      return `<div class="suggestion-item" data-index="${i}">
+        <div class="suggestion-name">${name}</div>
+        <div class="suggestion-address">${address}</div>
+      </div>`;
+    }).join('');
+    searchSuggestions.classList.add('open');
+
+    searchSuggestions.querySelectorAll('.suggestion-item').forEach((el) => {
+      el.addEventListener('click', () => selectSuggestion(Number(el.dataset.index)));
+    });
+  }
+
+  async function fetchSuggestions(q) {
+    const params = new URLSearchParams({
+      q,
+      access_token: mapboxgl.accessToken,
+      session_token: ensureSessionToken(),
+      language: SEARCH_LANGUAGE,
+      country: SEARCH_COUNTRY,
+      types: SEARCH_TYPES,
+      limit: '6',
+      proximity: `${map.getCenter().lng},${map.getCenter().lat}`
+    });
+
+    try {
+      const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/suggest?${params}`);
+      if (!res.ok) { closeSuggestions(); return; }
+      const data = await res.json();
+      renderSuggestions(data.suggestions || []);
+    } catch (error) {
+      console.error('Suggest error:', error);
+      closeSuggestions();
+    }
+  }
+
+  async function selectSuggestion(index) {
+    const item = currentItems[index];
+    if (!item) return;
+
+    searchInput.value = item.name;
+    searchClearBtn.classList.add('visible');
+    closeSuggestions();
+
+    const params = new URLSearchParams({
+      access_token: mapboxgl.accessToken,
+      session_token: ensureSessionToken()
+    });
+
+    try {
+      const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/retrieve/${item.mapbox_id}?${params}`);
+      sessionToken = null; // 選択完了。次の検索は新しいセッションとして扱う
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const feature = data.features && data.features[0];
+      if (!feature) return;
+
+      const [lng, lat] = feature.geometry.coordinates;
+      flyAndMark(lng, lat, item.name || item.place_formatted || '検索結果');
+    } catch (error) {
+      console.error('Retrieve error:', error);
+    }
+  }
+
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim();
+    searchClearBtn.classList.toggle('visible', q.length > 0);
+    clearTimeout(debounceTimer);
+    if (!q) { closeSuggestions(); sessionToken = null; return; }
+    debounceTimer = setTimeout(() => fetchSuggestions(q), 200);
+  });
+
+  searchInput.addEventListener('keydown', (e) => {
+    if (!searchSuggestions.classList.contains('open')) return;
+    const items = searchSuggestions.querySelectorAll('.suggestion-item');
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIndex = (activeIndex + 1) % items.length;
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIndex = (activeIndex - 1 + items.length) % items.length;
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0) selectSuggestion(activeIndex);
+      return;
+    } else if (e.key === 'Escape') {
+      closeSuggestions();
+      return;
+    } else {
+      return;
+    }
+    items.forEach((el, i) => el.classList.toggle('active', i === activeIndex));
+  });
+
+  searchClearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    searchClearBtn.classList.remove('visible');
+    closeSuggestions();
+    sessionToken = null;
+    searchInput.focus();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!document.getElementById('search-wrap').contains(e.target)) closeSuggestions();
+  });
+</script>
+
+</body>
+</html>

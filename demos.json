@@ -78,5 +78,10 @@
     "title": "jwl_static_images_api",
     "description": "Static Images APIの砂場ツール — addlayer/setfilter/カメラ/サイズを変えて画像を取得・DL（Search Boxで座標セット可）",
     "path": "./jwl_static_images_api/"
+  },
+  {
+    "title": "simple_map",
+    "description": "GL JS最新版(RC) + Search Box API Suggest + 現在地の降水/予測情報の最小デモ",
+    "path": "./simple_map/"
   }
 ]
