@@ -285,9 +285,9 @@
 
   // 降水タイルセット: ナウキャスト(直近) → 1-6時間 → 7-15時間 の順で未来を見通す
   const TILESETS = {
-    nowcast: { id: 'mapbox.weather-jp-nowcast', sourceId: 'precip-src-nowcast', layerId: 'precip-layer-nowcast' },
-    rain16: { id: 'mapbox.weather-jp-rain-1-6', sourceId: 'precip-src-rain16', layerId: 'precip-layer-rain16' },
-    rain715: { id: 'mapbox.weather-jp-rain-7-15', sourceId: 'precip-src-rain715', layerId: 'precip-layer-rain715' }
+    nowcast: { id: 'mapbox.weather-jp-nowcast' },
+    rain16: { id: 'mapbox.weather-jp-rain-1-6' },
+    rain715: { id: 'mapbox.weather-jp-rain-7-15' }
   };
 
   const map = new mapboxgl.Map({
@@ -371,47 +371,20 @@
     loadTilesetBands(TILESETS.rain715.id)
   ]).then(([nc, r16, r715]) => { nowcastMeta = nc; rain16Meta = r16; rain715Meta = r715; });
 
-  map.on('style.load', () => {
-    const layers = map.getStyle().layers;
-    const firstSymbolLayerId = layers.find(l => l.type === 'symbol')?.id;
-
-    for (const t of Object.values(TILESETS)) {
-      map.addSource(t.sourceId, {
-        type: 'raster-array',
-        url: `mapbox://${t.id}`,
-        tileSize: 512
-      });
-
-      const layerConfig = {
-        id: t.layerId,
-        type: 'raster',
-        source: t.sourceId,
-        paint: {
-          'raster-array-band': '',
-          'raster-opacity': 0
-        }
-      };
-
-      if (firstSymbolLayerId) {
-        map.addLayer(layerConfig, firstSymbolLayerId);
-      } else {
-        map.addLayer(layerConfig);
-      }
-    }
-  });
-
-  async function queryRasterValueAt(sourceId, layerName, bandId, lng, lat) {
+  // Tilequery API: https://api.mapbox.com/v4/{tileset}/tilequery/{lng},{lat}.json?layers=...&bands=...
+  async function queryTilequeryValue(tilesetId, layerName, bandId, lng, lat) {
     if (bandId == null) return null;
     try {
-      const result = await map.queryRasterValue(
-        sourceId,
-        { lng, lat },
-        { layerName, bands: [bandId.toString()] }
-      );
-      const val = result?.[layerName]?.[bandId.toString()]?.[0];
+      const url = `https://api.mapbox.com/v4/${tilesetId}/tilequery/${lng},${lat}.json`
+        + `?layers=${layerName}&bands=${bandId}&access_token=${mapboxgl.accessToken}`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const feature = data.features && data.features[0];
+      const val = feature?.properties?.val?.[0];
       return (val === null || val === undefined) ? null : val;
     } catch (error) {
-      console.error(`queryRasterValue error (${sourceId}):`, error);
+      console.error(`Tilequery error (${tilesetId}):`, error);
       return null;
     }
   }
@@ -429,8 +402,8 @@
     const nowUnix = Math.floor(Date.now() / 1000);
     const nowBandId = findClosestBand(nowcastMeta.bandIds, nowUnix);
 
-    const currentValue = await queryRasterValueAt(
-      TILESETS.nowcast.sourceId, nowcastMeta.layerName, nowBandId, lng, lat
+    const currentValue = await queryTilequeryValue(
+      TILESETS.nowcast.id, nowcastMeta.layerName, nowBandId, lng, lat
     );
 
     const futureSeq = [];
@@ -438,7 +411,7 @@
 
     for (const b of nowcastMeta.bandIds) {
       if (b > lastId) {
-        futureSeq.push({ sourceId: TILESETS.nowcast.sourceId, layerName: nowcastMeta.layerName, bandId: b });
+        futureSeq.push({ tilesetId: TILESETS.nowcast.id, layerName: nowcastMeta.layerName, bandId: b });
       }
     }
     if (futureSeq.length) lastId = futureSeq[futureSeq.length - 1].bandId;
@@ -446,7 +419,7 @@
     if (rain16Meta) {
       for (const b of rain16Meta.bandIds) {
         if (b > lastId) {
-          futureSeq.push({ sourceId: TILESETS.rain16.sourceId, layerName: rain16Meta.layerName, bandId: b });
+          futureSeq.push({ tilesetId: TILESETS.rain16.id, layerName: rain16Meta.layerName, bandId: b });
           lastId = b;
         }
       }
@@ -454,14 +427,14 @@
     if (rain715Meta) {
       for (const b of rain715Meta.bandIds) {
         if (b > lastId) {
-          futureSeq.push({ sourceId: TILESETS.rain715.sourceId, layerName: rain715Meta.layerName, bandId: b });
+          futureSeq.push({ tilesetId: TILESETS.rain715.id, layerName: rain715Meta.layerName, bandId: b });
           lastId = b;
         }
       }
     }
 
     const futureValues = await Promise.all(
-      futureSeq.map(b => queryRasterValueAt(b.sourceId, b.layerName, b.bandId, lng, lat))
+      futureSeq.map(b => queryTilequeryValue(b.tilesetId, b.layerName, b.bandId, lng, lat))
     );
 
     const currentLabel = (currentValue === null)
@@ -525,12 +498,10 @@
     marker.setLngLat([lng, lat]).addTo(map);
 
     precipLocationLabelEl.textContent = label;
-    map.once('idle', () => updatePrecipitation(lng, lat));
+    updatePrecipitation(lng, lat);
   }
 
-  map.once('idle', () => {
-    updatePrecipitation(DEFAULT_CENTER[0], DEFAULT_CENTER[1]);
-  });
+  updatePrecipitation(DEFAULT_CENTER[0], DEFAULT_CENTER[1]);
 
   // ========================================
   // 現在地取得ボタン
